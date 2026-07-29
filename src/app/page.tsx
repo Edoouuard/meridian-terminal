@@ -1,0 +1,289 @@
+"use client";
+
+import { useState } from "react";
+import { ThreadCard } from "@/components/ThreadCard";
+import {
+  ALLOCATION,
+  HIGHLIGHT,
+  NEWS,
+  PORTFOLIO_VALUE,
+  POSITIONS,
+  RISK_SUGGESTIONS,
+  ROTATION_BARS,
+  ThreadItem,
+  ThreadType,
+  WALLET_ADDRESS,
+  YIELD_CHART,
+  fmtUsd,
+} from "@/lib/data";
+
+export default function Home() {
+  const [thread, setThread] = useState<ThreadItem[]>([{ type: "pendle" }, { type: "betaneutral" }]);
+  const [promptText, setPromptText] = useState("");
+  const [executed, setExecuted] = useState<Record<string, boolean>>({});
+
+  const usedTypes = new Set(thread.map((t) => t.type));
+
+  function addExample(type: ThreadType) {
+    setThread((cur) => (cur.some((t) => t.type === type) ? cur : cur.concat([{ type }])));
+  }
+
+  function markExecuted(type: ThreadType) {
+    setExecuted((cur) => ({ ...cur, [type]: true }));
+  }
+
+  function submitPrompt() {
+    const text = promptText.trim();
+    if (!text) return;
+    const t = text.toLowerCase();
+    if (t.includes("pendle") || t.includes("yield") || t.includes("fixed")) addExample("pendle");
+    else if (t.includes("beta") || t.includes("neutral") || t.includes("hyperliquid")) addExample("betaneutral");
+    else if (t.includes("perp") || t.includes("sol") || t.includes("long") || t.includes("short")) addExample("perp");
+    else if (t.includes("swap")) addExample("swap");
+    else setThread((cur) => cur.concat([{ type: "custom", text }]));
+    setPromptText("");
+  }
+
+  return (
+    <div style={{ background: "var(--color-bg)", color: "var(--color-text)", height: "100vh", display: "flex", flexDirection: "column" }}>
+      <div className="nav" style={{ background: "var(--color-surface)", flex: "none" }}>
+        <span className="nav-brand">Meridian</span>
+        <span className="text-muted" style={{ fontSize: 13 }}>
+          Ethereum · connected
+        </span>
+        <span className="tag tag-outline" style={{ fontVariantNumeric: "tabular-nums" }}>
+          {WALLET_ADDRESS}
+        </span>
+        <span className="tag tag-neutral" style={{ fontVariantNumeric: "tabular-nums" }}>
+          {fmtUsd(PORTFOLIO_VALUE)}
+        </span>
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "290px 1fr 320px", overflow: "hidden" }}>
+        {/* Portfolio column */}
+        <div className="col-scroll" style={{ minWidth: 0, borderRight: "1px solid var(--color-divider)", padding: "var(--space-4)" }}>
+          <h6 style={{ color: "var(--color-accent)" }}>Portfolio</h6>
+          <p
+            style={{
+              fontFamily: "var(--font-heading)",
+              fontSize: 28,
+              margin: "0 0 var(--space-3)",
+              fontVariantNumeric: "tabular-nums",
+            }}
+          >
+            {fmtUsd(PORTFOLIO_VALUE)}
+          </p>
+
+          <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", marginBottom: "var(--space-2)" }}>
+            {ALLOCATION.map((a) => (
+              <div key={a.label} style={{ width: `${a.pct}%`, background: a.color }} />
+            ))}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, marginBottom: "var(--space-4)" }}>
+            {ALLOCATION.map((a) => (
+              <div key={a.label} style={{ display: "flex", justifyContent: "space-between" }}>
+                <span>{a.label}</span>
+                <span className="text-muted">{a.pct}%</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="hr" style={{ margin: "var(--space-3) 0" }} />
+          <h6 style={{ color: "var(--color-accent)" }}>Positions</h6>
+          <div style={{ display: "flex", flexDirection: "column", marginTop: "var(--space-2)" }}>
+            {POSITIONS.map((pos, i) => (
+              <div
+                key={i}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "baseline",
+                  padding: "6px 0",
+                  borderBottom: "1px solid var(--color-divider)",
+                  fontSize: 12,
+                }}
+              >
+                <span>
+                  {pos.asset}
+                  <span className="text-muted"> · {pos.venue}</span>
+                </span>
+                <span style={{ fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{pos.amount}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="hr" style={{ margin: "var(--space-3) 0" }} />
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <h6 style={{ color: "var(--color-accent)", margin: 0 }}>Risk</h6>
+            <span className="text-muted" style={{ fontSize: 11 }}>
+              3 optimizations
+            </span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginTop: "var(--space-2)" }}>
+            <span className="text-muted">Lowest health factor</span>
+            <span style={{ fontVariantNumeric: "tabular-nums", color: "var(--color-accent-700)" }}>1.32 · Aave</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginTop: 4 }}>
+            <span className="text-muted">Net delta</span>
+            <span style={{ fontVariantNumeric: "tabular-nums" }}>+0.62 ETH</span>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: "var(--space-2)" }}>
+            {RISK_SUGGESTIONS.map((rs, i) => (
+              <p key={i} style={{ fontSize: 12, color: "color-mix(in srgb, var(--color-text) 65%, transparent)", margin: 0 }}>
+                {rs.text}
+              </p>
+            ))}
+          </div>
+        </div>
+
+        {/* Trade column */}
+        <div style={{ display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, padding: "var(--space-4)" }}>
+          <div
+            className="col-scroll"
+            style={{ flex: 1, minHeight: 0, minWidth: 0, display: "flex", flexDirection: "column", gap: "var(--space-3)", paddingRight: 4 }}
+          >
+            <p className="card-kicker" style={{ margin: 0 }}>
+              This week in DeFi
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: "var(--space-3)", minWidth: 0 }}>
+              <div className="card" style={{ gap: 6, padding: "var(--space-2)", minWidth: 0 }}>
+                <p style={{ margin: 0, fontSize: 12, fontWeight: 600, fontFamily: "var(--font-heading)" }}>Net TVL flows, 7 days</p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 2, minWidth: 0 }}>
+                  {ROTATION_BARS.map((rb) => (
+                    <div key={rb.name} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, minWidth: 0 }}>
+                      <span style={{ width: 64, flex: "none", height: 15, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                        {rb.name}
+                      </span>
+                      <div style={{ flex: 1, minWidth: 0, height: 8, background: "var(--color-neutral-200)", borderRadius: 2, overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: rb.width, background: rb.color, borderRadius: 2 }} />
+                      </div>
+                      <span style={{ width: 36, flex: "none", textAlign: "right", fontVariantNumeric: "tabular-nums", color: rb.color }}>
+                        {rb.value}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+                <div className="card" style={{ gap: 4, padding: "var(--space-3)" }}>
+                  <p style={{ margin: 0, fontSize: 12, fontWeight: 600, fontFamily: "var(--font-heading)" }}>
+                    Fastest growing: {HIGHLIGHT.protocol}
+                  </p>
+                  <p style={{ margin: 0, fontSize: 11 }} className="text-muted">
+                    TVL {HIGHLIGHT.tvlStart} → <strong style={{ color: "var(--color-text)" }}>{HIGHLIGHT.tvlEnd}</strong> in 30 days (
+                    <span style={{ color: "var(--color-accent-700)" }}>{HIGHLIGHT.chg}</span>)
+                  </p>
+                  <svg width="100%" height="24" viewBox="0 0 36 24" preserveAspectRatio="none">
+                    <polyline points={HIGHLIGHT.points} fill="none" stroke="var(--color-accent)" strokeWidth={1.6} />
+                  </svg>
+                </div>
+                <div className="card" style={{ gap: 4, padding: "var(--space-3)" }}>
+                  <p style={{ margin: 0, fontSize: 12, fontWeight: 600, fontFamily: "var(--font-heading)" }}>Yield, 30 days: lock now or wait?</p>
+                  <svg width="100%" height="30" viewBox="0 0 36 30" preserveAspectRatio="none">
+                    <polyline points={YIELD_CHART.fixedPoints} fill="none" stroke="var(--color-accent)" strokeWidth={1.6} />
+                    <polyline
+                      points={YIELD_CHART.varPoints}
+                      fill="none"
+                      stroke="var(--color-neutral-500)"
+                      strokeWidth={1.6}
+                      strokeDasharray="2,2"
+                    />
+                  </svg>
+                  <p style={{ margin: 0, fontSize: 11 }}>
+                    <span style={{ color: "var(--color-accent-700)" }}>Pendle fixed, steady at 9.8%</span>
+                  </p>
+                  <p style={{ margin: 0, fontSize: 11 }} className="text-muted">
+                    Aave variable, down from 6.8% to 5.2%
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="hr" style={{ margin: 0 }} />
+
+            <h6 style={{ color: "var(--color-accent)", flex: "none" }}>Prompt to trade</h6>
+            <div style={{ maxWidth: "80%" }}>
+              <p style={{ margin: 0, fontSize: 14, color: "color-mix(in srgb, var(--color-text) 70%, transparent)" }}>
+                Describe a thesis. I will translate it into an executable order across Aave, Morpho, Lido, Pendle, Hyperliquid, Extended,
+                Variational, or Uniswap.
+              </p>
+            </div>
+
+            {thread.map((item, i) => (
+              <ThreadCard
+                key={i}
+                item={item}
+                executed={!!executed[item.type]}
+                onExecute={() => markExecuted(item.type)}
+              />
+            ))}
+          </div>
+
+          <div style={{ flex: "none", display: "flex", gap: 6, flexWrap: "wrap", margin: "var(--space-3) 0 var(--space-2)" }}>
+            <button className="btn btn-secondary" style={{ fontSize: 12 }} disabled={usedTypes.has("pendle")} onClick={() => addExample("pendle")}>
+              Lock a fixed yield
+            </button>
+            <button
+              className="btn btn-secondary"
+              style={{ fontSize: 12 }}
+              disabled={usedTypes.has("betaneutral")}
+              onClick={() => addExample("betaneutral")}
+            >
+              Beta neutral ETH
+            </button>
+            <button className="btn btn-secondary" style={{ fontSize: 12 }} disabled={usedTypes.has("perp")} onClick={() => addExample("perp")}>
+              Directional perp
+            </button>
+            <button className="btn btn-secondary" style={{ fontSize: 12 }} disabled={usedTypes.has("swap")} onClick={() => addExample("swap")}>
+              Swap
+            </button>
+          </div>
+          <div style={{ flex: "none", display: "flex", gap: 8 }}>
+            <input
+              className="input"
+              placeholder="e.g. Lock in a fixed rate on my stETH before it drops"
+              value={promptText}
+              onChange={(e) => setPromptText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitPrompt();
+              }}
+            />
+            <button className="btn btn-primary btn-icon" aria-label="Send" onClick={submitPrompt}>
+              →
+            </button>
+          </div>
+        </div>
+
+        {/* News column */}
+        <div className="col-scroll" style={{ minWidth: 0, borderLeft: "1px solid var(--color-divider)", padding: "var(--space-4)" }}>
+          <h6 style={{ color: "var(--color-accent)" }}>DeFi news</h6>
+          <div style={{ display: "flex", flexDirection: "column", marginTop: "var(--space-2)" }}>
+            {NEWS.map((n, i) => (
+              <div key={i} style={{ padding: "var(--space-2) 0", borderBottom: "1px solid var(--color-divider)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                  <span className="tag tag-accent" style={{ marginBottom: 4 }}>
+                    {n.protocol}
+                  </span>
+                  <span style={{ fontSize: 12, fontVariantNumeric: "tabular-nums", color: "var(--color-accent-700)" }}>{n.metric}</span>
+                </div>
+                <p style={{ margin: "4px 0 0", fontSize: 13, lineHeight: 1.4 }}>{n.text}</p>
+                {n.action && (
+                  <a
+                    href="#"
+                    style={{ textDecoration: "none", fontSize: 12 }}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      addExample(n.action as ThreadType);
+                    }}
+                  >
+                    Discuss →
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
