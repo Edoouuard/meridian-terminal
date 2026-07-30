@@ -1,4 +1,4 @@
-export type ThreadType = "pendle" | "betaneutral" | "perp" | "swap" | "custom";
+export type ThreadType = "pendle" | "betaneutral" | "perp" | "swap" | "hedge" | "custom";
 
 export interface ThreadItem {
   type: ThreadType;
@@ -10,7 +10,20 @@ export const TX_HASHES: Record<Exclude<ThreadType, "custom">, string> = {
   betaneutral: "0x8b71c02f...2e04",
   perp: "0x1a9d5b83...77f0",
   swap: "0x62c4f710...b0a9",
+  hedge: "0x9de731a4...5f88",
 };
+
+export const HEDGE_KEYWORDS = [
+  "hedge",
+  "protect",
+  "downside",
+  "insure",
+  "drawdown",
+  "crash",
+  "bear market",
+  "dump",
+  "correction",
+];
 
 export function fmtUsd(n: number): string {
   return (n < 0 ? "-" : "") + "$" + Math.abs(Math.round(n)).toLocaleString("en-US");
@@ -33,11 +46,42 @@ export const ALLOCATION = [
   { label: "Other", pct: 15, color: "var(--color-neutral-300)" },
 ];
 
-export const RISK_SUGGESTIONS = [
-  { text: "Repaying $4,200 USDC on Aave brings the health factor from 1.32 to 1.81." },
-  { text: "Shorting an extra $1,860 on Extended brings the ETH net delta from +0.62 to about 0." },
+/** Headline risk figures — also referenced by the hedge suggestion in the trade chat. */
+export const HEALTH_FACTOR = 1.32;
+export const NET_DELTA_ETH = 0.62;
+export const STAKING_CONCENTRATION_PCT = 42;
+
+export type RiskSuggestionKind = "healthFactor" | "delta" | "concentration";
+
+export interface RiskSuggestion {
+  kind: RiskSuggestionKind;
+  text: string;
+  before: number;
+  after: number;
+  max: number;
+}
+
+export const RISK_SUGGESTIONS: RiskSuggestion[] = [
   {
+    kind: "healthFactor",
+    text: "Repaying $4,200 USDC on Aave brings the health factor from 1.32 to 1.81.",
+    before: 1.32,
+    after: 1.81,
+    max: 2.5,
+  },
+  {
+    kind: "delta",
+    text: "Shorting an extra $1,860 on Extended brings the ETH net delta from +0.62 to about 0.",
+    before: 0.62,
+    after: 0.02,
+    max: 1.0,
+  },
+  {
+    kind: "concentration",
     text: "stETH plus wstETH are 42% of the portfolio in one protocol risk. Moving $6,000 into PT weETH cuts that to 31% while locking 9.8% fixed.",
+    before: 42,
+    after: 31,
+    max: 100,
   },
 ];
 
@@ -103,6 +147,92 @@ export const NEWS: NewsItem[] = [
     metric: "-3.2%",
     text: "TVL down, with $9M of net outflows this week on the ETH/USDC pools.",
   },
+];
+
+export type AlphaTag = "New protocol" | "Points farm" | "Airdrop rumor";
+
+export interface AlphaItem {
+  tag: AlphaTag;
+  protocol: string;
+  metric: string;
+  text: string;
+  action?: ThreadType;
+}
+
+export const ALPHA: AlphaItem[] = [
+  {
+    tag: "New protocol",
+    protocol: "Fluid V2",
+    metric: "Launched 3d ago",
+    text: "Instant-liquidity layer combining lending and a DEX in one smart-vault design. $180M TVL in the first 72 hours, no token yet.",
+  },
+  {
+    tag: "Points farm",
+    protocol: "Extended",
+    metric: "3x multiplier",
+    text: "Extended just tripled point multipliers on ETH and SOL perps through the end of the season — the cheapest basis-neutral farm on the board right now.",
+    action: "betaneutral",
+  },
+  {
+    tag: "Points farm",
+    protocol: "Variational",
+    metric: "Testnet live",
+    text: "Trades on Variational's options testnet now count toward season 1 points, ahead of the mainnet launch and token expected this quarter.",
+  },
+  {
+    tag: "New protocol",
+    protocol: "Ethena",
+    metric: "+$310M TVL wk1",
+    text: "Synthetic dollar sUSDe crossed $310M in deposits in its first week, backed by a delta-neutral ETH staking plus short-perp basis trade.",
+    action: "betaneutral",
+  },
+  {
+    tag: "Airdrop rumor",
+    protocol: "Hyperliquid",
+    metric: "Season 2 unconfirmed",
+    text: "No official confirmation yet, but on-chain volume through HyperCore is up 40% week-over-week — historically a leading signal for a new points season.",
+    action: "perp",
+  },
+  {
+    tag: "New protocol",
+    protocol: "Katana",
+    metric: "Chain live",
+    text: "New Ethereum L2 focused on unified DeFi liquidity just opened deposits, with a points program live from day one across its bridge and vaults.",
+  },
+];
+
+export interface CryptoTicker {
+  symbol: string;
+  price: string;
+  change: number;
+}
+
+export const TOP_CRYPTOS: CryptoTicker[] = [
+  { symbol: "BTC", price: "$118,420", change: 1.8 },
+  { symbol: "ETH", price: "$4,180", change: 2.4 },
+  { symbol: "USDT", price: "$1.00", change: 0.0 },
+  { symbol: "XRP", price: "$2.86", change: -0.6 },
+  { symbol: "BNB", price: "$842", change: 1.1 },
+  { symbol: "SOL", price: "$214", change: 3.7 },
+  { symbol: "USDC", price: "$1.00", change: 0.0 },
+  { symbol: "DOGE", price: "$0.284", change: -1.2 },
+  { symbol: "TRX", price: "$0.318", change: 0.4 },
+  { symbol: "ADA", price: "$0.812", change: -0.9 },
+  { symbol: "HYPE", price: "$38.40", change: 6.2 },
+  { symbol: "LINK", price: "$24.15", change: 2.1 },
+  { symbol: "AVAX", price: "$42.80", change: 1.5 },
+  { symbol: "SUI", price: "$4.62", change: 4.3 },
+  { symbol: "XLM", price: "$0.412", change: -0.3 },
+  { symbol: "TON", price: "$6.28", change: 0.8 },
+  { symbol: "SHIB", price: "$0.0000228", change: -1.5 },
+  { symbol: "LTC", price: "$118.60", change: 0.6 },
+  { symbol: "DOT", price: "$6.94", change: -0.4 },
+  { symbol: "BCH", price: "$612", change: 1.9 },
+  { symbol: "HBAR", price: "$0.284", change: 0.2 },
+  { symbol: "UNI", price: "$12.85", change: 1.3 },
+  { symbol: "PEPE", price: "$0.0000214", change: 5.8 },
+  { symbol: "NEAR", price: "$6.12", change: 2.6 },
+  { symbol: "APT", price: "$9.84", change: -1.1 },
 ];
 
 export const WALLET_ADDRESS = "0x7A3f…9B2c";

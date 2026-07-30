@@ -1,4 +1,4 @@
-import { ThreadItem, TX_HASHES } from "@/lib/data";
+import { NET_DELTA_ETH, STAKING_CONCENTRATION_PCT, ThreadItem, TX_HASHES } from "@/lib/data";
 
 function UserBubble({ children }: { children: React.ReactNode }) {
   return (
@@ -174,13 +174,35 @@ export function ThreadCard({
     );
   }
 
+  if (item.type === "hedge") {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+        <UserBubble>{item.text || "How do I hedge my portfolio against a broader market downturn?"}</UserBubble>
+        <div style={{ maxWidth: "90%" }}>
+          <p style={{ margin: "0 0 6px", fontSize: 14 }}>
+            Your book currently carries <strong>+{NET_DELTA_ETH.toFixed(2)} ETH</strong> of net directional delta,
+            and stETH plus PT weETH make up <strong>{STAKING_CONCENTRATION_PCT}%</strong> of the portfolio in
+            liquid-staking and restaking risk. A partial short on Hyperliquid brings the delta close to flat without
+            touching either yield leg.
+          </p>
+          <div style={orderStyle}>
+            <OrderRow label="Short" value="ETH PERP · Hyperliquid · $13,000 · 1.0x" />
+            <OrderRow label="Resulting net delta" value="≈0.02 ETH" valueColor="var(--risk-good)" />
+            <OrderRow label="Est. cost of carry" value="-1.1% annualized" />
+            <ExecuteAction executed={executed} txHash={TX_HASHES.hedge} label="Open the hedge →" onExecute={onExecute} />
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
       <UserBubble>{item.text}</UserBubble>
       <div style={{ maxWidth: "90%" }}>
         <p style={{ margin: 0, fontSize: 14 }}>
-          I can be most precise on fixed yield locks, beta neutral pairs, directional perps, and swaps. Try one of
-          the quick prompts below, or rephrase your thesis with one of those in mind.
+          I can be most precise on fixed yield locks, beta neutral pairs, directional perps, swaps, and portfolio
+          hedges. Try one of the quick prompts below, or rephrase your thesis with one of those in mind.
         </p>
       </div>
     </div>

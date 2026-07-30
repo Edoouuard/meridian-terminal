@@ -2,13 +2,17 @@
 
 import { useState } from "react";
 import { ThreadCard } from "@/components/ThreadCard";
+import { RiskPanel } from "@/components/RiskPanel";
+import { TickerBanner } from "@/components/TickerBanner";
 import {
   ALLOCATION,
+  ALPHA,
+  AlphaTag,
+  HEDGE_KEYWORDS,
   HIGHLIGHT,
   NEWS,
   PORTFOLIO_VALUE,
   POSITIONS,
-  RISK_SUGGESTIONS,
   ROTATION_BARS,
   ThreadItem,
   ThreadType,
@@ -17,15 +21,22 @@ import {
   fmtUsd,
 } from "@/lib/data";
 
+const ALPHA_TAG_CLASS: Record<AlphaTag, string> = {
+  "New protocol": "tag-neutral",
+  "Points farm": "tag-accent",
+  "Airdrop rumor": "tag-outline",
+};
+
 export default function Home() {
   const [thread, setThread] = useState<ThreadItem[]>([{ type: "pendle" }, { type: "betaneutral" }]);
   const [promptText, setPromptText] = useState("");
   const [executed, setExecuted] = useState<Record<string, boolean>>({});
+  const [feedTab, setFeedTab] = useState<"news" | "alpha">("news");
 
   const usedTypes = new Set(thread.map((t) => t.type));
 
-  function addExample(type: ThreadType) {
-    setThread((cur) => (cur.some((t) => t.type === type) ? cur : cur.concat([{ type }])));
+  function addExample(type: ThreadType, text?: string) {
+    setThread((cur) => (cur.some((t) => t.type === type) ? cur : cur.concat([{ type, text }])));
   }
 
   function markExecuted(type: ThreadType) {
@@ -38,6 +49,7 @@ export default function Home() {
     const t = text.toLowerCase();
     if (t.includes("pendle") || t.includes("yield") || t.includes("fixed")) addExample("pendle");
     else if (t.includes("beta") || t.includes("neutral") || t.includes("hyperliquid")) addExample("betaneutral");
+    else if (HEDGE_KEYWORDS.some((k) => t.includes(k))) addExample("hedge", text);
     else if (t.includes("perp") || t.includes("sol") || t.includes("long") || t.includes("short")) addExample("perp");
     else if (t.includes("swap")) addExample("swap");
     else setThread((cur) => cur.concat([{ type: "custom", text }]));
@@ -46,6 +58,7 @@ export default function Home() {
 
   return (
     <div style={{ background: "var(--color-bg)", color: "var(--color-text)", height: "100vh", display: "flex", flexDirection: "column" }}>
+      <TickerBanner />
       <div className="nav" style={{ background: "var(--color-surface)", flex: "none" }}>
         <span className="nav-brand">Meridian</span>
         <span className="text-muted" style={{ fontSize: 13 }}>
@@ -112,28 +125,7 @@ export default function Home() {
             ))}
           </div>
 
-          <div className="hr" style={{ margin: "var(--space-3) 0" }} />
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <h6 style={{ color: "var(--color-accent)", margin: 0 }}>Risk</h6>
-            <span className="text-muted" style={{ fontSize: 11 }}>
-              3 optimizations
-            </span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginTop: "var(--space-2)" }}>
-            <span className="text-muted">Lowest health factor</span>
-            <span style={{ fontVariantNumeric: "tabular-nums", color: "var(--color-accent-700)" }}>1.32 · Aave</span>
-          </div>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginTop: 4 }}>
-            <span className="text-muted">Net delta</span>
-            <span style={{ fontVariantNumeric: "tabular-nums" }}>+0.62 ETH</span>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: "var(--space-2)" }}>
-            {RISK_SUGGESTIONS.map((rs, i) => (
-              <p key={i} style={{ fontSize: 12, color: "color-mix(in srgb, var(--color-text) 65%, transparent)", margin: 0 }}>
-                {rs.text}
-              </p>
-            ))}
-          </div>
+          <RiskPanel />
         </div>
 
         {/* Trade column */}
@@ -237,6 +229,9 @@ export default function Home() {
             <button className="btn btn-secondary" style={{ fontSize: 12 }} disabled={usedTypes.has("swap")} onClick={() => addExample("swap")}>
               Swap
             </button>
+            <button className="btn btn-secondary" style={{ fontSize: 12 }} disabled={usedTypes.has("hedge")} onClick={() => addExample("hedge")}>
+              Hedge my portfolio
+            </button>
           </div>
           <div style={{ flex: "none", display: "flex", gap: 8 }}>
             <input
@@ -254,34 +249,76 @@ export default function Home() {
           </div>
         </div>
 
-        {/* News column */}
+        {/* News / Alpha column */}
         <div className="col-scroll" style={{ minWidth: 0, borderLeft: "1px solid var(--color-divider)", padding: "var(--space-4)" }}>
-          <h6 style={{ color: "var(--color-accent)" }}>DeFi news</h6>
-          <div style={{ display: "flex", flexDirection: "column", marginTop: "var(--space-2)" }}>
-            {NEWS.map((n, i) => (
-              <div key={i} style={{ padding: "var(--space-2) 0", borderBottom: "1px solid var(--color-divider)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                  <span className="tag tag-accent" style={{ marginBottom: 4 }}>
-                    {n.protocol}
-                  </span>
-                  <span style={{ fontSize: 12, fontVariantNumeric: "tabular-nums", color: "var(--color-accent-700)" }}>{n.metric}</span>
-                </div>
-                <p style={{ margin: "4px 0 0", fontSize: 13, lineHeight: 1.4 }}>{n.text}</p>
-                {n.action && (
-                  <a
-                    href="#"
-                    style={{ textDecoration: "none", fontSize: 12 }}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      addExample(n.action as ThreadType);
-                    }}
-                  >
-                    Discuss →
-                  </a>
-                )}
-              </div>
-            ))}
+          <h6 style={{ color: "var(--color-accent)" }}>{feedTab === "news" ? "DeFi news" : "Alpha"}</h6>
+          <div className="seg" style={{ marginBottom: "var(--space-2)" }}>
+            <label className="seg-opt">
+              <input type="radio" name="feed-tab" checked={feedTab === "news"} onChange={() => setFeedTab("news")} />
+              <span>News</span>
+            </label>
+            <label className="seg-opt">
+              <input type="radio" name="feed-tab" checked={feedTab === "alpha"} onChange={() => setFeedTab("alpha")} />
+              <span>Alpha</span>
+            </label>
           </div>
+
+          {feedTab === "news" ? (
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              {NEWS.map((n, i) => (
+                <div key={i} style={{ padding: "var(--space-2) 0", borderBottom: "1px solid var(--color-divider)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                    <span className="tag tag-accent" style={{ marginBottom: 4 }}>
+                      {n.protocol}
+                    </span>
+                    <span style={{ fontSize: 12, fontVariantNumeric: "tabular-nums", color: "var(--color-accent-700)" }}>{n.metric}</span>
+                  </div>
+                  <p style={{ margin: "4px 0 0", fontSize: 13, lineHeight: 1.4 }}>{n.text}</p>
+                  {n.action && (
+                    <a
+                      href="#"
+                      style={{ textDecoration: "none", fontSize: 12 }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        addExample(n.action as ThreadType);
+                      }}
+                    >
+                      Discuss →
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              {ALPHA.map((a, i) => (
+                <div key={i} style={{ padding: "var(--space-2) 0", borderBottom: "1px solid var(--color-divider)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                    <span className={`tag ${ALPHA_TAG_CLASS[a.tag]}`} style={{ marginBottom: 4 }}>
+                      {a.protocol}
+                    </span>
+                    <span style={{ fontSize: 12, fontVariantNumeric: "tabular-nums", color: "var(--color-accent-700)" }}>{a.metric}</span>
+                  </div>
+                  <p style={{ margin: "4px 0 0", fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }} className="text-muted">
+                    {a.tag}
+                  </p>
+                  <p style={{ margin: "4px 0 0", fontSize: 13, lineHeight: 1.4 }}>{a.text}</p>
+                  {a.action && (
+                    <a
+                      href="#"
+                      style={{ textDecoration: "none", fontSize: 12 }}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        addExample(a.action as ThreadType);
+                      }}
+                    >
+                      Add to thread →
+                    </a>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

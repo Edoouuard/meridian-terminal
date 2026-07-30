@@ -58,6 +58,12 @@
   --shadow-sm: 0 1px 2px color-mix(in srgb, #2d2b2b 14%, transparent);
   --shadow-md: 0 3px 10px color-mix(in srgb, #2d2b2b 16%, transparent);
   --shadow-lg: 0 12px 32px color-mix(in srgb, #2d2b2b 22%, transparent);
+
+  /* Status colors for risk gauges — validated (dataviz skill's validate_palette.js,
+     light mode) against a surface matching this design's --color-bg tone. */
+  --risk-good: #3f7a44;
+  --risk-warning: #b8791f;
+  --risk-serious: #a63f31;
 }
 
 html,
@@ -179,3 +185,20 @@ a:hover { color: var(--color-accent-700); }
 .col-scroll { overflow-y: auto; }
 .col-scroll::-webkit-scrollbar { width: 6px; }
 .col-scroll::-webkit-scrollbar-thumb { background: var(--color-neutral-300); border-radius: 3px; }
+
+/* — price ticker — */
+.ticker-viewport { overflow: hidden; white-space: nowrap; }
+.ticker-track {
+  display: inline-flex;
+  width: max-content;
+  animation: ticker-scroll 70s linear infinite;
+}
+.ticker-viewport:hover .ticker-track { animation-play-state: paused; }
+@keyframes ticker-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track { animation: none; }
+  .ticker-viewport { overflow-x: auto; }
+}
