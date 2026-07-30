@@ -6,7 +6,7 @@ import { ThreadCard } from "@/components/ThreadCard";
 import { RiskPanel } from "@/components/RiskPanel";
 import { TickerBanner } from "@/components/TickerBanner";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
-import { useLivePortfolio } from "@/hooks/useLivePortfolio";
+import { LiveAsset, LivePortfolio, useLivePortfolio } from "@/hooks/useLivePortfolio";
 import {
   ALLOCATION,
   ALPHA,
@@ -29,6 +29,39 @@ const ALPHA_TAG_CLASS: Record<AlphaTag, string> = {
   "Airdrop rumor": "tag-outline",
 };
 
+const ALLOCATION_COLORS = [
+  "var(--color-accent-700)",
+  "var(--color-accent-500)",
+  "var(--color-accent-300)",
+  "var(--color-neutral-500)",
+  "var(--color-neutral-300)",
+];
+
+function formatAssetAmount(asset: LiveAsset): string {
+  if (asset.usd > 0) return fmtUsd(asset.usd);
+  return `${asset.balance.toFixed(4)} ${asset.symbol}`;
+}
+
+function buildLiveAllocation(live: LivePortfolio): { label: string; pct: number; color: string }[] {
+  const slices = live.assets.map((a) => ({ label: a.symbol, usd: a.usd }));
+  const aaveNet = live.aaveCollateralUsd - live.aaveDebtUsd;
+  if (aaveNet > 0) slices.push({ label: "Aave (net)", usd: aaveNet });
+
+  const total = slices.reduce((sum, s) => sum + s.usd, 0);
+  if (total <= 0) return [];
+
+  slices.sort((a, b) => b.usd - a.usd);
+  const top = slices.slice(0, 4);
+  const restUsd = slices.slice(4).reduce((sum, s) => sum + s.usd, 0);
+  const finalSlices = restUsd > 0 ? [...top, { label: "Other", usd: restUsd }] : top;
+
+  return finalSlices.map((s, i) => ({
+    label: s.label,
+    pct: Math.round((s.usd / total) * 1000) / 10,
+    color: ALLOCATION_COLORS[i],
+  }));
+}
+
 export default function Home() {
   const [thread, setThread] = useState<ThreadItem[]>([{ type: "pendle" }, { type: "betaneutral" }]);
   const [promptText, setPromptText] = useState("");
@@ -41,12 +74,12 @@ export default function Home() {
   const displayPortfolioValue = isConnected ? live.netUsd : PORTFOLIO_VALUE;
 
   const livePositions = [
-    ...(live.ethBalance > 0 ? [{ asset: "ETH", venue: "Wallet", amount: `${live.ethBalance.toFixed(4)} ETH` }] : []),
-    ...(live.stEthBalance > 0 ? [{ asset: "stETH", venue: "Lido", amount: `${live.stEthBalance.toFixed(4)} stETH` }] : []),
+    ...live.assets.map((a) => ({ asset: a.symbol, venue: a.venue, amount: formatAssetAmount(a) })),
     ...(live.aaveCollateralUsd > 0 ? [{ asset: "Aave supply", venue: "Aave", amount: fmtUsd(live.aaveCollateralUsd) }] : []),
     ...(live.aaveDebtUsd > 0 ? [{ asset: "Aave borrow", venue: "Aave", amount: "-" + fmtUsd(live.aaveDebtUsd) }] : []),
   ];
   const displayPositions = isConnected ? livePositions : POSITIONS;
+  const displayAllocation = isConnected ? buildLiveAllocation(live) : ALLOCATION;
 
   const usedTypes = new Set(thread.map((t) => t.type));
 
@@ -105,15 +138,15 @@ export default function Home() {
             {fmtUsd(displayPortfolioValue)}
           </p>
 
-          {!isConnected && (
+          {displayAllocation.length > 0 && (
             <>
               <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", marginBottom: "var(--space-2)" }}>
-                {ALLOCATION.map((a) => (
+                {displayAllocation.map((a) => (
                   <div key={a.label} style={{ width: `${a.pct}%`, background: a.color }} />
                 ))}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, marginBottom: "var(--space-4)" }}>
-                {ALLOCATION.map((a) => (
+                {displayAllocation.map((a) => (
                   <div key={a.label} style={{ display: "flex", justifyContent: "space-between" }}>
                     <span>{a.label}</span>
                     <span className="text-muted">{a.pct}%</span>
@@ -148,13 +181,17 @@ export default function Home() {
             {isConnected && livePositions.length === 0 && (
               <p style={{ fontSize: 12, margin: "6px 0 0" }} className="text-muted">
                 {live.isLoading
-                  ? "Reading your wallet, ETH balance, and Aave position…"
-                  : "No ETH, stETH, or Aave position found on Ethereum mainnet. Morpho, Pendle, Hyperliquid, Extended, Variational, and Uniswap aren't wired up yet."}
+                  ? "Reading your wallet balances and Aave position…"
+                  : "No tracked assets (ETH, stETH, wstETH, WETH, WBTC, USDC, USDT, DAI, LINK, UNI) or Aave position found on Ethereum mainnet. Morpho, Pendle, Hyperliquid, Extended, Variational, and Uniswap aren't wired up yet."}
               </p>
             )}
           </div>
 
-          <RiskPanel liveHealthFactor={isConnected ? live.healthFactor : undefined} />
+          <RiskPanel
+            liveHealthFactor={isConnected ? live.healthFactor : undefined}
+            liveAvailableToBorrowUsd={live.aaveAvailableToBorrowUsd}
+            liveLtvPct={live.aaveLtvPct}
+          />
         </div>
 
         {/* Trade column */}

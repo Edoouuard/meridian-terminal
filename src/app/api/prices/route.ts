@@ -29,6 +29,10 @@ const COINGECKO_IDS: Record<string, string> = {
   PEPE: "pepe",
   NEAR: "near",
   APT: "aptos",
+  // Not shown in the top-25 ticker — used to price wallet asset balances instead.
+  DAI: "dai",
+  WBTC: "wrapped-bitcoin",
+  WSTETH: "wrapped-steth",
 };
 
 export interface LivePrice {

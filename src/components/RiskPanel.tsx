@@ -1,4 +1,4 @@
-import { HEALTH_FACTOR, NET_DELTA_ETH, RiskSuggestion, RISK_SUGGESTIONS } from "@/lib/data";
+import { HEALTH_FACTOR, NET_DELTA_ETH, RiskSuggestion, RISK_SUGGESTIONS, fmtUsd } from "@/lib/data";
 
 type Status = "good" | "warning" | "serious";
 
@@ -157,7 +157,15 @@ function SuggestionBar({ suggestion }: { suggestion: RiskSuggestion }) {
   );
 }
 
-export function RiskPanel({ liveHealthFactor }: { liveHealthFactor?: number | null }) {
+export function RiskPanel({
+  liveHealthFactor,
+  liveAvailableToBorrowUsd,
+  liveLtvPct,
+}: {
+  liveHealthFactor?: number | null;
+  liveAvailableToBorrowUsd?: number;
+  liveLtvPct?: number | null;
+}) {
   const isLive = liveHealthFactor !== undefined;
   const healthFactorValue = isLive ? liveHealthFactor : HEALTH_FACTOR;
 
@@ -173,6 +181,14 @@ export function RiskPanel({ liveHealthFactor }: { liveHealthFactor?: number | nu
 
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", marginTop: "var(--space-2)" }}>
         <HealthFactorGauge value={healthFactorValue} isLive={isLive} />
+        {isLive && liveHealthFactor !== null && liveLtvPct != null && (
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+            <span className="text-muted">Current LTV · Available to borrow</span>
+            <span style={{ fontVariantNumeric: "tabular-nums" }}>
+              {liveLtvPct.toFixed(1)}% · {fmtUsd(liveAvailableToBorrowUsd ?? 0)}
+            </span>
+          </div>
+        )}
         <NetDeltaBar />
       </div>
 
