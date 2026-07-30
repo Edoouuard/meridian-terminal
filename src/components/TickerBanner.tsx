@@ -1,7 +1,23 @@
+"use client";
+
 import { TOP_CRYPTOS } from "@/lib/data";
+import { useLivePrices } from "@/hooks/useLivePrices";
+
+function formatTickerPrice(n: number): string {
+  if (n >= 100) return "$" + Math.round(n).toLocaleString("en-US");
+  if (n >= 1) return "$" + n.toFixed(2);
+  return "$" + n.toPrecision(3);
+}
 
 export function TickerBanner() {
-  const items = [...TOP_CRYPTOS, ...TOP_CRYPTOS];
+  const { data: live } = useLivePrices();
+  const liveBySymbol = new Map((live ?? []).map((p) => [p.symbol, p]));
+
+  const merged = TOP_CRYPTOS.map((c) => {
+    const l = liveBySymbol.get(c.symbol);
+    return l ? { symbol: c.symbol, price: formatTickerPrice(l.price), change: l.change24h } : c;
+  });
+  const items = [...merged, ...merged];
 
   return (
     <div

@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { useAccount } from "wagmi";
 import { ThreadCard } from "@/components/ThreadCard";
 import { RiskPanel } from "@/components/RiskPanel";
 import { TickerBanner } from "@/components/TickerBanner";
+import { WalletConnectButton } from "@/components/WalletConnectButton";
+import { useLivePortfolio } from "@/hooks/useLivePortfolio";
 import {
   ALLOCATION,
   ALPHA,
@@ -16,7 +19,6 @@ import {
   ROTATION_BARS,
   ThreadItem,
   ThreadType,
-  WALLET_ADDRESS,
   YIELD_CHART,
   fmtUsd,
 } from "@/lib/data";
@@ -32,6 +34,19 @@ export default function Home() {
   const [promptText, setPromptText] = useState("");
   const [executed, setExecuted] = useState<Record<string, boolean>>({});
   const [feedTab, setFeedTab] = useState<"news" | "alpha">("news");
+
+  const { isConnected } = useAccount();
+  const live = useLivePortfolio();
+
+  const displayPortfolioValue = isConnected ? live.netUsd : PORTFOLIO_VALUE;
+
+  const livePositions = [
+    ...(live.ethBalance > 0 ? [{ asset: "ETH", venue: "Wallet", amount: `${live.ethBalance.toFixed(4)} ETH` }] : []),
+    ...(live.stEthBalance > 0 ? [{ asset: "stETH", venue: "Lido", amount: `${live.stEthBalance.toFixed(4)} stETH` }] : []),
+    ...(live.aaveCollateralUsd > 0 ? [{ asset: "Aave supply", venue: "Aave", amount: fmtUsd(live.aaveCollateralUsd) }] : []),
+    ...(live.aaveDebtUsd > 0 ? [{ asset: "Aave borrow", venue: "Aave", amount: "-" + fmtUsd(live.aaveDebtUsd) }] : []),
+  ];
+  const displayPositions = isConnected ? livePositions : POSITIONS;
 
   const usedTypes = new Set(thread.map((t) => t.type));
 
@@ -62,20 +77,23 @@ export default function Home() {
       <div className="nav" style={{ background: "var(--color-surface)", flex: "none" }}>
         <span className="nav-brand">Meridian</span>
         <span className="text-muted" style={{ fontSize: 13 }}>
-          Ethereum · connected
+          {isConnected ? "Ethereum · connected" : "Ethereum · not connected"}
         </span>
-        <span className="tag tag-outline" style={{ fontVariantNumeric: "tabular-nums" }}>
-          {WALLET_ADDRESS}
-        </span>
+        <WalletConnectButton />
         <span className="tag tag-neutral" style={{ fontVariantNumeric: "tabular-nums" }}>
-          {fmtUsd(PORTFOLIO_VALUE)}
+          {fmtUsd(displayPortfolioValue)}
         </span>
       </div>
 
       <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "290px 1fr 320px", overflow: "hidden" }}>
         {/* Portfolio column */}
         <div className="col-scroll" style={{ minWidth: 0, borderRight: "1px solid var(--color-divider)", padding: "var(--space-4)" }}>
-          <h6 style={{ color: "var(--color-accent)" }}>Portfolio</h6>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <h6 style={{ color: "var(--color-accent)", margin: 0 }}>Portfolio</h6>
+            <span className="text-muted" style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+              {isConnected ? "Live" : "Example"}
+            </span>
+          </div>
           <p
             style={{
               fontFamily: "var(--font-heading)",
@@ -84,27 +102,31 @@ export default function Home() {
               fontVariantNumeric: "tabular-nums",
             }}
           >
-            {fmtUsd(PORTFOLIO_VALUE)}
+            {fmtUsd(displayPortfolioValue)}
           </p>
 
-          <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", marginBottom: "var(--space-2)" }}>
-            {ALLOCATION.map((a) => (
-              <div key={a.label} style={{ width: `${a.pct}%`, background: a.color }} />
-            ))}
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, marginBottom: "var(--space-4)" }}>
-            {ALLOCATION.map((a) => (
-              <div key={a.label} style={{ display: "flex", justifyContent: "space-between" }}>
-                <span>{a.label}</span>
-                <span className="text-muted">{a.pct}%</span>
+          {!isConnected && (
+            <>
+              <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", marginBottom: "var(--space-2)" }}>
+                {ALLOCATION.map((a) => (
+                  <div key={a.label} style={{ width: `${a.pct}%`, background: a.color }} />
+                ))}
               </div>
-            ))}
-          </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, marginBottom: "var(--space-4)" }}>
+                {ALLOCATION.map((a) => (
+                  <div key={a.label} style={{ display: "flex", justifyContent: "space-between" }}>
+                    <span>{a.label}</span>
+                    <span className="text-muted">{a.pct}%</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
 
           <div className="hr" style={{ margin: "var(--space-3) 0" }} />
           <h6 style={{ color: "var(--color-accent)" }}>Positions</h6>
           <div style={{ display: "flex", flexDirection: "column", marginTop: "var(--space-2)" }}>
-            {POSITIONS.map((pos, i) => (
+            {displayPositions.map((pos, i) => (
               <div
                 key={i}
                 style={{
@@ -123,9 +145,16 @@ export default function Home() {
                 <span style={{ fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{pos.amount}</span>
               </div>
             ))}
+            {isConnected && livePositions.length === 0 && (
+              <p style={{ fontSize: 12, margin: "6px 0 0" }} className="text-muted">
+                {live.isLoading
+                  ? "Reading your wallet, ETH balance, and Aave position…"
+                  : "No ETH, stETH, or Aave position found on Ethereum mainnet. Morpho, Pendle, Hyperliquid, Extended, Variational, and Uniswap aren't wired up yet."}
+              </p>
+            )}
           </div>
 
-          <RiskPanel />
+          <RiskPanel liveHealthFactor={isConnected ? live.healthFactor : undefined} />
         </div>
 
         {/* Trade column */}

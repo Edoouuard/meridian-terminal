@@ -30,20 +30,35 @@ function formatValue(kind: RiskSuggestion["kind"], value: number): string {
   return `${value}%`;
 }
 
-function HealthFactorGauge() {
+function HealthFactorGauge({ value, isLive }: { value: number | null; isLive: boolean }) {
+  const label = isLive ? "Lowest health factor · Aave (live)" : "Lowest health factor · Aave (example)";
+
+  if (value === null) {
+    return (
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+          <span className="text-muted">{label}</span>
+          <span style={{ color: "var(--risk-good)", fontWeight: 600 }}>No debt</span>
+        </div>
+        <div style={{ height: 8, borderRadius: 4, background: "var(--risk-good)" }} />
+        <p style={{ fontSize: 10, margin: "3px 0 0" }} className="text-muted">
+          No open borrows on Aave — nothing at liquidation risk.
+        </p>
+      </div>
+    );
+  }
+
   const max = 2.5;
   const seriousEnd = 1.15;
   const warningEnd = 1.6;
-  const status = healthFactorStatus(HEALTH_FACTOR);
-  const markerPct = Math.min(100, (HEALTH_FACTOR / max) * 100);
+  const status = healthFactorStatus(value);
+  const markerPct = Math.min(100, (value / max) * 100);
 
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
-        <span className="text-muted">Lowest health factor · Aave</span>
-        <span style={{ fontVariantNumeric: "tabular-nums", color: statusColor(status), fontWeight: 600 }}>
-          {HEALTH_FACTOR.toFixed(2)}
-        </span>
+        <span className="text-muted">{label}</span>
+        <span style={{ fontVariantNumeric: "tabular-nums", color: statusColor(status), fontWeight: 600 }}>{value.toFixed(2)}</span>
       </div>
       <div style={{ position: "relative", height: 8, borderRadius: 4, overflow: "visible", display: "flex" }}>
         <div style={{ width: `${(seriousEnd / max) * 100}%`, background: "var(--risk-serious)", borderRadius: "4px 0 0 4px" }} />
@@ -142,7 +157,10 @@ function SuggestionBar({ suggestion }: { suggestion: RiskSuggestion }) {
   );
 }
 
-export function RiskPanel() {
+export function RiskPanel({ liveHealthFactor }: { liveHealthFactor?: number | null }) {
+  const isLive = liveHealthFactor !== undefined;
+  const healthFactorValue = isLive ? liveHealthFactor : HEALTH_FACTOR;
+
   return (
     <>
       <div className="hr" style={{ margin: "var(--space-3) 0" }} />
@@ -154,9 +172,16 @@ export function RiskPanel() {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", marginTop: "var(--space-2)" }}>
-        <HealthFactorGauge />
+        <HealthFactorGauge value={healthFactorValue} isLive={isLive} />
         <NetDeltaBar />
       </div>
+
+      <p style={{ fontSize: 10, margin: "var(--space-2) 0 0" }} className="text-muted">
+        {isLive
+          ? "Health factor reads live from your Aave v3 position."
+          : "Example figures — connect a wallet to see your real Aave health factor."}{" "}
+        Net delta and the suggestions below are illustrative until more protocols are connected.
+      </p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", marginTop: "var(--space-3)" }}>
         {RISK_SUGGESTIONS.map((s, i) => (
