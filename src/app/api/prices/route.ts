@@ -33,6 +33,10 @@ const COINGECKO_IDS: Record<string, string> = {
   DAI: "dai",
   WBTC: "wrapped-bitcoin",
   WSTETH: "wrapped-steth",
+  // Native gas token on Polygon — covers both the pre- and post-rebrand symbol,
+  // since which one a wallet balance reports depends on the viem chain version.
+  MATIC: "matic-network",
+  POL: "polygon-ecosystem-token",
 };
 
 export interface LivePrice {

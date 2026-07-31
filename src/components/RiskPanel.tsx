@@ -1,4 +1,5 @@
 import { HEALTH_FACTOR, NET_DELTA_ETH, RiskSuggestion, RISK_SUGGESTIONS, fmtUsd } from "@/lib/data";
+import { LiveAavePosition } from "@/hooks/useLivePortfolio";
 
 type Status = "good" | "warning" | "serious";
 
@@ -30,8 +31,8 @@ function formatValue(kind: RiskSuggestion["kind"], value: number): string {
   return `${value}%`;
 }
 
-function HealthFactorGauge({ value, isLive }: { value: number | null; isLive: boolean }) {
-  const label = isLive ? "Lowest health factor · Aave (live)" : "Lowest health factor · Aave (example)";
+function HealthFactorGauge({ value, isLive, chainLabel }: { value: number | null; isLive: boolean; chainLabel?: string }) {
+  const label = isLive ? `Lowest health factor · Aave${chainLabel ? ` (${chainLabel})` : ""}` : "Lowest health factor · Aave (example)";
 
   if (value === null) {
     return (
@@ -157,17 +158,9 @@ function SuggestionBar({ suggestion }: { suggestion: RiskSuggestion }) {
   );
 }
 
-export function RiskPanel({
-  liveHealthFactor,
-  liveAvailableToBorrowUsd,
-  liveLtvPct,
-}: {
-  liveHealthFactor?: number | null;
-  liveAvailableToBorrowUsd?: number;
-  liveLtvPct?: number | null;
-}) {
-  const isLive = liveHealthFactor !== undefined;
-  const healthFactorValue = isLive ? liveHealthFactor : HEALTH_FACTOR;
+export function RiskPanel({ liveAave, isConnected }: { liveAave?: LiveAavePosition | null; isConnected: boolean }) {
+  const isLive = isConnected;
+  const healthFactorValue = isLive ? (liveAave?.healthFactor ?? null) : HEALTH_FACTOR;
 
   return (
     <>
@@ -180,12 +173,12 @@ export function RiskPanel({
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", marginTop: "var(--space-2)" }}>
-        <HealthFactorGauge value={healthFactorValue} isLive={isLive} />
-        {isLive && liveHealthFactor !== null && liveLtvPct != null && (
+        <HealthFactorGauge value={healthFactorValue} isLive={isLive} chainLabel={liveAave?.chain} />
+        {isLive && liveAave && healthFactorValue !== null && (
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
             <span className="text-muted">Current LTV · Available to borrow</span>
             <span style={{ fontVariantNumeric: "tabular-nums" }}>
-              {liveLtvPct.toFixed(1)}% · {fmtUsd(liveAvailableToBorrowUsd ?? 0)}
+              {liveAave.ltvPct.toFixed(1)}% · {fmtUsd(liveAave.availableToBorrowUsd)}
             </span>
           </div>
         )}
