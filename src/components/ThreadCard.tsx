@@ -182,7 +182,7 @@ export function ThreadCard({
           <p style={{ margin: "0 0 6px", fontSize: 14 }}>
             Your book currently carries <strong>+{NET_DELTA_ETH.toFixed(2)} ETH</strong> of net directional delta,
             and stETH plus PT weETH make up <strong>{STAKING_CONCENTRATION_PCT}%</strong> of the portfolio in
-            liquid-staking and restaking risk. A partial short on Hyperliquid brings the delta close to flat without
+            liquid staking and restaking risk. A partial short on Hyperliquid brings the delta close to flat without
             touching either yield leg.
           </p>
           <div style={orderStyle}>

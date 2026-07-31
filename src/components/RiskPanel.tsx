@@ -43,7 +43,7 @@ function HealthFactorGauge({ value, isLive, chainLabel }: { value: number | null
         </div>
         <div style={{ height: 8, borderRadius: 4, background: "var(--risk-good)" }} />
         <p style={{ fontSize: 10, margin: "3px 0 0" }} className="text-muted">
-          No open borrows on Aave — nothing at liquidation risk.
+          No open borrows on Aave, so nothing is at liquidation risk.
         </p>
       </div>
     );
@@ -188,7 +188,7 @@ export function RiskPanel({ liveAave, isConnected }: { liveAave?: LiveAavePositi
       <p style={{ fontSize: 10, margin: "var(--space-2) 0 0" }} className="text-muted">
         {isLive
           ? "Health factor reads live from your Aave v3 position."
-          : "Example figures — connect a wallet to see your real Aave health factor."}{" "}
+          : "Example figures. Connect a wallet to see your real Aave health factor."}{" "}
         Net delta and the suggestions below are illustrative until more protocols are connected.
       </p>
 

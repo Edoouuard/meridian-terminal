@@ -84,7 +84,7 @@ export function PromptDemo() {
       >
         {thread.length === 0 && (
           <p className="text-muted" style={{ fontSize: 13, margin: 0 }}>
-            Type a thesis below, or pick one — Meridian turns it into an order.
+            Type a thesis below, or pick one. Meridian turns it into an order.
           </p>
         )}
         {thread.map((item, i) => (
@@ -115,7 +115,7 @@ export function PromptDemo() {
         </button>
       </div>
       <p className="text-muted" style={{ fontSize: 11, margin: "var(--space-2) 0 0" }}>
-        Simulated response for this preview — the terminal reads your real wallet and Aave position once connected.
+        Simulated response for this preview. The terminal reads your real wallet and Aave position once connected.
       </p>
     </div>
   );

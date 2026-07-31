@@ -164,13 +164,13 @@ export const ALPHA: AlphaItem[] = [
     tag: "New protocol",
     protocol: "Fluid V2",
     metric: "Launched 3d ago",
-    text: "Instant-liquidity layer combining lending and a DEX in one smart-vault design. $180M TVL in the first 72 hours, no token yet.",
+    text: "Instant liquidity layer combining lending and a DEX in one smart vault design. $180M TVL in the first 72 hours, no token yet.",
   },
   {
     tag: "Points farm",
     protocol: "Extended",
     metric: "3x multiplier",
-    text: "Extended just tripled point multipliers on ETH and SOL perps through the end of the season — the cheapest basis-neutral farm on the board right now.",
+    text: "Extended just tripled point multipliers on ETH and SOL perps through the end of the season, the cheapest basis neutral farm on the board right now.",
     action: "betaneutral",
   },
   {
@@ -183,14 +183,14 @@ export const ALPHA: AlphaItem[] = [
     tag: "New protocol",
     protocol: "Ethena",
     metric: "+$310M TVL wk1",
-    text: "Synthetic dollar sUSDe crossed $310M in deposits in its first week, backed by a delta-neutral ETH staking plus short-perp basis trade.",
+    text: "Synthetic dollar sUSDe crossed $310M in deposits in its first week, backed by a delta neutral ETH staking plus short perp basis trade.",
     action: "betaneutral",
   },
   {
     tag: "Airdrop rumor",
     protocol: "Hyperliquid",
     metric: "Season 2 unconfirmed",
-    text: "No official confirmation yet, but on-chain volume through HyperCore is up 40% week-over-week — historically a leading signal for a new points season.",
+    text: "No official confirmation yet, but on chain volume through HyperCore is up 40% week over week, historically a leading signal for a new points season.",
     action: "perp",
   },
   {
