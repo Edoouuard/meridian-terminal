@@ -97,10 +97,10 @@ function PlanCard({
             {plan.legs.some((l) => l.note) && (
               <OrderRow label="Note" value={plan.legs.map((l) => l.note).filter(Boolean).join(" · ")} />
             )}
-            {txHash && (
+            {plan.legs.length > 0 && (
               <ExecuteAction
                 executed={executed}
-                txHash={txHash}
+                txHash={txHash ?? TX_HASHES.swap}
                 label={`Execute on ${plan.protocol ?? "chain"} →`}
                 onExecute={onExecute}
               />
