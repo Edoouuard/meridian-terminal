@@ -1,10 +1,14 @@
 "use client";
 
+import { useState } from "react";
 import { useAccount } from "wagmi";
 import { ThreadItem, fmtUsd } from "@/lib/data";
 import { resolveOrderForLeg, protocolLabel } from "@/lib/assetMap";
 import type { Order } from "@/lib/execution";
+import type { TradeLeg } from "@/lib/tradePlan";
 import { useExecute, explorerUrlFor } from "@/hooks/useExecute";
+import { useHyperliquid } from "@/hooks/useHyperliquid";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 function UserBubble({ children }: { children: React.ReactNode }) {
   return (
@@ -54,6 +58,7 @@ function NotWired({ venue, reason }: { venue: string; reason: string }) {
 function ExecuteButton({ order, label }: { order: Order; label: string }) {
   const { isConnected } = useAccount();
   const { status, data, error, execute, reset } = useExecute();
+  const [confirming, setConfirming] = useState(false);
 
   if (status === "confirming") {
     return (
@@ -91,14 +96,117 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
   }
 
   return (
-    <button
-      className="btn btn-primary"
-      style={{ fontSize: 13, marginTop: 6, cursor: "pointer" }}
-      onClick={() => execute(order)}
-      title={isConnected ? undefined : "Connect a wallet first"}
-    >
-      {label}
-    </button>
+    <>
+      <button
+        className="btn btn-primary"
+        style={{ fontSize: 13, marginTop: 6, cursor: "pointer" }}
+        onClick={() => setConfirming(true)}
+        title={isConnected ? undefined : "Connect a wallet first"}
+      >
+        {label}
+      </button>
+      <ConfirmDialog
+        open={confirming}
+        title="Confirm on-chain action"
+        body={
+          <div>
+            Sign and broadcast <strong>{order.type}</strong> of {String(order.amount)}{" "}
+            {order.symbol ?? ""} on {String(order.protocol)} (chain {order.chainId}).
+          </div>
+        }
+        confirmLabel="Sign"
+        warning="This moves real funds from your wallet."
+        onConfirm={() => {
+          setConfirming(false);
+          execute(order);
+        }}
+        onCancel={() => setConfirming(false)}
+      />
+    </>
+  );
+}
+
+/**
+ * Live Hyperliquid perp execution (testnet by default). Fetches the live mid
+ * price + asset index, signs the EIP-712 order with the wallet, submits to the
+ * exchange API, and reports the real status. Honest: any failure surfaces as
+ * error, never a fake success.
+ */
+function PerpExecuteButton({ leg }: { leg: TradeLeg }) {
+  const { isConnected } = useAccount();
+  const { status, result, error, execute, reset } = useHyperliquid();
+  const [confirming, setConfirming] = useState(false);
+
+  const symbol = (leg.asset || "HYPE").replace(/PERP$/i, "").trim() || "HYPE";
+  const sizeUsd = leg.sizeUsd && leg.sizeUsd > 0 ? leg.sizeUsd : 1000;
+  const side = (leg.side || "").toLowerCase();
+  const isBuy = side.startsWith("long") || side === "buy";
+  const leverage = leg.leverage;
+
+  if (status === "preparing" || status === "signing" || status === "submitting") {
+    return (
+      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>
+        {status === "preparing"
+          ? "Fetching Hyperliquid price…"
+          : status === "signing"
+            ? "Awaiting wallet signature…"
+            : "Submitting order to Hyperliquid…"}
+      </p>
+    );
+  }
+
+  if (status === "confirmed" && result) {
+    return (
+      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-accent-700)" }}>
+        Order on Hyperliquid testnet: {result.marketPrice ? "$" + result.marketPrice.toFixed(4) : "n/a"} →{" "}
+        {JSON.stringify(result.response)}
+        <button onClick={reset} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 11 }}>
+          clear
+        </button>
+      </p>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--risk-bad, #c0392b)" }}>
+        {`HL: ${error ?? "execution failed"}`}
+        <button onClick={reset} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 11 }}>
+          clear
+        </button>
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <button
+        className="btn btn-primary"
+        style={{ fontSize: 13, marginTop: 6, cursor: "pointer" }}
+        onClick={() => setConfirming(true)}
+        title={isConnected ? undefined : "Connect a wallet first"}
+      >
+        Open {side === "short" ? "short" : "long"} {symbol} on Hyperliquid →
+      </button>
+      <ConfirmDialog
+        open={confirming}
+        title={`Confirm ${isBuy ? "long" : "short"} ${symbol} on Hyperliquid`}
+        body={
+          <div>
+            Market order: {isBuy ? "long" : "short"} {symbol.toUpperCase()} ({fmtUsd(sizeUsd)}
+            {leverage ? ` at ${leverage}x` : ""}). A live mid price will be fetched, the order signed with your
+            wallet, then submitted to Hyperliquid.
+          </div>
+        }
+        confirmLabel="Sign & submit"
+        warning="TESTNET by default — no real funds."
+        onConfirm={() => {
+          setConfirming(false);
+          execute({ symbol, isBuy, sizeUsd, leverage, testnet: true });
+        }}
+        onCancel={() => setConfirming(false)}
+      />
+    </>
   );
 }
 
@@ -138,7 +246,11 @@ function PlanCard({ item }: { item: ThreadItem }) {
                 <div key={i} style={{ marginTop: i === 0 ? 0 : "var(--space-2)" }}>
                   <OrderRow label={leg.side} value={legRowValue(leg)} />
                   {isUnsupported(resolved) ? (
-                    <NotWired venue={protocolLabel(leg.protocol)} reason={resolved.unsupported} />
+                    /hyperliquid/i.test(leg.protocol || "") ? (
+                      <PerpExecuteButton leg={leg} />
+                    ) : (
+                      <NotWired venue={protocolLabel(leg.protocol)} reason={resolved.unsupported} />
+                    )
                   ) : (
                     <ExecuteButton order={resolved} label={`Execute on ${leg.protocol} →`} />
                   )}

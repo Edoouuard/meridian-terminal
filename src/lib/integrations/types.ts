@@ -34,6 +34,8 @@ export interface PerpOrder {
   symbol?: string;
   /** true = buy/long, false = sell/short (or put for options venues). */
   isBuy: boolean;
+  /** Venue asset index (Hyperliquid). Live layer fetches it; static fallback otherwise. */
+  assetIndex?: number;
   /** Notional size in USD (human readable). */
   sizeUsd: number;
   /** Venue-native perp unit quantity, when already known. */
