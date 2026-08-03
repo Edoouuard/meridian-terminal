@@ -10,6 +10,7 @@ import {
   SUPPORTED_CHAINS,
   TRACKED_TOKENS_BY_CHAIN,
 } from "@/lib/onchain";
+import { ethPriceFromAssets, netEthDelta, stakingConcentration } from "@/lib/riskModel";
 import { useLivePrices } from "./useLivePrices";
 
 export interface LiveAsset {
@@ -159,23 +160,11 @@ export function useLivePortfolio(): LivePortfolio {
 
   // Risk metrics derived from the live tracked holdings (spot only — perps on
   // Hyperliquid/Extended aren't wired up yet, so netDeltaEth is the spot book).
-  const ETH_TRACKING = new Set(["ETH", "WETH", "stETH", "wstETH"]);
-  const ethExposureUsd = assets
-    .filter((a) => ETH_TRACKING.has(a.symbol))
-    .reduce((sum, a) => sum + a.usd, 0);
-  const ethPriceSource =
-    assets.find((a) => a.symbol === "ETH" && a.balance > 0) ??
-    assets.find((a) => a.symbol === "stETH" && a.balance > 0) ??
-    assets.find((a) => a.symbol === "WETH" && a.balance > 0) ??
-    assets.find((a) => a.symbol === "wstETH" && a.balance > 0) ??
-    null;
-  const ethPrice = ethPriceSource && ethPriceSource.balance > 0 ? ethPriceSource.usd / ethPriceSource.balance : null;
-  const netDeltaEth = ethPrice && ethPrice > 0 ? ethExposureUsd / ethPrice : null;
-
-  const stakingUsd = assets
-    .filter((a) => a.symbol === "stETH" || a.symbol === "wstETH")
-    .reduce((sum, a) => sum + a.usd, 0);
-  const stakingConcentrationPct = netUsd > 0 ? (stakingUsd / netUsd) * 100 : null;
+  // All of this math lives in the pure riskModel engine so the hook and the
+  // Risk panel compute identical numbers.
+  const ethPrice = ethPriceFromAssets(assets);
+  const netDeltaEth = netEthDelta(assets, ethPrice);
+  const stakingConcentrationPct = stakingConcentration(assets, netUsd);
 
   return {
     isConnected,

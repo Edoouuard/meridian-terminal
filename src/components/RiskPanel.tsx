@@ -8,6 +8,12 @@ import {
   fmtUsd,
 } from "@/lib/data";
 import { LivePortfolio } from "@/hooks/useLivePortfolio";
+import {
+  roundUsd,
+  suggestConcentrationReduction,
+  suggestDeltaHedge,
+  suggestHealthFactorRepay,
+} from "@/lib/riskModel";
 
 /**
  * A self-contained mock portfolio used by the dev-only "Simulate a portfolio"
@@ -69,10 +75,7 @@ function formatValue(kind: RiskSuggestion["kind"], value: number): string {
   return `${value}%`;
 }
 
-/** Round a dollar amount to a clean, human-parseable figure (nearest $50). */
-function roundUsd(n: number): number {
-  return Math.round(n / 50) * 50;
-}
+/** Round a dollar amount to a clean, human-parseable figure (nearest $50). Re-exported from riskModel. */
 
 /**
  * Build the three risk suggestions from the live portfolio (when a wallet is
@@ -83,63 +86,54 @@ function buildLiveSuggestions(live: LivePortfolio): RiskSuggestion[] {
   const out: RiskSuggestion[] = [];
 
   // 1) Aave health factor — size a repay that lifts HF toward a target.
-  const hf = live.riskAave?.healthFactor;
-  const debt = live.riskAave?.debtUsd ?? 0;
-  if (hf != null && hf < 1.95 && debt > 0) {
-    const target = 1.8;
-    // HF = (collateral * liqThreshold) / debt  ⇒  repay R → HF' = HF * debt / (debt - R)
-    const repay = debt * (1 - hf / target);
-    if (repay > 50) {
-      out.push({
-        kind: "healthFactor",
-        text: `Repaying ${fmtUsd(roundUsd(repay))} on Aave brings your health factor from ${hf.toFixed(
-          2,
-        )} to about ${target.toFixed(2)}.`,
-        before: hf,
-        after: target,
-        max: 2.5,
-      });
-    }
+  const hf = live.riskAave?.healthFactor ?? null;
+  const repaySug = suggestHealthFactorRepay(hf, live.riskAave?.debtUsd ?? 0);
+  if (repaySug && !repaySug.skip && repaySug.repay !== undefined && hf !== null) {
+    out.push({
+      kind: "healthFactor",
+      text: `Repaying ${fmtUsd(roundUsd(repaySug.repay))} on Aave brings your health factor from ${hf.toFixed(
+        2,
+      )} to about ${repaySug.target.toFixed(2)}.`,
+      before: hf,
+      after: repaySug.target,
+      max: 2.5,
+    });
   }
 
   // 2) Net ETH delta — size a perp hedge to flatten the tracked spot book.
-  const d = live.netDeltaEth;
-  if (d != null && Math.abs(d) >= 0.15 && live.ethPrice && live.ethPrice > 0) {
-    const shortUsd = roundUsd(Math.abs(d) * live.ethPrice);
-    const side = d > 0 ? "long" : "short";
-    const hedge = d > 0 ? "Shorting" : "Buying";
-    if (shortUsd > 100) {
-      out.push({
-        kind: "delta",
-        text: `Your tracked spot holdings are ${side} ${Math.abs(d).toFixed(
-          2,
-        )} ETH of net delta. ${hedge} ${fmtUsd(shortUsd)} on Hyperliquid brings it back near flat.`,
-        before: Math.abs(d),
-        after: 0.02,
-        max: 1.0,
-      });
-    }
+  const deltaSug = suggestDeltaHedge(live.netDeltaEth, live.ethPrice);
+  if (deltaSug && !deltaSug.skip && deltaSug.shortUsd !== undefined && live.netDeltaEth !== null) {
+    const d = live.netDeltaEth;
+    const side = deltaSug.direction === "short" ? "short" : "long";
+    const hedge = deltaSug.direction === "short" ? "Buying" : "Shorting";
+    out.push({
+      kind: "delta",
+      text: `Your tracked spot holdings are ${side} ${Math.abs(d).toFixed(
+        2,
+      )} ETH of net delta. ${hedge} ${fmtUsd(deltaSug.shortUsd)} on Hyperliquid brings it back near flat.`,
+      before: Math.abs(d),
+      after: 0.02,
+      max: 1.0,
+    });
   }
 
   // 3) Staking concentration — size a move out of Lido to hit a target share.
-  const c = live.stakingConcentrationPct;
-  if (c != null && c >= 20 && c <= 97 && live.netUsd > 0) {
-    const target = 30;
-    const amount = (live.netUsd * (c - target)) / 100;
-    if (amount > 1000) {
-      const to = c > target ? target : Math.min(40, c + 10);
-      const directed = c > target ? "Moving" : "Adding";
-      const verb = c > target ? "cuts" : "lifts";
-      out.push({
-        kind: "concentration",
-        text: `${c.toFixed(0)}% of your portfolio sits in liquid staking/restaking (stETH + wstETH) via Lido. ${directed} ${fmtUsd(
-          roundUsd(amount),
-        )} into PT weETH ${verb} Lido concentration to ~${to.toFixed(0)}% while locking a fixed yield.`,
-        before: c,
-        after: to,
-        max: 100,
-      });
-    }
+  const concSug = suggestConcentrationReduction(live.netUsd, live.stakingConcentrationPct);
+  if (concSug && !concSug.skip && concSug.amount !== undefined && live.stakingConcentrationPct !== null) {
+    const c = live.stakingConcentrationPct;
+    const amount = concSug.amount;
+    const to = c > concSug.target ? concSug.target : Math.min(40, c + 10);
+    const directed = c > concSug.target ? "Moving" : "Adding";
+    const verb = c > concSug.target ? "cuts" : "lifts";
+    out.push({
+      kind: "concentration",
+      text: `${c.toFixed(0)}% of your portfolio sits in liquid staking/restaking (stETH + wstETH) via Lido. ${directed} ${fmtUsd(
+        roundUsd(amount),
+      )} into PT weETH ${verb} Lido concentration to ~${to.toFixed(0)}% while locking a fixed yield.`,
+      before: c,
+      after: to,
+      max: 100,
+    });
   }
 
   return out;

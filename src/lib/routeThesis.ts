@@ -1,15 +1,16 @@
-import { HEDGE_KEYWORDS, ThreadItem, ThreadType } from "@/lib/data";
+import { ThreadItem } from "@/lib/data";
+import { parseThesis, planToThreadType } from "@/lib/tradePlan";
 
-/** Keyword routing shared by the terminal's live chat and the landing page demo. */
+/**
+ * Route a raw thesis string to a ThreadItem. The heavyweight parsing lives in
+ * tradePlan.parseThesis(); here we just run it and stamp the resulting plan
+ * (plus a backward-compatible ThreadType) onto the ThreadItem so the card
+ * renderer can build dynamic order rows from it.
+ */
 export function routeThesis(rawText: string): ThreadItem {
-  const text = rawText.trim();
-  const t = text.toLowerCase();
-  if (t.includes("pendle") || t.includes("yield") || t.includes("fixed")) return { type: "pendle" };
-  if (t.includes("beta") || t.includes("neutral") || t.includes("hyperliquid")) return { type: "betaneutral" };
-  if (HEDGE_KEYWORDS.some((k) => t.includes(k))) return { type: "hedge", text };
-  if (t.includes("perp") || t.includes("sol") || t.includes("long") || t.includes("short")) return { type: "perp" };
-  if (t.includes("swap")) return { type: "swap" };
-  return { type: "custom", text };
+  const text = (rawText ?? "").trim();
+  const plan = parseThesis(text);
+  return { type: planToThreadType(plan), text, plan };
 }
 
 export const EXAMPLE_THESES = [
@@ -20,4 +21,5 @@ export const EXAMPLE_THESES = [
   "Move my USDC into stETH",
 ];
 
-export type { ThreadType };
+export { planToThreadType } from "@/lib/tradePlan";
+export type { TradePlan } from "@/lib/tradePlan";

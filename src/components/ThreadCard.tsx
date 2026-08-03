@@ -1,4 +1,5 @@
-import { NET_DELTA_ETH, STAKING_CONCENTRATION_PCT, ThreadItem, TX_HASHES } from "@/lib/data";
+import { NET_DELTA_ETH, STAKING_CONCENTRATION_PCT, ThreadItem, TX_HASHES, fmtUsd } from "@/lib/data";
+import { planToThreadType } from "@/lib/tradePlan";
 
 function UserBubble({ children }: { children: React.ReactNode }) {
   return (
@@ -58,6 +59,59 @@ function ExecuteAction({
   );
 }
 
+/** Order card rendered from a parsed TradePlan when item.plan is present. */
+function PlanCard({
+  item,
+  executed,
+  onExecute,
+}: {
+  item: ThreadItem;
+  executed: boolean;
+  onExecute: () => void;
+}) {
+  const plan = item.plan!;
+  const orderStyle: React.CSSProperties = {
+    borderLeft: "2px solid var(--color-accent)",
+    paddingLeft: "var(--space-2)",
+    fontSize: 13,
+  };
+  const type = planToThreadType(plan);
+  const txHash = type !== "custom" ? TX_HASHES[type] : undefined;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+      <UserBubble>{item.text || "Describe your thesis."}</UserBubble>
+      <div style={{ maxWidth: "90%" }}>
+        <p style={{ margin: "0 0 6px", fontSize: 14 }}>{plan.summary}</p>
+        {plan.legs.length > 0 && (
+          <div style={orderStyle}>
+            {plan.legs.map((leg, i) => (
+              <OrderRow
+                key={i}
+                label={leg.side}
+                value={`${leg.asset} · ${leg.protocol}${leg.sizeUsd ? ` · ${fmtUsd(leg.sizeUsd)}` : ""}${
+                  leg.leverage ? ` · ${leg.leverage}x` : ""
+                }`}
+              />
+            ))}
+            {plan.legs.some((l) => l.note) && (
+              <OrderRow label="Note" value={plan.legs.map((l) => l.note).filter(Boolean).join(" · ")} />
+            )}
+            {txHash && (
+              <ExecuteAction
+                executed={executed}
+                txHash={txHash}
+                label={`Execute on ${plan.protocol ?? "chain"} →`}
+                onExecute={onExecute}
+              />
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ThreadCard({
   item,
   executed,
@@ -72,6 +126,11 @@ export function ThreadCard({
     paddingLeft: "var(--space-2)",
     fontSize: 13,
   };
+
+  // Dynamic plan-driven card takes priority over the canned fallbacks.
+  if (item.plan) {
+    return <PlanCard item={item} executed={executed} onExecute={onExecute} />;
+  }
 
   if (item.type === "pendle") {
     return (
