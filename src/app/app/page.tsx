@@ -69,7 +69,6 @@ function buildLiveAllocation(live: LivePortfolio): { label: string; pct: number;
 export default function TerminalApp() {
   const [thread, setThread] = useState<ThreadItem[]>([{ type: "pendle" }, { type: "betaneutral" }]);
   const [promptText, setPromptText] = useState("");
-  const [executed, setExecuted] = useState<Record<string, boolean>>({});
   const [feedTab, setFeedTab] = useState<"news" | "alpha">("news");
 
   const { isConnected } = useAccount();
@@ -91,10 +90,6 @@ export default function TerminalApp() {
 
   function addExample(type: ThreadType, text?: string) {
     setThread((cur) => (cur.some((t) => t.type === type) ? cur : cur.concat([{ type, text }])));
-  }
-
-  function markExecuted(type: ThreadType) {
-    setExecuted((cur) => ({ ...cur, [type]: true }));
   }
 
   function submitPrompt() {
@@ -267,12 +262,7 @@ export default function TerminalApp() {
             </div>
 
             {thread.map((item, i) => (
-              <ThreadCard
-                key={i}
-                item={item}
-                executed={!!executed[item.type]}
-                onExecute={() => markExecuted(item.type)}
-              />
+              <ThreadCard key={i} item={item} />
             ))}
           </div>
 

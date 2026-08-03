@@ -3,8 +3,26 @@
 import { useCallback, useState } from "react";
 import { useAccount, useSendTransaction, useWriteContract } from "wagmi";
 import { applySender, buildExecution, type ExecutionPlan, type Order } from "@/lib/execution";
+import { mainnet, base, arbitrum, optimism, polygon, avalanche } from "wagmi/chains";
 
 export type ExecuteStatus = "idle" | "confirming" | "confirmed" | "error";
+
+/**
+ * Build a block-explorer tx URL for a chain id + tx hash, for surfacing a
+ * confirmed transaction in the UI. Additive helper — `useExecute` itself is
+ * unchanged in signature.
+ */
+export function explorerUrlFor(chainId: number, hash: `0x${string}`): string {
+  const baseUrl: Record<number, string> = {
+    [mainnet.id]: "https://etherscan.io/tx/",
+    [base.id]: "https://basescan.org/tx/",
+    [arbitrum.id]: "https://arbiscan.io/tx/",
+    [optimism.id]: "https://optimistic.etherscan.io/tx/",
+    [polygon.id]: "https://polygonscan.com/tx/",
+    [avalanche.id]: "https://snowtrace.io/tx/",
+  };
+  return `${baseUrl[chainId] ?? `https://etherscan.io/tx/`}${hash}`;
+}
 
 export interface ExecuteState {
   status: ExecuteStatus;
