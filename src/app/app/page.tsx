@@ -7,6 +7,7 @@ import { ThreadCard } from "@/components/ThreadCard";
 import { RiskPanel } from "@/components/RiskPanel";
 import { TickerBanner } from "@/components/TickerBanner";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
+import { HyperliquidPanel } from "@/components/HyperliquidPanel";
 import { LiveAsset, LivePortfolio, useLivePortfolio } from "@/hooks/useLivePortfolio";
 import { CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
 import { routeThesis } from "@/lib/routeThesis";
@@ -186,6 +187,7 @@ export default function TerminalApp() {
           </div>
 
           <RiskPanel live={live} isConnected={isConnected} />
+          <HyperliquidPanel />
         </div>
 
         {/* Trade column */}

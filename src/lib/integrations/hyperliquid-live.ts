@@ -107,6 +107,10 @@ export interface ExecuteHyperliquidParams {
   signer: Address;
   sign: PerpSignFunction;
   testnet?: boolean;
+  /** Force the size in coin units (for closing a known position). Overrides sizeUsd math. */
+  coinQty?: number;
+  /** true = only reduce an existing position (close). */
+  reduceOnly?: boolean;
 }
 
 export interface ExecuteHyperliquidResult {
@@ -150,7 +154,9 @@ export async function executeHyperliquidPerp(
     market: symbol,
     symbol,
     isBuy: params.isBuy,
-    sizeUsd: params.sizeUsd,
+    sizeUsd: params.coinQty && params.coinQty > 0 ? params.coinQty * price : params.sizeUsd,
+    sizePerp: params.coinQty && params.coinQty > 0 ? BigInt(Math.round(params.coinQty * 100_000_000)) : undefined,
+    reduceOnly: params.reduceOnly ?? false,
     leverage: params.leverage ?? 1,
     price: BigInt(Math.round(price * 1_000_000)), // micro-units
     signer: params.signer,
@@ -173,3 +179,121 @@ export async function executeHyperliquidPerp(
 
 /** Which venues the live layer can actually route/submit for right now. */
 export const LIVE_EXECUTABLE_VENUES = new Set(["hyperliquid", "Hyperliquid"]);
+
+/** A parsed Hyperliquid position as shown to the user. */
+export interface HlPosition {
+  coin: string;
+  /** Coin quantity; positive = long, negative = short. */
+  size: number;
+  entryPx: number;
+  notional: number;
+  unrealizedPnl: number;
+  leverage: number;
+}
+
+/** The user's Hyperliquid account snapshot. */
+export interface HlAccount {
+  accountValue: number;
+  totalMarginUsed: number;
+  withdrawable: number;
+  positions: HlPosition[];
+}
+
+interface RawPosition {
+  position?: {
+    coin?: string;
+    szi?: string;
+    entryPx?: string;
+    positionValue?: string;
+    unrealizedPnl?: string;
+    notional?: string;
+    leverage?: { value?: number | string };
+  };
+}
+
+function num(v: unknown): number {
+  const n = typeof v === "number" ? v : parseFloat(String(v ?? ""));
+  return Number.isFinite(n) ? n : 0;
+}
+
+function parseClearinghouseState(data: {
+  clearinghouseState?: {
+    marginSummary?: Record<string, number>;
+    withdrawable?: string;
+    assetPositions?: RawPosition[];
+  };
+}): HlAccount {
+  const ch = data?.clearinghouseState ?? {};
+  const positions = (ch.assetPositions ?? [])
+    .map((ap) => ap.position)
+    .filter((p): p is NonNullable<typeof p> => !!p)
+    .map((p) => ({
+      coin: p.coin ?? "",
+      size: num(p.szi),
+      entryPx: num(p.entryPx),
+      notional: num(p.notional ?? p.positionValue),
+      unrealizedPnl: num(p.unrealizedPnl),
+      leverage: num(p.leverage?.value ?? 1),
+    }))
+    .filter((p) => Math.abs(p.size) > 0.00000001);
+  const totalMargin = num(ch.marginSummary?.totalMarginUsed);
+  return {
+    accountValue: num(ch.marginSummary?.accountValue),
+    totalMarginUsed: totalMargin,
+    withdrawable: num(ch.withdrawable),
+    positions,
+  };
+}
+
+/** Fetch a wallet's Hyperliquid account snapshot (positions, margin, pnl). Read-only. */
+export async function fetchClearinghouseState(
+  address: string,
+  env: HyperliquidEnv,
+): Promise<HlAccount> {
+  const res = await fetch(env.infoUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "clearinghouseState", user: address }),
+  });
+  if (!res.ok) throw new Error(`Hyperliquid clearinghouseState failed: ${res.status}`);
+  const data = (await res.json()) as Parameters<typeof parseClearinghouseState>[0];
+  return parseClearinghouseState(data);
+}
+
+export interface HlOpenOrder {
+  coin: string;
+  side: string;
+  size: number;
+  limitPx: number;
+  reduceOnly: boolean;
+  oid: number;
+}
+
+/** Fetch a wallet's open orders on the venue. Read-only. */
+export async function fetchOpenOrders(
+  address: string,
+  env: HyperliquidEnv,
+): Promise<HlOpenOrder[]> {
+  const res = await fetch(env.infoUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "openOrders", user: address }),
+  });
+  if (!res.ok) return [];
+  const data = (await res.json()) as Array<{
+    coin?: string;
+    side?: string;
+    sz?: string;
+    limitPx?: string;
+    reduceOnly?: boolean;
+    oid?: number;
+  }>;
+  return data.map((o) => ({
+    coin: o.coin ?? "",
+    side: o.side ?? "",
+    size: num(o.sz),
+    limitPx: num(o.limitPx),
+    reduceOnly: !!o.reduceOnly,
+    oid: o.oid ?? 0,
+  }));
+}

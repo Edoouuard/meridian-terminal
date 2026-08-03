@@ -20,6 +20,8 @@ export interface UseHyperliquidResult extends HlState {
     sizeUsd: number;
     leverage?: number;
     testnet?: boolean;
+    coinQty?: number;
+    reduceOnly?: boolean;
   }) => Promise<void>;
   reset: () => void;
 }
@@ -35,7 +37,15 @@ export function useHyperliquid(): UseHyperliquidResult {
   const [state, setState] = useState<HlState>({ status: "idle" });
 
   const execute = useCallback(
-    async (p: { symbol: string; isBuy: boolean; sizeUsd: number; leverage?: number; testnet?: boolean }) => {
+    async (p: {
+      symbol: string;
+      isBuy: boolean;
+      sizeUsd: number;
+      leverage?: number;
+      testnet?: boolean;
+      coinQty?: number;
+      reduceOnly?: boolean;
+    }) => {
       if (!isConnected || !address) {
         setState({ status: "error", error: "wallet not connected" });
         return;
@@ -61,6 +71,8 @@ export function useHyperliquid(): UseHyperliquidResult {
           signer: address,
           sign,
           testnet: p.testnet,
+          coinQty: p.coinQty,
+          reduceOnly: p.reduceOnly,
         };
         const result = await executeHyperliquidPerp(params);
         setState({ status: result.ok ? "confirmed" : "error", result, error: result.error });
