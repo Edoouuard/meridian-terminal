@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   HEALTH_FACTOR,
   NET_DELTA_ETH,
@@ -7,6 +8,36 @@ import {
   fmtUsd,
 } from "@/lib/data";
 import { LivePortfolio } from "@/hooks/useLivePortfolio";
+
+/**
+ * A self-contained mock portfolio used by the dev-only "Simulate a portfolio"
+ * toggle. It mirrors what a real connected wallet might hold — spot ETH +
+ * staking exposure and an Aave debt position — and exercises the same
+ * dynamic risk logic (buildLiveSuggestions) as real data.
+ */
+const SIMULATED_PORTFOLIO: LivePortfolio = {
+  isConnected: true,
+  isLoading: false,
+  assets: [
+    { symbol: "ETH", venue: "Wallet", chain: "Ethereum", balance: 1.0, usd: 4180 },
+    { symbol: "stETH", venue: "Lido", chain: "Ethereum", balance: 4.0, usd: 16720 },
+    { symbol: "wstETH", venue: "Lido", chain: "Ethereum", balance: 1.0, usd: 4300 },
+    { symbol: "WETH", venue: "Wallet", chain: "Ethereum", balance: 0.5, usd: 2090 },
+    { symbol: "USDC", venue: "Wallet", chain: "Ethereum", balance: 12000, usd: 12000 },
+  ],
+  assetsUsd: 39290,
+  aavePositions: [
+    { chain: "Ethereum", collateralUsd: 20000, debtUsd: 8000, availableToBorrowUsd: 5200, ltvPct: 38.4, healthFactor: 1.32 },
+  ],
+  aaveCollateralUsd: 20000,
+  aaveDebtUsd: 8000,
+  riskAave: { chain: "Ethereum", collateralUsd: 20000, debtUsd: 8000, availableToBorrowUsd: 5200, ltvPct: 38.4, healthFactor: 1.32 },
+  healthFactor: 1.32,
+  netUsd: 51290,
+  netDeltaEth: 6.53,
+  ethPrice: 4180,
+  stakingConcentrationPct: 53.5,
+};
 
 type Status = "good" | "warning" | "serious";
 
@@ -243,11 +274,15 @@ function SuggestionBar({ suggestion }: { suggestion: RiskSuggestion }) {
 }
 
 export function RiskPanel({ live, isConnected }: { live?: LivePortfolio; isConnected: boolean }) {
-  const isLive = isConnected;
-  const healthFactorValue = isLive ? (live?.riskAave?.healthFactor ?? null) : HEALTH_FACTOR;
-  const netDelta = isLive && live?.netDeltaEth != null ? live.netDeltaEth : NET_DELTA_ETH;
-  const stakingConcentration = isLive && live?.stakingConcentrationPct != null ? live.stakingConcentrationPct : STAKING_CONCENTRATION_PCT;
-  const suggestions = isLive && live ? buildLiveSuggestions(live) : RISK_SUGGESTIONS;
+  const [simulating, setSimulating] = useState(false);
+  const effLive = simulating ? SIMULATED_PORTFOLIO : live;
+  const isLive = simulating || isConnected;
+
+  const healthFactorValue = isLive ? (effLive?.riskAave?.healthFactor ?? null) : HEALTH_FACTOR;
+  const netDelta = isLive && effLive?.netDeltaEth != null ? effLive.netDeltaEth : NET_DELTA_ETH;
+  const stakingConcentration =
+    isLive && effLive?.stakingConcentrationPct != null ? effLive.stakingConcentrationPct : STAKING_CONCENTRATION_PCT;
+  const suggestions = isLive && effLive ? buildLiveSuggestions(effLive) : RISK_SUGGESTIONS;
 
   return (
     <>
@@ -259,13 +294,21 @@ export function RiskPanel({ live, isConnected }: { live?: LivePortfolio; isConne
         </span>
       </div>
 
+      {!isConnected && (
+        <div style={{ marginTop: "var(--space-2)" }}>
+          <button className="btn btn-secondary" style={{ fontSize: 11 }} onClick={() => setSimulating((s) => !s)}>
+            {simulating ? "Use demo figures" : "Simulate a portfolio"}
+          </button>
+        </div>
+      )}
+
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", marginTop: "var(--space-2)" }}>
-        <HealthFactorGauge value={healthFactorValue} isLive={isLive} chainLabel={live?.riskAave?.chain} />
-        {isLive && live?.riskAave && healthFactorValue !== null && (
+        <HealthFactorGauge value={healthFactorValue} isLive={isLive} chainLabel={effLive?.riskAave?.chain} />
+        {isLive && effLive?.riskAave && healthFactorValue !== null && (
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
             <span className="text-muted">Current LTV · Available to borrow</span>
             <span style={{ fontVariantNumeric: "tabular-nums" }}>
-              {live.riskAave.ltvPct.toFixed(1)}% · {fmtUsd(live.riskAave.availableToBorrowUsd)}
+              {effLive.riskAave.ltvPct.toFixed(1)}% · {fmtUsd(effLive.riskAave.availableToBorrowUsd)}
             </span>
           </div>
         )}
@@ -278,7 +321,7 @@ export function RiskPanel({ live, isConnected }: { live?: LivePortfolio; isConne
               stakingConcentration,
             )}% in Liquid Staking).`
           : "Example figures. Connect a wallet to compute your real Aave health factor, net ETH delta, and staking concentration."}
-        {" "}
+        {simulating && " Simulated portfolio shown — connect a wallet for your real numbers."}{" "}
         Perps on Hyperliquid/Extended {"aren't"} wired up yet, so perp delta is not included here.
       </p>
 
