@@ -1,5 +1,12 @@
-import { HEALTH_FACTOR, NET_DELTA_ETH, RiskSuggestion, RISK_SUGGESTIONS, fmtUsd } from "@/lib/data";
-import { LiveAavePosition } from "@/hooks/useLivePortfolio";
+import {
+  HEALTH_FACTOR,
+  NET_DELTA_ETH,
+  RiskSuggestion,
+  RISK_SUGGESTIONS,
+  STAKING_CONCENTRATION_PCT,
+  fmtUsd,
+} from "@/lib/data";
+import { LivePortfolio } from "@/hooks/useLivePortfolio";
 
 type Status = "good" | "warning" | "serious";
 
@@ -29,6 +36,82 @@ function formatValue(kind: RiskSuggestion["kind"], value: number): string {
   if (kind === "healthFactor") return value.toFixed(2);
   if (kind === "delta") return `${value >= 0 ? "+" : ""}${value.toFixed(2)} ETH`;
   return `${value}%`;
+}
+
+/** Round a dollar amount to a clean, human-parseable figure (nearest $50). */
+function roundUsd(n: number): number {
+  return Math.round(n / 50) * 50;
+}
+
+/**
+ * Build the three risk suggestions from the live portfolio (when a wallet is
+ * connected), instead of the static demo figures in data.ts. Any metric we
+ * can't compute (e.g. no Aave debt, already flat delta) is simply omitted.
+ */
+function buildLiveSuggestions(live: LivePortfolio): RiskSuggestion[] {
+  const out: RiskSuggestion[] = [];
+
+  // 1) Aave health factor — size a repay that lifts HF toward a target.
+  const hf = live.riskAave?.healthFactor;
+  const debt = live.riskAave?.debtUsd ?? 0;
+  if (hf != null && hf < 1.95 && debt > 0) {
+    const target = 1.8;
+    // HF = (collateral * liqThreshold) / debt  ⇒  repay R → HF' = HF * debt / (debt - R)
+    const repay = debt * (1 - hf / target);
+    if (repay > 50) {
+      out.push({
+        kind: "healthFactor",
+        text: `Repaying ${fmtUsd(roundUsd(repay))} on Aave brings your health factor from ${hf.toFixed(
+          2,
+        )} to about ${target.toFixed(2)}.`,
+        before: hf,
+        after: target,
+        max: 2.5,
+      });
+    }
+  }
+
+  // 2) Net ETH delta — size a perp hedge to flatten the tracked spot book.
+  const d = live.netDeltaEth;
+  if (d != null && Math.abs(d) >= 0.15 && live.ethPrice && live.ethPrice > 0) {
+    const shortUsd = roundUsd(Math.abs(d) * live.ethPrice);
+    const side = d > 0 ? "long" : "short";
+    const hedge = d > 0 ? "Shorting" : "Buying";
+    if (shortUsd > 100) {
+      out.push({
+        kind: "delta",
+        text: `Your tracked spot holdings are ${side} ${Math.abs(d).toFixed(
+          2,
+        )} ETH of net delta. ${hedge} ${fmtUsd(shortUsd)} on Hyperliquid brings it back near flat.`,
+        before: Math.abs(d),
+        after: 0.02,
+        max: 1.0,
+      });
+    }
+  }
+
+  // 3) Staking concentration — size a move out of Lido to hit a target share.
+  const c = live.stakingConcentrationPct;
+  if (c != null && c >= 20 && c <= 97 && live.netUsd > 0) {
+    const target = 30;
+    const amount = (live.netUsd * (c - target)) / 100;
+    if (amount > 1000) {
+      const to = c > target ? target : Math.min(40, c + 10);
+      const directed = c > target ? "Moving" : "Adding";
+      const verb = c > target ? "cuts" : "lifts";
+      out.push({
+        kind: "concentration",
+        text: `${c.toFixed(0)}% of your portfolio sits in liquid staking/restaking (stETH + wstETH) via Lido. ${directed} ${fmtUsd(
+          roundUsd(amount),
+        )} into PT weETH ${verb} Lido concentration to ~${to.toFixed(0)}% while locking a fixed yield.`,
+        before: c,
+        after: to,
+        max: 100,
+      });
+    }
+  }
+
+  return out;
 }
 
 function HealthFactorGauge({ value, isLive, chainLabel }: { value: number | null; isLive: boolean; chainLabel?: string }) {
@@ -86,19 +169,20 @@ function HealthFactorGauge({ value, isLive, chainLabel }: { value: number | null
   );
 }
 
-function NetDeltaBar() {
+function NetDeltaBar({ value, isLive }: { value: number; isLive: boolean }) {
   const max = 1.5;
-  const status = deltaStatus(Math.abs(NET_DELTA_ETH));
-  const halfPct = Math.min(50, (Math.abs(NET_DELTA_ETH) / max) * 50);
-  const isPositive = NET_DELTA_ETH >= 0;
+  const label = isLive ? "Net spot ETH delta" : "Net ETH delta";
+  const status = deltaStatus(Math.abs(value));
+  const halfPct = Math.min(50, (Math.abs(value) / max) * 50);
+  const isPositive = value >= 0;
 
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
-        <span className="text-muted">Net ETH delta</span>
+        <span className="text-muted">{label}</span>
         <span style={{ fontVariantNumeric: "tabular-nums", color: statusColor(status), fontWeight: 600 }}>
           {isPositive ? "+" : ""}
-          {NET_DELTA_ETH.toFixed(2)} ETH
+          {value.toFixed(2)} ETH
         </span>
       </div>
       <div style={{ position: "relative", height: 8, borderRadius: 4, background: "var(--color-neutral-200)", overflow: "hidden" }}>
@@ -158,9 +242,12 @@ function SuggestionBar({ suggestion }: { suggestion: RiskSuggestion }) {
   );
 }
 
-export function RiskPanel({ liveAave, isConnected }: { liveAave?: LiveAavePosition | null; isConnected: boolean }) {
+export function RiskPanel({ live, isConnected }: { live?: LivePortfolio; isConnected: boolean }) {
   const isLive = isConnected;
-  const healthFactorValue = isLive ? (liveAave?.healthFactor ?? null) : HEALTH_FACTOR;
+  const healthFactorValue = isLive ? (live?.riskAave?.healthFactor ?? null) : HEALTH_FACTOR;
+  const netDelta = isLive && live?.netDeltaEth != null ? live.netDeltaEth : NET_DELTA_ETH;
+  const stakingConcentration = isLive && live?.stakingConcentrationPct != null ? live.stakingConcentrationPct : STAKING_CONCENTRATION_PCT;
+  const suggestions = isLive && live ? buildLiveSuggestions(live) : RISK_SUGGESTIONS;
 
   return (
     <>
@@ -168,34 +255,42 @@ export function RiskPanel({ liveAave, isConnected }: { liveAave?: LiveAavePositi
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <h6 style={{ color: "var(--color-accent)", margin: 0 }}>Risk</h6>
         <span className="text-muted" style={{ fontSize: 11 }}>
-          {RISK_SUGGESTIONS.length} optimizations
+          {suggestions.length} optimizations
         </span>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", marginTop: "var(--space-2)" }}>
-        <HealthFactorGauge value={healthFactorValue} isLive={isLive} chainLabel={liveAave?.chain} />
-        {isLive && liveAave && healthFactorValue !== null && (
+        <HealthFactorGauge value={healthFactorValue} isLive={isLive} chainLabel={live?.riskAave?.chain} />
+        {isLive && live?.riskAave && healthFactorValue !== null && (
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
             <span className="text-muted">Current LTV · Available to borrow</span>
             <span style={{ fontVariantNumeric: "tabular-nums" }}>
-              {liveAave.ltvPct.toFixed(1)}% · {fmtUsd(liveAave.availableToBorrowUsd)}
+              {live.riskAave.ltvPct.toFixed(1)}% · {fmtUsd(live.riskAave.availableToBorrowUsd)}
             </span>
           </div>
         )}
-        <NetDeltaBar />
+        <NetDeltaBar value={netDelta} isLive={isLive} />
       </div>
 
       <p style={{ fontSize: 10, margin: "var(--space-2) 0 0" }} className="text-muted">
         {isLive
-          ? "Health factor reads live from your Aave v3 position."
-          : "Example figures. Connect a wallet to see your real Aave health factor."}{" "}
-        Net delta and the suggestions below are illustrative until more protocols are connected.
+          ? `Health factor reads live from your Aave v3 position. Net ETH delta and staking concentration are computed from your tracked spot holdings (${Math.round(
+              stakingConcentration,
+            )}% in Liquid Staking).`
+          : "Example figures. Connect a wallet to compute your real Aave health factor, net ETH delta, and staking concentration."}
+        {" "}
+        Perps on Hyperliquid/Extended {"aren't"} wired up yet, so perp delta is not included here.
       </p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", marginTop: "var(--space-3)" }}>
-        {RISK_SUGGESTIONS.map((s, i) => (
+        {suggestions.map((s, i) => (
           <SuggestionBar key={i} suggestion={s} />
         ))}
+        {suggestions.length === 0 && (
+          <p style={{ fontSize: 12, margin: 0 }} className="text-muted">
+            Your book looks healthy — no risk optimizations to suggest right now.
+          </p>
+        )}
       </div>
     </>
   );

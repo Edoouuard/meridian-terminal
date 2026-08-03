@@ -190,7 +190,7 @@ export default function TerminalApp() {
             )}
           </div>
 
-          <RiskPanel liveAave={isConnected ? live.riskAave : undefined} isConnected={isConnected} />
+          <RiskPanel live={live} isConnected={isConnected} />
         </div>
 
         {/* Trade column */}
