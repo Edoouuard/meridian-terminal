@@ -257,7 +257,7 @@ a:hover { color: var(--color-accent-700); }
 /* — rupture hero — */
 .rupture-container {
   position: relative;
-  height: 230vh;
+  height: 190vh;
 }
 .rupture-sticky {
   position: sticky;
@@ -272,17 +272,52 @@ a:hover { color: var(--color-accent-700); }
 .rupture-shatter {
   position: absolute;
   inset: 0;
+  transform-origin: center;
+  animation: hero-kenburns 26s ease-in-out infinite alternate;
+}
+@keyframes hero-kenburns {
+  from { transform: scale(1); }
+  to { transform: scale(1.045); }
 }
 .shard {
   position: absolute;
   background-repeat: no-repeat;
-  background-size: 400% 300%;
-  background-image: var(--hero-image);
-  background-position: var(--bg-pos);
+  /* background-image/size/position are set inline per shard (see RuptureHero.tsx) so the
+     photo is cropped to cover its window instead of being stretched to fit it. */
   transform: translate(calc(var(--progress, 0) * var(--dx)), calc(var(--progress, 0) * var(--dy)))
     rotate(calc(var(--progress, 0) * var(--rot)));
-  opacity: calc(1 - var(--progress, 0) * 1.15);
+  opacity: calc(1 - var(--progress, 0));
   will-change: transform, opacity;
+}
+.rupture-glow-fade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: calc(1 - var(--progress, 0) * 1.1);
+}
+.rupture-glow {
+  position: absolute;
+  left: 23%;
+  top: 40%;
+  width: 160px;
+  height: 160px;
+  margin-left: -80px;
+  margin-top: -80px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 196, 110, 0.55), transparent 70%);
+  mix-blend-mode: screen;
+  animation: hero-lamp-glow 3.6s ease-in-out infinite;
+}
+@keyframes hero-lamp-glow {
+  0%, 100% { opacity: 0.45; transform: scale(0.9); }
+  50% { opacity: 0.85; transform: scale(1.08); }
+}
+.rupture-scrim {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 70% 55% at 50% 45%, rgba(8, 8, 10, 0.6), rgba(8, 8, 10, 0.24) 65%, rgba(8, 8, 10, 0.4));
+  opacity: calc(1 - var(--progress, 0) * 0.95);
+  pointer-events: none;
 }
 .rupture-content {
   position: relative;
@@ -290,8 +325,37 @@ a:hover { color: var(--color-accent-700); }
   text-align: center;
   max-width: 760px;
   padding: 0 var(--space-4);
-  opacity: calc(1 - var(--progress, 0) * 3.2);
-  transform: translateY(calc(var(--progress, 0) * -60px));
+  opacity: calc(1 - var(--progress, 0) * 1.6);
+  transform: translateY(calc(var(--progress, 0) * -50px));
+}
+/* Text sits over a dark photo now, not the light page background, so it needs its own palette. */
+.rupture-content .hero-title,
+.rupture-content .hero-sub {
+  color: #f5ede0;
+}
+.rupture-content .hero-sub {
+  opacity: 0.85;
+}
+.rupture-content .card-kicker {
+  color: #e8c079;
+}
+.rupture-content .scroll-cue {
+  color: #e8c079;
+}
+.rupture-content .input {
+  background: rgba(20, 16, 12, 0.35);
+  border-color: rgba(245, 237, 224, 0.35);
+  color: #f5ede0;
+}
+.rupture-content .input::placeholder {
+  color: rgba(245, 237, 224, 0.55);
+}
+.rupture-content .btn-primary {
+  color: #e8c079;
+  border-color: #e8c079;
+}
+.rupture-content .btn-primary:hover {
+  background: rgba(232, 192, 121, 0.15);
 }
 
 /* — waitlist form — */
@@ -313,9 +377,11 @@ a:hover { color: var(--color-accent-700); }
   .reveal { transition: none; opacity: 1; transform: none; }
   .scroll-cue { animation: none; }
   .rupture-container { height: 100vh; }
+  .rupture-shatter { animation: none; }
+  .rupture-glow { animation: none; }
   .shard { display: none; }
   .rupture-content { opacity: 1; transform: none; }
-  .rupture-sticky { background-image: var(--hero-image); background-size: cover; background-position: center; }
+  .rupture-sticky { background-image: url("/hero/terminal-night.webp"); background-size: cover; background-position: center; }
 }
 
 @media (max-width: 760px) {
