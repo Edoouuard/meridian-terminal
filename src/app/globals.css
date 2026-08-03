@@ -254,12 +254,12 @@ a:hover { color: var(--color-accent-700); }
   margin-top: var(--space-8);
 }
 
-/* — rupture hero — */
-.rupture-container {
+/* — approach hero: scroll dollies toward the building's door, which opens on signup — */
+.approach-container {
   position: relative;
   height: 190vh;
 }
-.rupture-sticky {
+.approach-sticky {
   position: sticky;
   top: 0;
   height: 100vh;
@@ -269,33 +269,29 @@ a:hover { color: var(--color-accent-700); }
   justify-content: center;
   background: var(--color-bg);
 }
-.rupture-shatter {
+.approach-zoom {
   position: absolute;
   inset: 0;
-  transform-origin: center;
-  animation: hero-kenburns 26s ease-in-out infinite alternate;
+  transform: scale(calc(1 + var(--progress, 0) * 1.8));
+  will-change: transform;
 }
-@keyframes hero-kenburns {
-  from { transform: scale(1); }
-  to { transform: scale(1.045); }
-}
-.shard {
+.approach-image {
   position: absolute;
+  inset: 0;
   background-repeat: no-repeat;
-  /* background-image/size/position are set inline per shard (see RuptureHero.tsx) so the
-     photo is cropped to cover its window instead of being stretched to fit it. */
-  transform: translate(calc(var(--progress, 0) * var(--dx)), calc(var(--progress, 0) * var(--dy)))
-    rotate(calc(var(--progress, 0) * var(--rot)));
-  opacity: calc(1 - var(--progress, 0));
-  will-change: transform, opacity;
+  animation: hero-breathe 7s ease-in-out infinite alternate;
 }
-.rupture-glow-fade {
+@keyframes hero-breathe {
+  from { filter: brightness(1); }
+  to { filter: brightness(1.07); }
+}
+.approach-glow-fade {
   position: absolute;
   inset: 0;
   pointer-events: none;
   opacity: calc(1 - var(--progress, 0) * 1.1);
 }
-.rupture-glow {
+.approach-glow {
   position: absolute;
   left: 23%;
   top: 40%;
@@ -312,14 +308,51 @@ a:hover { color: var(--color-accent-700); }
   0%, 100% { opacity: 0.45; transform: scale(0.9); }
   50% { opacity: 0.85; transform: scale(1.08); }
 }
-.rupture-scrim {
+.approach-door {
+  position: absolute;
+  overflow: hidden;
+  border-radius: 8% 8% 0 0;
+  box-shadow: 0 0 0 2px rgba(20, 14, 8, 0.55);
+}
+.approach-door-panel {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  background: linear-gradient(180deg, #3a2712, #201304 85%);
+  transition: transform 1.4s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.approach-door-panel::after {
+  content: "";
+  position: absolute;
+  inset: 8% 14%;
+  border: 1px solid rgba(232, 192, 121, 0.35);
+}
+.approach-door-panel--left { left: 0; transform: translateX(0); }
+.approach-door-panel--right { right: 0; transform: translateX(0); }
+.approach-door.is-open .approach-door-panel--left { transform: translateX(-100%); }
+.approach-door.is-open .approach-door-panel--right { transform: translateX(100%); }
+.approach-door-glow {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle, rgba(255, 224, 160, 0.95), rgba(255, 196, 110, 0.4) 55%, transparent 75%);
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 1s ease-out 0.3s, transform 1.4s ease-out 0.3s;
+  pointer-events: none;
+}
+.approach-door.is-open .approach-door-glow {
+  opacity: 1;
+  transform: scale(2.4);
+}
+.approach-scrim {
   position: absolute;
   inset: 0;
   background: radial-gradient(ellipse 70% 55% at 50% 45%, rgba(8, 8, 10, 0.6), rgba(8, 8, 10, 0.24) 65%, rgba(8, 8, 10, 0.4));
   opacity: calc(1 - var(--progress, 0) * 0.95);
   pointer-events: none;
 }
-.rupture-content {
+.approach-content {
   position: relative;
   z-index: 2;
   text-align: center;
@@ -328,34 +361,42 @@ a:hover { color: var(--color-accent-700); }
   opacity: calc(1 - var(--progress, 0) * 1.6);
   transform: translateY(calc(var(--progress, 0) * -50px));
 }
+.approach-sticky--open .approach-content {
+  opacity: 1;
+  transform: none;
+  transition: opacity 0.8s ease-out, transform 0.8s ease-out;
+}
 /* Text sits over a dark photo now, not the light page background, so it needs its own palette. */
-.rupture-content .hero-title,
-.rupture-content .hero-sub {
+.approach-content .hero-title,
+.approach-content .hero-sub {
   color: #f5ede0;
 }
-.rupture-content .hero-sub {
+.approach-content .hero-sub {
   opacity: 0.85;
 }
-.rupture-content .card-kicker {
+.approach-content .card-kicker {
   color: #e8c079;
 }
-.rupture-content .scroll-cue {
+.approach-content .scroll-cue {
   color: #e8c079;
 }
-.rupture-content .input {
+.approach-content .input {
   background: rgba(20, 16, 12, 0.35);
   border-color: rgba(245, 237, 224, 0.35);
   color: #f5ede0;
 }
-.rupture-content .input::placeholder {
+.approach-content .input::placeholder {
   color: rgba(245, 237, 224, 0.55);
 }
-.rupture-content .btn-primary {
+.approach-content .btn-primary {
   color: #e8c079;
   border-color: #e8c079;
 }
-.rupture-content .btn-primary:hover {
+.approach-content .btn-primary:hover {
   background: rgba(232, 192, 121, 0.15);
+}
+.approach-content .waitlist-success {
+  color: #f5ede0;
 }
 
 /* — waitlist form — */
@@ -376,12 +417,12 @@ a:hover { color: var(--color-accent-700); }
 @media (prefers-reduced-motion: reduce) {
   .reveal { transition: none; opacity: 1; transform: none; }
   .scroll-cue { animation: none; }
-  .rupture-container { height: 100vh; }
-  .rupture-shatter { animation: none; }
-  .rupture-glow { animation: none; }
-  .shard { display: none; }
-  .rupture-content { opacity: 1; transform: none; }
-  .rupture-sticky { background-image: url("/hero/terminal-night.webp"); background-size: cover; background-position: center; }
+  .approach-container { height: 100vh; }
+  .approach-zoom { transform: none; }
+  .approach-image { animation: none; }
+  .approach-glow { animation: none; }
+  .approach-content { opacity: 1; transform: none; }
+  .approach-sticky { background-image: url("/hero/terminal-night.webp"); background-size: cover; background-position: center; }
 }
 
 @media (max-width: 760px) {
