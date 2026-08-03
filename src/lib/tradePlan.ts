@@ -3,10 +3,11 @@
  *
  * parseThesis() is a lightweight, fully-offline parser (regex/lexer over a
  * keyword + amount + asset vocabulary). It turns a free-form conviction like
- * "short 5000 SOL on Hyperliquid" into a typed TradePlan with concrete legs,
- * which ThreadCard renders as dynamic order cards. It makes no network or LLM
- * calls and never throws: ambiguous or unparseable input degrades to a safe
- * default plan whose summary says so.
+ * "short 5000 SOL on Hyperliquid" or "ETH et HYPE me semblent sous-évalués"
+ * into a typed TradePlan with concrete legs, which ThreadCard renders as
+ * dynamic order cards. It makes no network or LLM calls and never throws:
+ * ambiguous or unparseable input degrades to a safe default plan whose summary
+ * says so.
  *
  * We augment ThreadItem (declared in data.ts) with an optional `plan` field via
  * declaration merging so this whole feature stays additive and data.ts is
@@ -52,7 +53,7 @@ export const DEFAULT_SIZES: Record<Exclude<TradeIntent, "unknown">, number> = {
   hedge: 13000,
 };
 
-/* Map a raw token back to its canonical symbol (longest-first matching). */
+/* Map a raw token back to its canonical symbol. */
 function canonAsset(token: string): string {
   const t = token.trim().toLowerCase().replace(/\s+/g, "");
   const map: Record<string, string> = {
@@ -71,7 +72,11 @@ function canonAsset(token: string): string {
   return map[t] ?? token.trim();
 }
 
-/* Recognised assets, longest token first so wstETH wins over ETH. */
+/*
+ * Recognised assets, longest token first so wstETH wins over ETH. Substantial
+ * overlap with the terminal's TOP_CRYPTOS ticker so conviction like "HYPE is
+ * cheap" resolves. \b word boundaries avoid matching tokens inside longer words.
+ */
 const ASSET_PATTERNS: Array<[RegExp, string]> = [
   [/\bwst\s?eth\b/i, "wstETH"],
   [/\bst\s?eth\b/i, "stETH"],
@@ -79,18 +84,39 @@ const ASSET_PATTERNS: Array<[RegExp, string]> = [
   [/\bw\s?btc\b/i, "WBTC"],
   [/\bs\s?usde\b/i, "sUSDe"],
   [/\bweth\b/i, "WETH"],
-  [/\busdc\b/i, "USDC"],
-  [/\busdt\b/i, "USDT"],
+  [/\$?usdc\b/i, "USDC"],
+  [/\$?usdt\b/i, "USDT"],
   [/\bbtc\b|\bbitcoin\b/i, "BTC"],
   [/\beth\b|\bether\b/i, "ETH"],
   [/\bsol\b|\bsolana\b/i, "SOL"],
+  [/\$?hype\b/i, "HYPE"],
+  [/\$?xrp\b/i, "XRP"],
+  [/\bdoge\b|\bdogecoin\b/i, "DOGE"],
+  [/\blink\b|\bchainlink\b/i, "LINK"],
+  [/\bavax\b|\bavalanche\b/i, "AVAX"],
+  [/\bsui\b/i, "SUI"],
+  [/\bdot\b/i, "DOT"],
+  [/\bada\b|\bcardano\b/i, "ADA"],
+  [/\bltc\b|\blitecoin\b/i, "LTC"],
+  [/\bbnb\b/i, "BNB"],
+  [/\bnear\b/i, "NEAR"],
+  [/\bapt\b/i, "APT"],
+  [/\buni\b|\buniswap\b/i, "UNI"],
+  [/\bpepe\b/i, "PEPE"],
+  [/\btrx\b|\btron\b/i, "TRX"],
+  [/\bton\b/i, "TON"],
+  [/\bshib\b|\bshiba\b/i, "SHIB"],
+  [/\bhbar\b|\bhedera\b/i, "HBAR"],
+  [/\bxlm\b|\bstellar\b/i, "XLM"],
 ];
 
-function parseAsset(text: string): string | undefined {
+/** Collect every distinct matched asset in pattern order. */
+function parseAssets(text: string): string[] {
+  const found: string[] = [];
   for (const [re, canon] of ASSET_PATTERNS) {
-    if (re.test(text)) return canon;
+    if (re.test(text) && !found.includes(canon)) found.push(canon);
   }
-  return undefined;
+  return found;
 }
 
 const SWAP_RE =
@@ -148,10 +174,19 @@ function parseProtocol(text: string): string | undefined {
   return undefined;
 }
 
+/*
+ * Direction is not only explicit long/short but also directional conviction:
+ * "ETH seems undervalued / sous-évalué" ⇒ long; "BNB is overvalued / surévalué"
+ * ⇒ short. French + English covered.
+ */
 function parseDirection(text: string): "long" | "short" | undefined {
   const t = text.toLowerCase();
-  const long = /\b(long|buy|bullish|outperform\w*|up|rally|rise)\b/.test(t);
-  const short = /\b(short|sell|bearish|underperform\w*|down|selloff)\b/.test(t);
+  const long = /(\b(long|buy|bullish|outperform\w*|rally|rise|accumulate|cheap|potential|upside|strong)\b|under[- ]?value\w*|sous[\s-]*[eé]valu[ée]?\w*|sous[\s-]*[eé]stim[ée]?\w*|[eé]valu[ée]?|pas cher|a du potentiel|va monte\w*|will (rally|rise|pop|outperform))/.test(
+    t,
+  );
+  const short = /(\b(short|sell|bearish|underperform\w*|selloff|expensive|weak)\b|over[- ]?value\w*|sur[\s-]*[eé]valu[ée]?\w*|trop cher|overpriced|va baiss\w*|will (fall|drop|dump)|a fini de monter)/.test(
+    t,
+  );
   if (short && !long) return "short";
   if (long) return "long";
   return undefined;
@@ -202,7 +237,8 @@ export function parseThesis(rawText: string): TradePlan {
   const text = (rawText || "").trim();
   const t = text.toLowerCase();
 
-  const asset = parseAsset(text);
+  const assets = parseAssets(text);
+  const base = assets[0] ?? "ETH";
   const amount = parseAmount(text);
   const protocol = parseProtocol(text);
   const direction = parseDirection(t);
@@ -210,7 +246,6 @@ export function parseThesis(rawText: string): TradePlan {
   const intent = resolveIntent(t, swap, protocol, direction);
 
   const size = amount ?? (intent !== "unknown" ? DEFAULT_SIZES[intent] : undefined);
-  const base = asset ?? "ETH";
   let legs: TradeLeg[] = [];
   let summary = "";
 
@@ -219,7 +254,9 @@ export function parseThesis(rawText: string): TradePlan {
       legs = [
         { side: "Buy", asset: `PT ${base}`, protocol: protocol ?? "Pendle", sizeUsd: size, note: "Fixed APY" },
       ];
-      summary = `Lock the current fixed rate on ${base} through a Pendle Principal Token (PT) for ${fmtUsd(size ?? 0)}, capturing the fixed vs variable spread before it compresses.`;
+      summary = `Lock the current fixed rate on ${base} through a Pendle Principal Token (PT) for ${fmtUsd(
+        size ?? 0,
+      )}, capturing the fixed vs variable spread before it compresses.`;
       break;
     }
     case "betaNeutral": {
@@ -232,14 +269,25 @@ export function parseThesis(rawText: string): TradePlan {
     }
     case "directional": {
       const dir = direction ?? "long";
-      legs = [
-        { side: dir === "long" ? "Long" : "Short", asset: `${base} PERP`, protocol: protocol ?? "Hyperliquid", sizeUsd: size, leverage: 4 },
-      ];
-      summary = `Open a ${dir} ${base} position on ${protocol ?? "Hyperliquid"} for ~${fmtUsd(size ?? 0)} notional.`;
+      const list = assets.length > 0 ? assets : ["ETH"];
+      const venue = protocol ?? "Hyperliquid";
+      legs = list.map((a) => ({
+        side: dir === "long" ? "Long" : "Short",
+        asset: `${a} PERP`,
+        protocol: venue,
+        sizeUsd: size,
+        leverage: 4,
+      }));
+      summary =
+        list.length > 1
+          ? `Open a ${dir} ${list.join(" and ")} position on ${venue}, ~${fmtUsd(
+              size ?? 0,
+            )} notional per leg (split across ${list.length} legs).`
+          : `Open a ${dir} ${list[0]} position on ${venue} for ~${fmtUsd(size ?? 0)} notional.`;
       break;
     }
     case "swap": {
-      const from = swap?.from ?? asset ?? "USDC";
+      const from = swap?.from ?? assets[0] ?? "USDC";
       const to = swap?.to ?? "stETH";
       legs = [{ side: "Swap", asset: `${from} → ${to}`, protocol: protocol ?? "Uniswap", sizeUsd: size }];
       summary = `Swap ~${fmtUsd(size ?? 0)} ${from} into ${to} via ${protocol ?? "Uniswap"} at minimal estimated slippage.`;
@@ -257,5 +305,5 @@ export function parseThesis(rawText: string): TradePlan {
     }
   }
 
-  return { intent, asset, direction, sizeUsd: size, protocol, legs, summary };
+  return { intent, asset: base, direction, sizeUsd: size, protocol, legs, summary };
 }
