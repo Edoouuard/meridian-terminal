@@ -107,7 +107,12 @@ export interface ExecuteHyperliquidParams {
   signer: Address;
   sign: PerpSignFunction;
   testnet?: boolean;
-  /** Force the size in coin units (for closing a known position). Overrides sizeUsd math. */
+  /**
+   * Explicit coin quantity in coin units (e.g. 0.2392 ETH). When supplied and
+   * positive it is used EXACTLY as the order's `sizePerp` (the actual fill), so
+   * the caller's quoted amount is authoritative rather than re-derived. Without
+   * it the layer derives the quantity from `sizeUsd` / the live mid price.
+   */
   coinQty?: number;
   /** true = only reduce an existing position (close). */
   reduceOnly?: boolean;
@@ -137,6 +142,33 @@ export async function executeHyperliquidPerp(
 
   const universe = await fetchUniverse(env);
   const assetIndex = assetIndexFromUniverse(universe, symbol);
+
+  // Safety: the execution amount must be validated positive BEFORE any build/sign.
+  // The caller's explicit coinQty is authoritative; otherwise sizeUsd must be > 0.
+  if (params.coinQty !== undefined && !(Number.isFinite(params.coinQty) && params.coinQty > 0)) {
+    return {
+      ok: false,
+      testnet,
+      symbol,
+      marketPrice: null,
+      order: null as unknown as PerpOrder,
+      error: `Refusing to execute: coin quantity for ${symbol} must be positive. No order was built or signed.`,
+    };
+  }
+  if (
+    params.coinQty === undefined &&
+    !(Number.isFinite(params.sizeUsd) && params.sizeUsd > 0)
+  ) {
+    return {
+      ok: false,
+      testnet,
+      symbol,
+      marketPrice: null,
+      order: null as unknown as PerpOrder,
+      error: `Refusing to execute: notional size for ${symbol} must be positive. No order was built or signed.`,
+    };
+  }
+
   const price = await fetchMidPrice(symbol, env);
   if (price === null) {
     return {

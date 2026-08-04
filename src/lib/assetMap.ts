@@ -2,17 +2,25 @@ import type { Address } from "viem";
 import type { Order } from "@/lib/execution";
 import type { TradeLeg } from "@/lib/tradePlan";
 import { TRACKED_TOKENS_BY_CHAIN } from "@/lib/onchain";
+import {
+  type PriceEntry,
+  resolvePriceFromList,
+  usdToTokenAmount,
+} from "@/lib/quote";
 
 /**
  * assetMap.ts — maps a parsed TradePlan leg to a concrete, wallet-executable
  * `Order` for `buildExecution` (the wagmi "hand"), and — just as important —
  * honestly reports which venues/sides are NOT wired for live execution yet.
  *
- * This is deliberately a thin, pure, offline layer:
+ * This is deliberately a thin, mostly-offline layer:
  *   - It resolves a leg's asset symbol to an ERC20 address + decimals via
  *     `TRACKED_TOKENS_BY_CHAIN` (the canonical per-chain asset list).
- *   - It maps the leg's USD notional to a human-unit amount string. A real
- *     quote engine is out of scope, so the rule is simple and documented below.
+ *   - It maps the leg's USD notional to an exact human-unit amount using the
+ *     quote layer (`src/lib/quote.ts`) and a caller-supplied live price list
+ *     when available. With a live price the amount is exact (stablecoins peg to
+ *     whole units; ETH-like assets divide by price); without one it falls back
+ *     to the documented size≈amount approximation.
  *   - For venues that cannot execute yet (Hyperliquid/Extended perps, Pendle PT,
  *     options, swaps, staking, bridges, Aave borrow), it returns
  *     `{ unsupported: <message> }` instead of ever pretending to succeed.
@@ -41,17 +49,27 @@ export function protocolLabel(protocol: string | undefined): string {
 }
 
 /**
- * Resolve a leg's USD notional into a human-unit amount string.
+ * Resolve a leg's USD notional into an exact human-unit amount string.
  *
- * SIMPLIFICATION (documented, out-of-scope to fix): a real quote engine does not
- * exist yet, so we treat the USD notional as the human token amount directly.
- * This is exact for 1:1 pegged stablecoins (USDC/USDT — $1 = 1 token) and a rough
- * placeholder for ETH-like assets until live pricing lands. When no size was
- * parsed we fall back to a small, demo-friendly default so the button still works.
+ * Now backed by the quote layer: when a live price is available for the asset we
+ * divide the notional by the price and format to the token's decimals (exact for
+ * 1:1 stablecoins, precise for ETH-like assets). When no price is available we
+ * keep the historical approximation (USD notional ≈ token amount). When no size
+ * was parsed we fall back to a small, demo-friendly default so the button works.
+ *
+ * @param prices optional live price list (symbol -> price); used to quote the asset.
  */
-export function humanAmountForLeg(leg: TradeLeg): string {
-  const size = leg.sizeUsd && leg.sizeUsd > 0 ? leg.sizeUsd : 100;
-  return String(Math.round(size));
+export function humanAmountForLeg(leg: TradeLeg, prices?: PriceEntry[]): string {
+  const symbol = bareSymbol(leg.asset);
+  const price = resolvePriceFromList(prices, symbol);
+  const decimals = tokenDecimalsFor(symbol);
+  return usdToTokenAmount(symbol, leg.sizeUsd, price, decimals).amount;
+}
+
+/** Decimals for a tracked token symbol on the default chain, or 18 when unknown. */
+function tokenDecimalsFor(symbol: string): number {
+  const token = findToken(symbol, DEFAULT_CHAIN_ID);
+  return token ? token.decimals : 18;
 }
 
 /** Find a tracked token by symbol on a given chain (case-insensitive). */
@@ -73,30 +91,46 @@ function bareSymbol(asset: string): string {
  * native L1 transfer), or `{ unsupported }` when the venue/side has no live
  * execution path yet. NEVER auto-executes — the caller decides when to sign.
  *
+ * Amounts are quoted exactly via `src/lib/quote.ts`: when `prices` carries a
+ * live price for the asset, the Order's amount is the precise base-unit bigint
+ * for the USD notional (stablecoins peg to whole units; ETH-like assets divide
+ * by price). When no price is available it falls back to the statistical
+ * size≈amount approximation, so the button still works offline.
+ *
  * @param leg     the parsed trade leg (side / asset / protocol / sizeUsd)
  * @param address optional recipient address, required only for native `eth`
  *                transfers (used as the `to` of the order).
+ * @param prices  optional live price list (symbol -> price) used to quote the
+ *                asset exactly. Pass the fetched list from `/api/prices`.
  */
 export function resolveOrderForLeg(
   leg: TradeLeg,
   address?: Address,
+  prices?: PriceEntry[],
 ): Order | { unsupported: string } {
   const protocol = (leg.protocol || "").toLowerCase().trim();
   const side = (leg.side || "").toLowerCase().trim();
   const chainId = DEFAULT_CHAIN_ID;
   const venue = protocolLabel(leg.protocol);
 
+  // Quote the leg's notional once: live price when available, else approximation.
+  const quoteFor = (symbol: string, decimals: number) =>
+    usdToTokenAmount(symbol, leg.sizeUsd, resolvePriceFromList(prices, symbol), decimals);
+
   // --- Native L1 transfer (executable) -------------------------------------
   if (protocol === "eth" || side === "transfer") {
     if (!address) {
       return { unsupported: "Native transfer needs a recipient address; nothing wired here yet." };
     }
+    const symbol = bareSymbol(leg.asset) || "ETH";
+    const quote = quoteFor(symbol, 18);
     return {
       type: "transfer",
       protocol: "eth",
-      symbol: bareSymbol(leg.asset) || "ETH",
-      amount: humanAmountForLeg(leg),
+      symbol,
+      amount: quote.amountBase,
       chainId,
+      decimals: 18,
       to: address,
     };
   }
@@ -115,12 +149,13 @@ export function resolveOrderForLeg(
         unsupported: `Aave ${orderType} of "${symbol}" is not wired yet: "${symbol}" has no tracked ${chainId === 1 ? "mainnet" : "chain " + chainId} address.`,
       };
     }
+    const quote = quoteFor(token.symbol, token.decimals);
     return {
       type: orderType,
       protocol: "aave",
       symbol: token.symbol,
       token: token.address,
-      amount: humanAmountForLeg(leg),
+      amount: quote.amountBase,
       chainId,
       decimals: token.decimals,
     };

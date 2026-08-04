@@ -116,3 +116,17 @@ export const AAVE_POOL_ABI = [
 
 /** Aave returns this sentinel (uint256 max) for healthFactor when the user has no debt. */
 export const AAVE_NO_DEBT_HEALTH_FACTOR = BigInt(2) ** BigInt(256) - BigInt(1);
+
+/**
+ * Perp coins on Hyperliquid whose signed position size is treated as ETH delta
+ * for the cross-venue net-delta / flatten metrics. Mirrors riskModel's
+ * ETH_TRACKING_SYMBOLS, normalised to the uppercase, `-PERP`-stripped coin
+ * strings the Hyperliquid API returns (e.g. "ETH", "ETH-PERP", "wstETH").
+ */
+export const PERP_ETH_COIN_SET: ReadonlySet<string> = new Set(["ETH", "WETH", "STETH", "WSTETH"]);
+
+/** True if a Hyperliquid perp coin maps to ETH delta (long + / short - in coin units). */
+export function perpCoinIsEth(coin: string): boolean {
+  const base = (coin || "").toUpperCase().replace(/-PERP$/, "");
+  return PERP_ETH_COIN_SET.has(base);
+}

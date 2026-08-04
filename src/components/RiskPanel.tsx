@@ -41,6 +41,11 @@ const SIMULATED_PORTFOLIO: LivePortfolio = {
   healthFactor: 1.32,
   netUsd: 51290,
   netDeltaEth: 6.53,
+  perpNetDeltaEth: 0,
+  netDeltaEthTotal: 6.53,
+  perps: [],
+  perpNotionalUsd: 0,
+  perpUnrealizedPnl: 0,
   ethPrice: 4180,
   stakingConcentrationPct: 53.5,
 };
@@ -100,15 +105,16 @@ function buildLiveSuggestions(live: LivePortfolio): RiskSuggestion[] {
     });
   }
 
-  // 2) Net ETH delta — size a perp hedge to flatten the tracked spot book.
-  const deltaSug = suggestDeltaHedge(live.netDeltaEth, live.ethPrice);
-  if (deltaSug && !deltaSug.skip && deltaSug.shortUsd !== undefined && live.netDeltaEth !== null) {
-    const d = live.netDeltaEth;
+  // 2) Net ETH delta (cross-venue: spot + Hyperliquid perps) — size a hedge to flatten it.
+  const netDelta = live.netDeltaEthTotal ?? live.netDeltaEth ?? null;
+  const deltaSug = suggestDeltaHedge(netDelta, live.ethPrice);
+  if (deltaSug && !deltaSug.skip && deltaSug.shortUsd !== undefined && netDelta !== null) {
+    const d = netDelta;
     const side = deltaSug.direction === "short" ? "short" : "long";
     const hedge = deltaSug.direction === "short" ? "Buying" : "Shorting";
     out.push({
       kind: "delta",
-      text: `Your tracked spot holdings are ${side} ${Math.abs(d).toFixed(
+      text: `Your tracked spot + Hyperliquid perp book is ${side} ${Math.abs(d).toFixed(
         2,
       )} ETH of net delta. ${hedge} ${fmtUsd(deltaSug.shortUsd)} on Hyperliquid brings it back near flat.`,
       before: Math.abs(d),
@@ -196,7 +202,7 @@ function HealthFactorGauge({ value, isLive, chainLabel }: { value: number | null
 
 function NetDeltaBar({ value, isLive }: { value: number; isLive: boolean }) {
   const max = 1.5;
-  const label = isLive ? "Net spot ETH delta" : "Net ETH delta";
+  const label = isLive ? "Net ETH delta · spot + perps" : "Net ETH delta";
   const status = deltaStatus(Math.abs(value));
   const halfPct = Math.min(50, (Math.abs(value) / max) * 50);
   const isPositive = value >= 0;
@@ -273,7 +279,9 @@ export function RiskPanel({ live, isConnected }: { live?: LivePortfolio; isConne
   const isLive = simulating || isConnected;
 
   const healthFactorValue = isLive ? (effLive?.riskAave?.healthFactor ?? null) : HEALTH_FACTOR;
-  const netDelta = isLive && effLive?.netDeltaEth != null ? effLive.netDeltaEth : NET_DELTA_ETH;
+  const netDelta =
+    isLive ? (effLive?.netDeltaEthTotal ?? effLive?.netDeltaEth ?? null) : NET_DELTA_ETH;
+  const netDeltaNull = isLive && netDelta == null;
   const stakingConcentration =
     isLive && effLive?.stakingConcentrationPct != null ? effLive.stakingConcentrationPct : STAKING_CONCENTRATION_PCT;
   const suggestions = isLive && effLive ? buildLiveSuggestions(effLive) : RISK_SUGGESTIONS;
@@ -306,17 +314,51 @@ export function RiskPanel({ live, isConnected }: { live?: LivePortfolio; isConne
             </span>
           </div>
         )}
-        <NetDeltaBar value={netDelta} isLive={isLive} />
+        {netDeltaNull ? (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+              <span className="text-muted">Net ETH delta · spot + perps</span>
+              <span className="text-muted">—</span>
+            </div>
+            <p style={{ fontSize: 10, margin: 0 }} className="text-muted">
+              No ETH price could be derived from tracked holdings to size the net delta.
+            </p>
+          </div>
+        ) : (
+          <NetDeltaBar value={netDelta as number} isLive={isLive} />
+        )}
+
+        {isLive && effLive && effLive.perps.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+              <span className="text-muted">Perps (Hyperliquid)</span>
+              <span style={{ fontVariantNumeric: "tabular-nums" }}>{fmtUsd(effLive.perpNotionalUsd)}</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }} className="text-muted">
+              <span>
+                {effLive.perps.length} position{effLive.perps.length > 1 ? "s" : ""} · unrealized{" "}
+                {effLive.perpUnrealizedPnl >= 0 ? "+" : ""}
+                {fmtUsd(effLive.perpUnrealizedPnl)}
+              </span>
+              {effLive.perpNetDeltaEth != null && effLive.perpNetDeltaEth !== 0 && (
+                <span style={{ fontVariantNumeric: "tabular-nums" }}>
+                  ETH delta{" "}
+                  {effLive.perpNetDeltaEth >= 0 ? "+" : ""}
+                  {effLive.perpNetDeltaEth.toFixed(2)}
+                </span>
+              )}
+            </div>
+          </div>
+        )}
       </div>
 
       <p style={{ fontSize: 10, margin: "var(--space-2) 0 0" }} className="text-muted">
         {isLive
           ? `Health factor reads live from your Aave v3 position. Net ETH delta and staking concentration are computed from your tracked spot holdings (${Math.round(
               stakingConcentration,
-            )}% in Liquid Staking).`
+            )}% in Liquid Staking), with any open Hyperliquid perps folded into the delta.`
           : "Example figures. Connect a wallet to compute your real Aave health factor, net ETH delta, and staking concentration."}
-        {simulating && " Simulated portfolio shown — connect a wallet for your real numbers."}{" "}
-        Perps on Hyperliquid/Extended {"aren't"} wired up yet, so perp delta is not included here.
+        {simulating && " Simulated portfolio shown — connect a wallet for your real numbers."}
       </p>
 
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", marginTop: "var(--space-3)" }}>

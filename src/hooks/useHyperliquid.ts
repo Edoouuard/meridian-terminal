@@ -20,6 +20,11 @@ export interface UseHyperliquidResult extends HlState {
     sizeUsd: number;
     leverage?: number;
     testnet?: boolean;
+    /**
+     * Exact coin quantity (from the quote layer) to use for the fill. When
+     * provided and positive it is forwarded to the Hyperliquid layer verbatim,
+     * so the caller's quoted amount is the one actually submitted.
+     */
     coinQty?: number;
     reduceOnly?: boolean;
   }) => Promise<void>;

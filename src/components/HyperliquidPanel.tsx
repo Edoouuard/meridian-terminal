@@ -5,11 +5,11 @@ import { useAccount } from "wagmi";
 import { useHyperliquid } from "@/hooks/useHyperliquid";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { fmtUsd } from "@/lib/data";
+import { setSharedHlAccount, useSharedHlAccount } from "@/hooks/useLivePortfolio";
 import {
   fetchClearinghouseState,
   fetchOpenOrders,
   hyperliquidEnv,
-  type HlAccount,
   type HlOpenOrder,
 } from "@/lib/integrations/hyperliquid-live";
 
@@ -26,7 +26,7 @@ function fmtPx(n: number): string {
 export function HyperliquidPanel() {
   const { address, isConnected } = useAccount();
   const [env, setEnv] = useState<"testnet" | "mainnet">("testnet");
-  const [account, setAccount] = useState<HlAccount | null>(null);
+  const account = useSharedHlAccount();
   const [orders, setOrders] = useState<HlOpenOrder[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,7 +44,8 @@ export function HyperliquidPanel() {
         fetchClearinghouseState(address, e),
         fetchOpenOrders(address, e),
       ]);
-      setAccount(acc);
+      // Push into the shared store so the portfolio and this panel agree.
+      setSharedHlAccount(acc);
       setOrders(ord);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

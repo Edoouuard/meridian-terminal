@@ -1,4 +1,5 @@
 import { formatUnits } from "viem";
+import { useEffect, useSyncExternalStore } from "react";
 import { useAccount, useBalance, useReadContracts } from "wagmi";
 import { arbitrum, avalanche, base, mainnet, optimism, polygon } from "wagmi/chains";
 import {
@@ -9,7 +10,9 @@ import {
   ERC20_ABI,
   SUPPORTED_CHAINS,
   TRACKED_TOKENS_BY_CHAIN,
+  perpCoinIsEth,
 } from "@/lib/onchain";
+import { fetchClearinghouseState, hyperliquidEnv, type HlAccount } from "@/lib/integrations/hyperliquid-live";
 import { ethPriceFromAssets, netEthDelta, stakingConcentration } from "@/lib/riskModel";
 import { useLivePrices } from "./useLivePrices";
 
@@ -30,6 +33,15 @@ export interface LiveAavePosition {
   healthFactor: number | null;
 }
 
+/** A live Hyperliquid perp position, distilled for the portfolio / risk views (read-only). */
+export interface LivePerp {
+  coin: string;
+  /** Signed coin quantity; positive = long, negative = short. */
+  size: number;
+  notional: number;
+  unrealizedPnl: number;
+}
+
 export interface LivePortfolio {
   isConnected: boolean;
   isLoading: boolean;
@@ -45,15 +57,78 @@ export interface LivePortfolio {
   netUsd: number;
   /** Net directional spot exposure to ETH (tracked ETH/WETH/stETH/wstETH holdings), in ETH units. */
   netDeltaEth: number | null;
+  /** Net Hyperliquid perp exposure to ETH (ETH/WETH/stETH/wstETH perp sizes, signed), in ETH units. */
+  perpNetDeltaEth: number | null;
+  /** Net directional exposure to ETH across venues (spot + Hyperliquid perps), in ETH units. */
+  netDeltaEthTotal: number | null;
+  /** Open Hyperliquid perp positions (read-only; empty when none / HL read fails). */
+  perps: LivePerp[];
+  /** Sum of absolute perp notional (USD exposure held on Hyperliquid). */
+  perpNotionalUsd: number;
+  /** Sum of unrealized PnL across open perp positions. */
+  perpUnrealizedPnl: number;
   /** Approximate ETH price (derived from tracked holdings) used to size the flatten trade. */
   ethPrice: number | null;
   /** stETH + wstETH as a percent of net portfolio value. */
   stakingConcentrationPct: number | null;
 }
 
+// ---------------------------------------------------------------------------
+// Shared Hyperliquid account store
+// ---------------------------------------------------------------------------
+// A tiny module-level store that both useLivePortfolio() and HyperliquidPanel
+// read/write so the portfolio and the panel always reflect the same live
+// Hyperliquid account. Read-only: nothing here can place an order.
+let sharedHlAccount: HlAccount | null = null;
+const hlListeners = new Set<() => void>();
+
+export function setSharedHlAccount(acc: HlAccount | null): void {
+  sharedHlAccount = acc;
+  hlListeners.forEach((l) => l());
+}
+
+export function getSharedHlAccount(): HlAccount | null {
+  return sharedHlAccount;
+}
+
+function subscribeHlAccount(listener: () => void): () => void {
+  hlListeners.add(listener);
+  return () => {
+    hlListeners.delete(listener);
+  };
+}
+
+/** Subscribe to the shared Hyperliquid account (returns the current value reactively). */
+export function useSharedHlAccount(): HlAccount | null {
+  return useSyncExternalStore(subscribeHlAccount, getSharedHlAccount, getSharedHlAccount);
+}
+
 export function useLivePortfolio(): LivePortfolio {
   const { address, isConnected } = useAccount();
+  const hlAccount = useSharedHlAccount();
   const { data: prices } = useLivePrices();
+
+  // Fetch the Hyperliquid clearinghouse state when a wallet connects (read-only,
+  // TESTNET default). The result is written to the shared store so the portfolio
+  // and the Hyperliquid panel always agree.
+  useEffect(() => {
+    if (!isConnected || !address) {
+      setSharedHlAccount(null);
+      return;
+    }
+    let cancelled = false;
+    fetchClearinghouseState(address, hyperliquidEnv(true))
+      .then((acc) => {
+        if (!cancelled) setSharedHlAccount(acc);
+      })
+      .catch(() => {
+        // Graceful: a chain/network where HL reads fail just yields no perps.
+        if (!cancelled) setSharedHlAccount(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [address, isConnected]);
 
   // Native balances — one explicit useBalance call per supported chain. Hooks can't be
   // called in a loop/map, so this list is unrolled to match SUPPORTED_CHAINS exactly.
@@ -158,12 +233,32 @@ export function useLivePortfolio(): LivePortfolio {
 
   const netUsd = assetsUsd + aaveCollateralUsd - aaveDebtUsd;
 
-  // Risk metrics derived from the live tracked holdings (spot only — perps on
-  // Hyperliquid/Extended aren't wired up yet, so netDeltaEth is the spot book).
-  // All of this math lives in the pure riskModel engine so the hook and the
-  // Risk panel compute identical numbers.
+  // Risk metrics derived from the live tracked holdings. netDeltaEth is the spot
+  // book; the Hyperliquid perps are folded in via their own netDelta and a
+  // cross-venue total. All of this math lives in the pure riskModel engine so
+  // the hook and the Risk panel compute identical numbers.
   const ethPrice = ethPriceFromAssets(assets);
-  const netDeltaEth = netEthDelta(assets, ethPrice);
+  const spotNetDeltaEth = netEthDelta(assets, ethPrice);
+
+  const perps: LivePerp[] = (hlAccount?.positions ?? []).map((p) => ({
+    coin: p.coin,
+    size: p.size,
+    notional: p.notional,
+    unrealizedPnl: p.unrealizedPnl,
+  }));
+  // Net perp ETH delta = signed perp size of ETH-denominated perps (long +, short -).
+  const perpNetDeltaEth = perps
+    .filter((p) => perpCoinIsEth(p.coin))
+    .reduce((sum, p) => sum + p.size, 0);
+  const perpNotionalUsd = perps.reduce((sum, p) => sum + Math.abs(p.notional), 0);
+  const perpUnrealizedPnl = perps.reduce((sum, p) => sum + p.unrealizedPnl, 0);
+
+  // Cross-venue net ETH delta: spot plus perp. If spot can't be priced but perps
+  // exist, fall back to the perp-only figure; if nothing is priced, null.
+  let netDeltaEthTotal: number | null = null;
+  if (spotNetDeltaEth !== null) netDeltaEthTotal = spotNetDeltaEth + perpNetDeltaEth;
+  else if (perps.length > 0) netDeltaEthTotal = perpNetDeltaEth;
+
   const stakingConcentrationPct = stakingConcentration(assets, netUsd);
 
   return {
@@ -178,7 +273,12 @@ export function useLivePortfolio(): LivePortfolio {
     riskAave,
     healthFactor: riskAave?.healthFactor ?? null,
     netUsd,
-    netDeltaEth,
+    netDeltaEth: spotNetDeltaEth,
+    perpNetDeltaEth,
+    netDeltaEthTotal,
+    perps,
+    perpNotionalUsd,
+    perpUnrealizedPnl,
     ethPrice,
     stakingConcentrationPct,
   };

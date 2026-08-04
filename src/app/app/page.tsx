@@ -7,10 +7,17 @@ import { ThreadCard } from "@/components/ThreadCard";
 import { RiskPanel } from "@/components/RiskPanel";
 import { TickerBanner } from "@/components/TickerBanner";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
+import { HistoryPanel } from "@/components/HistoryPanel";
 import { HyperliquidPanel } from "@/components/HyperliquidPanel";
 import { LiveAsset, LivePortfolio, useLivePortfolio } from "@/hooks/useLivePortfolio";
 import { CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
 import { routeThesis } from "@/lib/routeThesis";
+import { recordExecution } from "@/lib/history";
+
+// Expose the local order-history API on the page module so real execution
+// sites (ThreadCard's useExecute / useHyperliquid) can log orders going
+// forward: `recordExecution({ type, label, amount, asset, protocol, chainId, status, hash })`.
+export { recordExecution };
 
 const CHAIN_NAMES = SUPPORTED_CHAINS.map((c) => CHAIN_LABEL[c.id]).join(", ");
 import {
@@ -188,6 +195,7 @@ export default function TerminalApp() {
 
           <RiskPanel live={live} isConnected={isConnected} />
           <HyperliquidPanel />
+          <HistoryPanel />
         </div>
 
         {/* Trade column */}
@@ -266,6 +274,23 @@ export default function TerminalApp() {
             {thread.map((item, i) => (
               <ThreadCard key={i} item={item} />
             ))}
+
+            {isConnected && live.isLoading && (
+              <p style={{ margin: 0, fontSize: 12 }} className="text-muted">
+                Loading your live positions…
+              </p>
+            )}
+
+            {thread.length === 0 && (
+              <div className="card" style={{ gap: 6, padding: "var(--space-3)" }}>
+                <p style={{ margin: 0, fontSize: 12, fontWeight: 600, fontFamily: "var(--font-heading)" }}>
+                  No positions yet
+                </p>
+                <p style={{ margin: 0, fontSize: 12 }} className="text-muted">
+                  Describe a thesis above or add an example to draft your first order.
+                </p>
+              </div>
+            )}
           </div>
 
           <div style={{ flex: "none", display: "flex", gap: 6, flexWrap: "wrap", margin: "var(--space-3) 0 var(--space-2)" }}>

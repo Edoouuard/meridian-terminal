@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAccount } from "wagmi";
 import { ThreadItem, fmtUsd } from "@/lib/data";
 import { resolveOrderForLeg, protocolLabel } from "@/lib/assetMap";
@@ -8,7 +8,25 @@ import type { Order } from "@/lib/execution";
 import type { TradeLeg } from "@/lib/tradePlan";
 import { useExecute, explorerUrlFor } from "@/hooks/useExecute";
 import { useHyperliquid } from "@/hooks/useHyperliquid";
+import { useLivePrices } from "@/hooks/useLivePrices";
+import { formatBaseUnits, resolvePriceFromList, usdToTokenAmount, type PriceEntry } from "@/lib/quote";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { recordExecution, type OrderRecordType } from "@/lib/history";
+
+/** Map an execution Order type to a coarse history record type. */
+function recordTypeFor(orderType: string): OrderRecordType {
+  switch (orderType) {
+    case "supply":
+      return "deposit";
+    case "repay":
+    case "borrow":
+    case "withdraw":
+    case "transfer":
+      return "withdraw";
+    default:
+      return "custom";
+  }
+}
 
 function UserBubble({ children }: { children: React.ReactNode }) {
   return (
@@ -59,6 +77,36 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
   const { isConnected } = useAccount();
   const { status, data, error, execute, reset } = useExecute();
   const [confirming, setConfirming] = useState(false);
+  const recordedRef = useRef<string | null>(null);
+
+  // Log real outcomes to the local order-history store (guarded so a render
+  // doesn't double-record the same hash).
+  useEffect(() => {
+    if (status === "confirmed" && data && recordedRef.current !== data) {
+      recordedRef.current = data;
+      recordExecution({
+        type: recordTypeFor(order.type),
+        label: `Signed ${order.type}${order.symbol ? " " + order.symbol : ""}`,
+        amount: typeof order.amount === "bigint" ? formatBaseUnits(order.amount, order.decimals ?? 18) : String(order.amount),
+        asset: order.symbol,
+        protocol: String(order.protocol),
+        chainId: order.chainId,
+        status: "confirmed",
+        hash: data,
+      });
+    } else if (status === "error" && recordedRef.current !== "error") {
+      recordedRef.current = "error";
+      recordExecution({
+        type: recordTypeFor(order.type),
+        label: `${order.type}${order.symbol ? " " + order.symbol : ""} (failed)`,
+        amount: typeof order.amount === "bigint" ? formatBaseUnits(order.amount, order.decimals ?? 18) : String(order.amount),
+        asset: order.symbol,
+        protocol: String(order.protocol),
+        chainId: order.chainId,
+        status: "error",
+      });
+    }
+  }, [status, data, error, order]);
 
   if (status === "confirming") {
     return (
@@ -110,7 +158,10 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
         title="Confirm on-chain action"
         body={
           <div>
-            Sign and broadcast <strong>{order.type}</strong> of {String(order.amount)}{" "}
+            Sign and broadcast <strong>{order.type}</strong> of{" "}
+            {typeof order.amount === "bigint"
+              ? formatBaseUnits(order.amount, order.decimals ?? 18)
+              : String(order.amount)}{" "}
             {order.symbol ?? ""} on {String(order.protocol)} (chain {order.chainId}).
           </div>
         }
@@ -131,8 +182,13 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
  * price + asset index, signs the EIP-712 order with the wallet, submits to the
  * exchange API, and reports the real status. Honest: any failure surfaces as
  * error, never a fake success.
+ *
+ * The USD notional is quoted to an exact coin quantity via the live price list
+ * (passed in), and that coinQty is handed to the Hyperliquid layer so the fill
+ * uses the caller's computed number rather than silently re-deriving it. The
+ * notional and the approximate coin amount are shown before signing.
  */
-function PerpExecuteButton({ leg }: { leg: TradeLeg }) {
+function PerpExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry[] }) {
   const { isConnected } = useAccount();
   const { status, result, error, execute, reset } = useHyperliquid();
   const [confirming, setConfirming] = useState(false);
@@ -142,6 +198,38 @@ function PerpExecuteButton({ leg }: { leg: TradeLeg }) {
   const side = (leg.side || "").toLowerCase();
   const isBuy = side.startsWith("long") || side === "buy";
   const leverage = leg.leverage;
+
+  // Exact coin quantity from the USD notional at the live price (8-decimal HL precision).
+  const hlPrice = resolvePriceFromList(prices, symbol);
+  const coinQty = hlPrice !== null ? sizeUsd / hlPrice : undefined;
+
+  // Exact quote (8-decimal HL precision) used to show the implied coin amount.
+  const hlQuote = hlPrice !== null ? usdToTokenAmount(symbol, sizeUsd, hlPrice, 8) : null;
+
+  const recordedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (status === "confirmed" && result && recordedRef.current !== "ok") {
+      recordedRef.current = "ok";
+      recordExecution({
+        type: isBuy ? "buy" : "sell",
+        label: `${isBuy ? "Long" : "Short"} ${symbol}`,
+        amount: coinQty !== undefined ? String(coinQty) : undefined,
+        asset: symbol,
+        protocol: "Hyperliquid",
+        status: "confirmed",
+      });
+    } else if (status === "error" && recordedRef.current !== "error") {
+      recordedRef.current = "error";
+      recordExecution({
+        type: isBuy ? "buy" : "sell",
+        label: `${isBuy ? "Long" : "Short"} ${symbol} (failed)`,
+        amount: coinQty !== undefined ? String(coinQty) : undefined,
+        asset: symbol,
+        protocol: "Hyperliquid",
+        status: "error",
+      });
+    }
+  }, [status, result, isBuy, symbol, coinQty]);
 
   if (status === "preparing" || status === "signing" || status === "submitting") {
     return (
@@ -194,15 +282,24 @@ function PerpExecuteButton({ leg }: { leg: TradeLeg }) {
         body={
           <div>
             Market order: {isBuy ? "long" : "short"} {symbol.toUpperCase()} ({fmtUsd(sizeUsd)}
-            {leverage ? ` at ${leverage}x` : ""}). A live mid price will be fetched, the order signed with your
-            wallet, then submitted to Hyperliquid.
+            {leverage ? ` at ${leverage}x` : ""}).
+            {hlQuote && coinQty !== undefined ? (
+              <>
+                {" "}
+                ≈ <strong>{coinQty.toFixed(4)}</strong> {symbol.toUpperCase()} at ~$
+                {hlPrice!.toFixed(2)} each. The order is signed with your wallet, then submitted
+                to Hyperliquid.
+              </>
+            ) : (
+              <> A live mid price will be fetched, the order signed with your wallet, then submitted to Hyperliquid.</>
+            )}
           </div>
         }
         confirmLabel="Sign & submit"
         warning="TESTNET by default — no real funds."
         onConfirm={() => {
           setConfirming(false);
-          execute({ symbol, isBuy, sizeUsd, leverage, testnet: true });
+          execute({ symbol, isBuy, sizeUsd, leverage, testnet: true, coinQty });
         }}
         onCancel={() => setConfirming(false)}
       />
@@ -227,11 +324,19 @@ function isUnsupported(r: Order | { unsupported: string }): r is { unsupported: 
 /** Order card rendered from a parsed TradePlan when item.plan is present. */
 function PlanCard({ item }: { item: ThreadItem }) {
   const plan = item.plan!;
+  // Live price list used to quote each leg's USD notional into an exact token amount.
+  const { data: prices } = useLivePrices();
   const orderStyle: React.CSSProperties = {
     borderLeft: "2px solid var(--color-accent)",
     paddingLeft: "var(--space-2)",
     fontSize: 13,
   };
+
+  // Exact human token amount for an already-quoted Order (single source of truth).
+  const orderAmountDisplay = (order: Order): string =>
+    typeof order.amount === "bigint"
+      ? `${formatBaseUnits(order.amount, order.decimals ?? 18)} ${order.symbol ?? ""}`
+      : `${String(order.amount)} ${order.symbol ?? ""}`;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
@@ -241,18 +346,21 @@ function PlanCard({ item }: { item: ThreadItem }) {
         {plan.legs.length > 0 && (
           <div style={orderStyle}>
             {plan.legs.map((leg, i) => {
-              const resolved = resolveOrderForLeg(leg);
+              const resolved = resolveOrderForLeg(leg, undefined, prices);
               return (
                 <div key={i} style={{ marginTop: i === 0 ? 0 : "var(--space-2)" }}>
                   <OrderRow label={leg.side} value={legRowValue(leg)} />
                   {isUnsupported(resolved) ? (
                     /hyperliquid/i.test(leg.protocol || "") ? (
-                      <PerpExecuteButton leg={leg} />
+                      <PerpExecuteButton leg={leg} prices={prices} />
                     ) : (
                       <NotWired venue={protocolLabel(leg.protocol)} reason={resolved.unsupported} />
                     )
                   ) : (
-                    <ExecuteButton order={resolved} label={`Execute on ${leg.protocol} →`} />
+                    <>
+                      <OrderRow label="Amount" value={orderAmountDisplay(resolved)} valueColor="var(--color-accent-700)" />
+                      <ExecuteButton order={resolved} label={`Execute on ${leg.protocol} →`} />
+                    </>
                   )}
                 </div>
               );
