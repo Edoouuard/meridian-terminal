@@ -254,44 +254,67 @@ a:hover { color: var(--color-accent-700); }
   margin-top: var(--space-8);
 }
 
-/* — rupture hero — */
-.rupture-container {
+/* — hero: a calm section, photo behind a scrim, text and CTA are the whole point — */
+.hero-simple {
   position: relative;
-  height: 230vh;
-}
-.rupture-sticky {
-  position: sticky;
-  top: 0;
-  height: 100vh;
-  overflow: hidden;
+  min-height: 92vh;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--color-bg);
+  overflow: hidden;
 }
-.rupture-shatter {
+.hero-simple-bg {
   position: absolute;
   inset: 0;
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
 }
-.shard {
+.hero-simple-scrim {
   position: absolute;
-  background-repeat: no-repeat;
-  background-size: 400% 300%;
-  background-image: var(--hero-image);
-  background-position: var(--bg-pos);
-  transform: translate(calc(var(--progress, 0) * var(--dx)), calc(var(--progress, 0) * var(--dy)))
-    rotate(calc(var(--progress, 0) * var(--rot)));
-  opacity: calc(1 - var(--progress, 0) * 1.15);
-  will-change: transform, opacity;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(10, 9, 8, 0.55), rgba(10, 9, 8, 0.72));
 }
-.rupture-content {
+.hero-simple-content {
   position: relative;
   z-index: 2;
   text-align: center;
   max-width: 760px;
-  padding: 0 var(--space-4);
-  opacity: calc(1 - var(--progress, 0) * 3.2);
-  transform: translateY(calc(var(--progress, 0) * -60px));
+  padding: var(--space-8) var(--space-4);
+}
+/* Text sits over a dark photo now, not the light page background, so it needs its own palette. */
+.hero-simple-content .hero-title,
+.hero-simple-content .hero-sub {
+  color: #f5ede0;
+}
+.hero-simple-content .hero-sub {
+  opacity: 0.85;
+}
+.hero-simple-content .card-kicker,
+.hero-simple-content .scroll-cue {
+  color: #e8c079;
+}
+.hero-simple-content .input {
+  background: rgba(20, 16, 12, 0.35);
+  border-color: rgba(245, 237, 224, 0.35);
+  color: #f5ede0;
+}
+.hero-simple-content .input::placeholder {
+  color: rgba(245, 237, 224, 0.55);
+}
+.hero-simple-content .btn-primary {
+  color: #e8c079;
+  border-color: #e8c079;
+}
+.hero-simple-content .btn-primary:hover {
+  background: rgba(232, 192, 121, 0.15);
+}
+.hero-simple-content .waitlist-success {
+  color: #f5ede0;
+}
+@media (max-width: 760px), (hover: none) {
+  /* background-attachment: fixed is unreliable on touch/mobile browsers. */
+  .hero-simple-bg { background-attachment: scroll; }
 }
 
 /* — waitlist form — */
@@ -312,10 +335,6 @@ a:hover { color: var(--color-accent-700); }
 @media (prefers-reduced-motion: reduce) {
   .reveal { transition: none; opacity: 1; transform: none; }
   .scroll-cue { animation: none; }
-  .rupture-container { height: 100vh; }
-  .shard { display: none; }
-  .rupture-content { opacity: 1; transform: none; }
-  .rupture-sticky { background-image: var(--hero-image); background-size: cover; background-position: center; }
 }
 
 @media (max-width: 760px) {
