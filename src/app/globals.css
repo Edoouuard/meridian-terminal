@@ -322,3 +322,73 @@ a:hover { color: var(--color-accent-700); }
   .nav a.text-muted { display: none; }
   .waitlist-form { justify-content: center; }
 }
+
+/* ————— app shell: error boundary + responsive (additive) ————— */
+
+/* Error boundary fallback surface (shared by ErrorBoundary.tsx). */
+.error-boundary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 40vh;
+  padding: var(--space-8);
+  text-align: center;
+  color: var(--color-text);
+  background: var(--color-bg);
+}
+
+/* Prevent the app from ever collapsing horizontally / into a blank sliver
+   on very small viewports, independent of page.tsx. */
+html {
+  overflow-x: hidden;
+}
+body {
+  min-width: 320px;
+}
+
+/* — responsive terminal layout —
+   The 3-column terminal grid lives in page.tsx as an inline style
+   (gridTemplateColumns: "290px 1fr 320px") on a container that has no
+   class/id we are allowed to add (page.tsx is owned by another agent and
+   must not be edited). To stack it to one column on narrow screens without
+   touching page.tsx, we target the container by the exact inline
+   grid-template-columns value it serializes to. This is purely additive and
+   only applies below the breakpoint, so desktop rendering is untouched.
+   NOTE: if the page.tsx column widths ever change, update the selector to the
+   new value (or add a stable class to that container). */
+@media (max-width: 1080px) {
+  div[style*="290px 1fr 320px"] {
+    grid-template-columns: 1fr !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+  }
+  /* Drop the vertical dividers between the now-stacked columns. */
+  div[style*="290px 1fr 320px"] > div {
+    border-right: 0 !important;
+    border-left: 0 !important;
+    padding-left: var(--space-3) !important;
+    padding-right: var(--space-3) !important;
+  }
+}
+
+/* — small screens: tighter type + spacing (applies to terminal + landing) — */
+@media (max-width: 760px) {
+  html,
+  body {
+    font-size: 14px;
+  }
+  h1 { font-size: 34px; }
+  h2 { font-size: 27px; }
+  h3 { font-size: 22px; }
+  .nav {
+    padding: var(--space-2) var(--space-3);
+    gap: var(--space-2);
+    flex-wrap: wrap;
+  }
+  .card { padding: var(--space-3); }
+  .landing-container { padding: 0 var(--space-3); }
+  .hero-sub { font-size: 16px; }
+  .waitlist-form .input { min-width: 100%; }
+}
+

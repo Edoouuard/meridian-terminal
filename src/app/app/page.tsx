@@ -10,6 +10,8 @@ import { WalletConnectButton } from "@/components/WalletConnectButton";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { HyperliquidPanel } from "@/components/HyperliquidPanel";
 import { LiveAsset, LivePortfolio, useLivePortfolio } from "@/hooks/useLivePortfolio";
+import { useLiveFeed } from "@/hooks/useLiveFeed";
+import { NewsFeed } from "@/components/NewsFeed";
 import { CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
 import { routeThesis } from "@/lib/routeThesis";
 import { recordExecution } from "@/lib/history";
@@ -22,10 +24,7 @@ export { recordExecution };
 const CHAIN_NAMES = SUPPORTED_CHAINS.map((c) => CHAIN_LABEL[c.id]).join(", ");
 import {
   ALLOCATION,
-  ALPHA,
-  AlphaTag,
   HIGHLIGHT,
-  NEWS,
   PORTFOLIO_VALUE,
   POSITIONS,
   ROTATION_BARS,
@@ -35,12 +34,6 @@ import {
   fmtUsd,
 } from "@/lib/data";
 
-const ALPHA_TAG_CLASS: Record<AlphaTag, string> = {
-  "New protocol": "tag-neutral",
-  "Points farm": "tag-accent",
-  "Airdrop rumor": "tag-outline",
-};
-
 const ALLOCATION_COLORS = [
   "var(--color-accent-700)",
   "var(--color-accent-500)",
@@ -48,6 +41,14 @@ const ALLOCATION_COLORS = [
   "var(--color-neutral-500)",
   "var(--color-neutral-300)",
 ];
+
+function fmtUsdCompact(n: number): string {
+  const abs = Math.abs(n);
+  if (abs >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
+  if (abs >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
+  if (abs >= 1e3) return `$${(n / 1e3).toFixed(0)}K`;
+  return `$${n.toFixed(0)}`;
+}
 
 function formatAssetAmount(asset: LiveAsset): string {
   if (asset.usd > 0) return fmtUsd(asset.usd);
@@ -77,10 +78,44 @@ function buildLiveAllocation(live: LivePortfolio): { label: string; pct: number;
 export default function TerminalApp() {
   const [thread, setThread] = useState<ThreadItem[]>([{ type: "pendle" }, { type: "betaneutral" }]);
   const [promptText, setPromptText] = useState("");
-  const [feedTab, setFeedTab] = useState<"news" | "alpha">("news");
 
   const { isConnected } = useAccount();
   const live = useLivePortfolio();
+  const feed = useLiveFeed();
+
+  const isLiveFeed = !feed.loading && !!feed.data;
+
+  // Live top-movers / flow list — built from Hyperliquid metaAndAssetCtxs.
+  // Use 24h notional (dayNtlVlm) as the flow proxy, normalised into bar widths.
+  const liveBars =
+    isLiveFeed && feed.data?.highlights && feed.data.highlights.movers.length > 0
+      ? feed.data.highlights.movers.map((m) => ({
+          name: m.coin,
+          width: "0%",
+          color: m.changePct >= 0 ? "var(--color-accent-700)" : "var(--color-neutral-600)",
+          value: `${m.changePct >= 0 ? "+" : ""}${m.changePct.toFixed(1)}%`,
+          flow: m.dayNtlVlm,
+        }))
+      : null;
+
+  // Compute relative bar widths from the largest flow.
+  let displayBars = ROTATION_BARS;
+  if (liveBars && liveBars.length > 0) {
+    const maxFlow = Math.max(...liveBars.map((b) => b.flow), 1);
+    displayBars = liveBars.map((b) => ({ ...b, width: `${Math.max(4, Math.round((b.flow / maxFlow) * 100))}%` }));
+  }
+
+  // Live "fastest growing" card from the same metadata.
+  const fastestLive = isLiveFeed ? feed.data?.highlights?.fastest : null;
+  const displayHighlight = fastestLive
+    ? {
+        protocol: fastestLive.coin,
+        chg: `${fastestLive.changePct >= 0 ? "+" : ""}${fastestLive.changePct.toFixed(1)}%`,
+        tvlStart: "24h vol",
+        tvlEnd: fmtUsdCompact(fastestLive.dayNtlVlm) || "$—",
+        points: HIGHLIGHT.points,
+      }
+    : HIGHLIGHT;
 
   const displayPortfolioValue = isConnected ? live.netUsd : PORTFOLIO_VALUE;
 
@@ -211,7 +246,7 @@ export default function TerminalApp() {
               <div className="card" style={{ gap: 6, padding: "var(--space-2)", minWidth: 0 }}>
                 <p style={{ margin: 0, fontSize: 12, fontWeight: 600, fontFamily: "var(--font-heading)" }}>Net TVL flows, 7 days</p>
                 <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 2, minWidth: 0 }}>
-                  {ROTATION_BARS.map((rb) => (
+                  {displayBars.map((rb) => (
                     <div key={rb.name} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, minWidth: 0 }}>
                       <span style={{ width: 64, flex: "none", height: 15, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
                         {rb.name}
@@ -229,14 +264,14 @@ export default function TerminalApp() {
               <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
                 <div className="card" style={{ gap: 4, padding: "var(--space-3)" }}>
                   <p style={{ margin: 0, fontSize: 12, fontWeight: 600, fontFamily: "var(--font-heading)" }}>
-                    Fastest growing: {HIGHLIGHT.protocol}
+                    Fastest growing: {displayHighlight.protocol}
                   </p>
                   <p style={{ margin: 0, fontSize: 11 }} className="text-muted">
-                    TVL {HIGHLIGHT.tvlStart} → <strong style={{ color: "var(--color-text)" }}>{HIGHLIGHT.tvlEnd}</strong> in 30 days (
-                    <span style={{ color: "var(--color-accent-700)" }}>{HIGHLIGHT.chg}</span>)
+                    {displayHighlight.tvlStart} → <strong style={{ color: "var(--color-text)" }}>{displayHighlight.tvlEnd}</strong>{" "}
+                    <span style={{ color: "var(--color-accent-700)" }}>({displayHighlight.chg})</span>
                   </p>
                   <svg width="100%" height="24" viewBox="0 0 36 24" preserveAspectRatio="none">
-                    <polyline points={HIGHLIGHT.points} fill="none" stroke="var(--color-accent)" strokeWidth={1.6} />
+                    <polyline points={displayHighlight.points} fill="none" stroke="var(--color-accent)" strokeWidth={1.6} />
                   </svg>
                 </div>
                 <div className="card" style={{ gap: 4, padding: "var(--space-3)" }}>
@@ -333,74 +368,7 @@ export default function TerminalApp() {
 
         {/* News / Alpha column */}
         <div className="col-scroll" style={{ minWidth: 0, borderLeft: "1px solid var(--color-divider)", padding: "var(--space-4)" }}>
-          <h6 style={{ color: "var(--color-accent)" }}>{feedTab === "news" ? "DeFi news" : "Alpha"}</h6>
-          <div className="seg" style={{ marginBottom: "var(--space-2)" }}>
-            <label className="seg-opt">
-              <input type="radio" name="feed-tab" checked={feedTab === "news"} onChange={() => setFeedTab("news")} />
-              <span>News</span>
-            </label>
-            <label className="seg-opt">
-              <input type="radio" name="feed-tab" checked={feedTab === "alpha"} onChange={() => setFeedTab("alpha")} />
-              <span>Alpha</span>
-            </label>
-          </div>
-
-          {feedTab === "news" ? (
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              {NEWS.map((n, i) => (
-                <div key={i} style={{ padding: "var(--space-2) 0", borderBottom: "1px solid var(--color-divider)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                    <span className="tag tag-accent" style={{ marginBottom: 4 }}>
-                      {n.protocol}
-                    </span>
-                    <span style={{ fontSize: 12, fontVariantNumeric: "tabular-nums", color: "var(--color-accent-700)" }}>{n.metric}</span>
-                  </div>
-                  <p style={{ margin: "4px 0 0", fontSize: 13, lineHeight: 1.4 }}>{n.text}</p>
-                  {n.action && (
-                    <a
-                      href="#"
-                      style={{ textDecoration: "none", fontSize: 12 }}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        addExample(n.action as ThreadType);
-                      }}
-                    >
-                      Discuss →
-                    </a>
-                  )}
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column" }}>
-              {ALPHA.map((a, i) => (
-                <div key={i} style={{ padding: "var(--space-2) 0", borderBottom: "1px solid var(--color-divider)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                    <span className={`tag ${ALPHA_TAG_CLASS[a.tag]}`} style={{ marginBottom: 4 }}>
-                      {a.protocol}
-                    </span>
-                    <span style={{ fontSize: 12, fontVariantNumeric: "tabular-nums", color: "var(--color-accent-700)" }}>{a.metric}</span>
-                  </div>
-                  <p style={{ margin: "4px 0 0", fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }} className="text-muted">
-                    {a.tag}
-                  </p>
-                  <p style={{ margin: "4px 0 0", fontSize: 13, lineHeight: 1.4 }}>{a.text}</p>
-                  {a.action && (
-                    <a
-                      href="#"
-                      style={{ textDecoration: "none", fontSize: 12 }}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        addExample(a.action as ThreadType);
-                      }}
-                    >
-                      Add to thread →
-                    </a>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+          <NewsFeed feed={feed} onAddThread={addExample} />
         </div>
       </div>
     </div>
