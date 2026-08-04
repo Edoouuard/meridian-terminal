@@ -1,16 +1,11 @@
-"use client";
-
-import { useState } from "react";
 import Link from "next/link";
 import { Reveal } from "@/components/landing/Reveal";
 import { PromptDemo } from "@/components/landing/PromptDemo";
 import { ProtocolMarquee } from "@/components/landing/ProtocolMarquee";
-import { ApproachHero } from "@/components/landing/ApproachHero";
+import { HeroBackground } from "@/components/landing/HeroBackground";
 import { WaitlistForm } from "@/components/landing/WaitlistForm";
 
 export default function Landing() {
-  const [doorOpen, setDoorOpen] = useState(false);
-
   return (
     <div style={{ background: "var(--color-bg)", color: "var(--color-text)" }}>
       <div className="nav" style={{ background: "var(--color-surface)", position: "relative", zIndex: 3 }}>
@@ -23,7 +18,7 @@ export default function Landing() {
         </Link>
       </div>
 
-      <ApproachHero doorOpen={doorOpen}>
+      <HeroBackground>
         <p className="card-kicker" style={{ marginBottom: "var(--space-3)" }}>
           Early access
         </p>
@@ -37,14 +32,12 @@ export default function Landing() {
           waitlist to be first in when it opens.
         </p>
         <div style={{ marginTop: "var(--space-4)", display: "flex", justifyContent: "center" }}>
-          <WaitlistForm align="center" onSuccess={() => setDoorOpen(true)} />
+          <WaitlistForm align="center" />
         </div>
-        {!doorOpen && (
-          <a href="#demo" className="scroll-cue" aria-label="Scroll to see it work">
-            ↓
-          </a>
-        )}
-      </ApproachHero>
+        <a href="#demo" className="scroll-cue" aria-label="Scroll to see it work">
+          ↓
+        </a>
+      </HeroBackground>
 
       {/* The one feature */}
       <section id="demo" className="landing-container" style={{ paddingTop: "var(--space-8)" }}>

@@ -1,8 +1,6 @@
 /**
- * Hero background: a hand selected night illustration (a grand building lit warm against a
- * night sky, rendered in a cross stitch texture), used by RuptureHero for the shatter effect.
- * Natural dimensions are needed there to compute a cover fit crop without distorting the image.
+ * Hero background: a heavily softened version of a night illustration (a grand building
+ * lit warm against the sky). The source photo had a dense cross stitch texture baked in;
+ * this file is blurred and desaturated so it reads as an ambient backdrop, not a pattern.
  */
-export const HERO_BACKGROUND_IMAGE = 'url("/hero/terminal-night.webp")';
-export const HERO_IMAGE_WIDTH = 1462;
-export const HERO_IMAGE_HEIGHT = 1076;
+export const HERO_BACKGROUND_IMAGE = "/hero/terminal-night-soft.webp";

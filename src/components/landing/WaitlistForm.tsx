@@ -4,7 +4,7 @@ import { useState } from "react";
 
 type Status = "idle" | "submitting" | "success" | "error";
 
-export function WaitlistForm({ align = "left", onSuccess }: { align?: "left" | "center"; onSuccess?: () => void }) {
+export function WaitlistForm({ align = "left" }: { align?: "left" | "center" }) {
   const [email, setEmail] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [message, setMessage] = useState("");
@@ -26,7 +26,6 @@ export function WaitlistForm({ align = "left", onSuccess }: { align?: "left" | "
         return;
       }
       setStatus("success");
-      onSuccess?.();
     } catch {
       setMessage("Something went wrong. Please try again.");
       setStatus("error");
