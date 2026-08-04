@@ -9,6 +9,7 @@ import { TickerBanner } from "@/components/TickerBanner";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { HyperliquidPanel } from "@/components/HyperliquidPanel";
+import { BetaGate } from "@/components/BetaGate";
 import { LiveAsset, LivePortfolio, useLivePortfolio } from "@/hooks/useLivePortfolio";
 import { useLiveFeed } from "@/hooks/useLiveFeed";
 import { NewsFeed } from "@/components/NewsFeed";
@@ -144,8 +145,9 @@ export default function TerminalApp() {
   }
 
   return (
-    <div style={{ background: "var(--color-bg)", color: "var(--color-text)", height: "100vh", display: "flex", flexDirection: "column" }}>
-      <TickerBanner />
+    <BetaGate>
+      <div style={{ background: "var(--color-bg)", color: "var(--color-text)", height: "100vh", display: "flex", flexDirection: "column" }}>
+        <TickerBanner />
       <div className="nav" style={{ background: "var(--color-surface)", flex: "none" }}>
         <Link href="/" className="nav-brand" style={{ color: "var(--color-text)" }}>
           Meridian
@@ -372,5 +374,6 @@ export default function TerminalApp() {
         </div>
       </div>
     </div>
+    </BetaGate>
   );
 }
