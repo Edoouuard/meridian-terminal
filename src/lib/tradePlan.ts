@@ -86,11 +86,16 @@ function canonAsset(token: string): string {
     wbtc: "WBTC",
     susde: "sUSDe",
     weth: "WETH",
+    wbnb: "WBNB",
+    wxdai: "WXDAI",
     usdc: "USDC",
     usdt: "USDT",
+    dai: "DAI",
     btc: "BTC",
     eth: "ETH",
     sol: "SOL",
+    bnb: "BNB",
+    xdai: "XDAI",
   };
   return map[t] ?? token.trim();
 }
@@ -106,11 +111,16 @@ const ASSET_PATTERNS: Array<[RegExp, string]> = [
   [/\bw\s?btc\b/i, "WBTC"],
   [/\bs\s?usde\b/i, "sUSDe"],
   [/\bweth\b/i, "WETH"],
+  [/\bw\s?bnb\b/i, "WBNB"],
+  [/\bw\s?xdai\b/i, "WXDAI"],
   [/\$?usdc\b/i, "USDC"],
   [/\$?usdt\b/i, "USDT"],
+  [/\bdai\b/i, "DAI"],
   [/\bbtc\b|\bbitcoin\b/i, "BTC"],
   [/\beth\b|\bether\b/i, "ETH"],
   [/\bsol\b|\bsolana\b/i, "SOL"],
+  [/\$?bnb\b/i, "BNB"],
+  [/\bxda?\bi\b/i, "XDAI"],
   [/\$?hype\b/i, "HYPE"],
   [/\$?xrp\b/i, "XRP"],
   [/\bdoge\b|\bdogecoin\b/i, "DOGE"],
@@ -209,6 +219,18 @@ const PROTOCOL_PATTERNS: Array<[RegExp, string]> = [
   [/\bextended\b/i, "Extended"],
   [/\bvariational\b|\boptions\b/i, "Variational"],
   [/\bperp\b|\bperpetual\b|\bhl\b/i, "Hyperliquid"],
+  // Expanded DeFi protocol vocabulary (routing breadth; live execution still opt-in).
+  [/\bcompound\b|\bcomp\b/i, "Compound"],
+  [/\bcurve\b/i, "Curve"],
+  [/\bdydx\b|\bdydx\b/i, "dYdX"],
+  [/\bgmx\b/i, "GMX"],
+  [/\bjupiter\b/i, "Jupiter"],
+  [/\bmaker\b|\bdsr\b/i, "Maker"],
+  [/\bfluid\b/i, "Fluid"],
+  [/\bsilo\b/i, "Silo"],
+  [/\bspark\b/i, "Spark"],
+  [/\bexpress\b/i, "Express"],
+  [/\bsolana\b/i, "Solana"],
 ];
 
 function parseProtocol(text: string): string | undefined {

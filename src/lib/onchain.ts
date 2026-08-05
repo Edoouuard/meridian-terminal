@@ -1,7 +1,41 @@
 import type { Address } from "viem";
-import { arbitrum, avalanche, base, mainnet, optimism, polygon } from "wagmi/chains";
+import {
+  arbitrum,
+  avalanche,
+  base,
+  bsc,
+  celo,
+  fantom,
+  gnosis,
+  linea,
+  mainnet,
+  mantle,
+  metis,
+  optimism,
+  polygon,
+  scroll,
+  sonic,
+  zkSync,
+} from "wagmi/chains";
 
-export const SUPPORTED_CHAINS = [mainnet, base, arbitrum, optimism, polygon, avalanche] as const;
+export const SUPPORTED_CHAINS = [
+  mainnet,
+  base,
+  arbitrum,
+  optimism,
+  polygon,
+  avalanche,
+  bsc,
+  gnosis,
+  scroll,
+  zkSync,
+  linea,
+  mantle,
+  metis,
+  fantom,
+  sonic,
+  celo,
+] as const;
 
 export const CHAIN_LABEL: Record<number, string> = {
   [mainnet.id]: "Ethereum",
@@ -10,15 +44,27 @@ export const CHAIN_LABEL: Record<number, string> = {
   [optimism.id]: "Optimism",
   [polygon.id]: "Polygon",
   [avalanche.id]: "Avalanche",
+  [bsc.id]: "BNB Chain",
+  [gnosis.id]: "Gnosis",
+  [scroll.id]: "Scroll",
+  [zkSync.id]: "zkSync Era",
+  [linea.id]: "Linea",
+  [mantle.id]: "Mantle",
+  [metis.id]: "Metis",
+  [fantom.id]: "Fantom",
+  [sonic.id]: "Sonic",
+  [celo.id]: "Celo",
 };
 
 /**
- * Aave v3 Pool addresses, verified 2026-07-30 against aave-dao/aave-address-book.
- * Arbitrum/Optimism/Polygon/Avalanche deliberately share one address — Aave deployed
- * those four via the same deterministic (CREATE2) factory and salt, confirmed by
- * fetching all four source files independently. Base and Ethereum were deployed
- * separately and have their own addresses. Wrong addresses here would silently
- * misreport real money — double-check any change against a second source.
+ * Aave v3 Pool addresses. Verified 2026-07-30+ against aave-dao/aave-address-book
+ * (src/AaveV3*.sol). Arbitrum/Optimism/Polygon/Avalanche/Fantom deliberately share
+ * one address — Aave deployed those via the same deterministic (CREATE2) factory
+ * and salt, confirmed by fetching each source file independently. Base and
+ * Ethereum were deployed separately and have their own addresses. The BNB/Gnosis/
+ * Scroll/zkSync/Linea/Mantle/Metis/Sonic/Celo pools each have their own distinct
+ * universally-verified address. Wrong addresses here would silently misreport
+ * real money — double-check any change against a second source.
  */
 export const AAVE_V3_POOL_BY_CHAIN: Record<number, Address> = {
   [mainnet.id]: "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2",
@@ -27,6 +73,16 @@ export const AAVE_V3_POOL_BY_CHAIN: Record<number, Address> = {
   [optimism.id]: "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
   [polygon.id]: "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
   [avalanche.id]: "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
+  [bsc.id]: "0x6807dc923806fE8Fd134338EABCA509979a7e0cB",
+  [gnosis.id]: "0xb50201558B00496A145fE76f7424749556E326D8",
+  [scroll.id]: "0x11fCfe756c05AD438e312a7fd934381537D3cFfe",
+  [zkSync.id]: "0x78e30497a3c7527d953c6B1E3541b021A98Ac43c",
+  [linea.id]: "0xc47b8C00b0f69a36fa203Ffeac0334874574a8Ac",
+  [mantle.id]: "0x458F293454fE0d67EC0655f3672301301DD51422",
+  [metis.id]: "0x90df02551bB792286e8D4f13E0e357b4Bf1D6a57",
+  [fantom.id]: "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
+  [sonic.id]: "0x5362dBb1e601abF3a4c14c22ffEdA64042E5eAA3",
+  [celo.id]: "0x3E59A31363E2ad014dcbc521c4a0d5757d9f3402",
 };
 
 export const STETH_ADDRESS: Address = "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84";
@@ -80,6 +136,28 @@ export const TRACKED_TOKENS_BY_CHAIN: Record<number, TrackedToken[]> = {
     { symbol: "USDC", address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
     { symbol: "USDT", address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
   ],
+  [bsc.id]: [
+    { symbol: "USDT", address: "0x55d398326f99059fF775485246999027B3197955", decimals: 18, priceSymbol: "USDT", venue: "Wallet" },
+    { symbol: "USDC", address: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", decimals: 18, priceSymbol: "USDC", venue: "Wallet" },
+    { symbol: "WBNB", address: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", decimals: 18, priceSymbol: "BNB", venue: "Wallet" },
+  ],
+  [gnosis.id]: [
+    { symbol: "USDC", address: "0xDDAfbb505ad214D7b80b1f830fcCc89B60fb7A83", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
+  ],
+  [scroll.id]: [
+    { symbol: "WETH", address: "0x5300000000000000000000000000000000000004", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
+    { symbol: "USDC", address: "0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
+  ],
+  [zkSync.id]: [
+    { symbol: "USDC", address: "0x3355df6d4c9c3035724fd0e3914de96a5a83aaf4", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
+    { symbol: "USDT", address: "0x493257fD37EDB34451f62EDf8D2a0C418852bA4C", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
+    { symbol: "WETH", address: "0x5aeA5775959fbc2557Cc8789bC1bf90A239D9a91", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
+  ],
+  [linea.id]: [
+    { symbol: "USDC", address: "0x176211869cA2b568f2A7D4EE941E073a821EE1ff", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
+    { symbol: "USDT", address: "0xA219439258ca9da29E9Cc4cE5596924745e12B93", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
+    { symbol: "WETH", address: "0xe5D7C2a44FfDDf6b295A15c148167daaAf5Cf34f", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
+  ],
   [avalanche.id]: [
     { symbol: "USDC", address: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
     { symbol: "USDT", address: "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
@@ -116,6 +194,99 @@ export const AAVE_POOL_ABI = [
 
 /** Aave returns this sentinel (uint256 max) for healthFactor when the user has no debt. */
 export const AAVE_NO_DEBT_HEALTH_FACTOR = BigInt(2) ** BigInt(256) - BigInt(1);
+
+/**
+ * Ordered lending pools whose account data is read via the Aave-v3-style
+ * `getUserAccountData(address)` ABI (6 values, base-currency USD with 8 decimals,
+ * sentinel MAX_HEALTH_FACTOR when there is no debt).
+ *
+ * Aave v3 pools verified against aave-dao/aave-address-book. SparkLend is an
+ * Aave-v3 fork on Ethereum whose pool returns the identical shape (confirmed by a
+ * live eth_call); address from its verified deployment. Wrong addresses silently
+ * misreport real money — double-check any change against a second source.
+ */
+export interface LendingPool {
+  protocol: string;
+  pool: Address;
+}
+export const LENDING_POOLS_BY_CHAIN: Record<number, LendingPool[]> = {
+  [mainnet.id]: [
+    { protocol: "Aave v3", pool: "0x87870Bca3F3fD6335C3F4ce8392D69350B4fA4E2" },
+    { protocol: "SparkLend", pool: "0xC13e21B648A5Ee794902342038FF3aDAB66BE987" },
+  ],
+  [base.id]: [{ protocol: "Aave v3", pool: "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5" }],
+  [arbitrum.id]: [{ protocol: "Aave v3", pool: "0x794a61358D6845594F94dc1DB02A252b5b4814aD" }],
+  [optimism.id]: [{ protocol: "Aave v3", pool: "0x794a61358D6845594F94dc1DB02A252b5b4814aD" }],
+  [polygon.id]: [{ protocol: "Aave v3", pool: "0x794a61358D6845594F94dc1DB02A252b5b4814aD" }],
+  [avalanche.id]: [{ protocol: "Aave v3", pool: "0x794a61358D6845594F94dc1DB02A252b5b4814aD" }],
+  [bsc.id]: [{ protocol: "Aave v3", pool: "0x6807dc923806fE8Fd134338EABCA509979a7e0cB" }],
+  [gnosis.id]: [{ protocol: "Aave v3", pool: "0xb50201558B00496A145fE76f7424749556E326D8" }],
+  [scroll.id]: [{ protocol: "Aave v3", pool: "0x11fCfe756c05AD438e312a7fd934381537D3cFfe" }],
+  [zkSync.id]: [{ protocol: "Aave v3", pool: "0x78e30497a3c7527d953c6B1E3541b021A98Ac43c" }],
+  [linea.id]: [{ protocol: "Aave v3", pool: "0xc47b8C00b0f69a36fa203Ffeac0334874574a8Ac" }],
+  [mantle.id]: [{ protocol: "Aave v3", pool: "0x458F293454fE0d67EC0655f3672301301DD51422" }],
+  [metis.id]: [{ protocol: "Aave v3", pool: "0x90df02551bB792286e8D4f13E0e357b4Bf1D6a57" }],
+  [fantom.id]: [{ protocol: "Aave v3", pool: "0x794a61358D6845594F94dc1DB02A252b5b4814aD" }],
+  [sonic.id]: [{ protocol: "Aave v3", pool: "0x5362dBb1e601abF3a4c14c22ffEdA64042E5eAA3" }],
+  [celo.id]: [{ protocol: "Aave v3", pool: "0x3E59A31363E2ad014dcbc521c4a0d5757d9f3402" }],
+};
+
+/**
+ * Compound V3 (Comet) markets whose supply/borrow we read per asset. baseToken()
+ * returns the base (denominated) asset; balances are denominated in that base
+ * token's smallest unit. Addresses verified as live contracts on mainnet; the
+ * USDC Comet baseToken() confirmed as USDC via eth_call.
+ */
+export interface CometMarket {
+  protocol: string;
+  market: Address;
+  baseToken: Address;
+  baseDecimals: number;
+  baseSymbol: string;
+}
+export const COMET_MARKETS: CometMarket[] = [
+  {
+    protocol: "Compound V3",
+    market: "0xc3d688B66703497DAA19211EEdFF47f25384cdc3",
+    baseToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+    baseDecimals: 6,
+    baseSymbol: "USDC",
+  },
+];
+
+/** Aave-v3 style getUserAccountData ABI (used for Aave v3 + SparkLend). */
+export const LENDING_POOL_ABI = AAVE_POOL_ABI;
+
+/** Compound v3 Comet read ABI (supply/borrow per asset). */
+export const COMET_ABI = [
+  {
+    type: "function",
+    name: "baseToken",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ name: "", type: "address" }],
+  },
+  {
+    type: "function",
+    name: "getSupplyBalance",
+    stateMutability: "view",
+    inputs: [
+      { name: "asset", type: "address" },
+      { name: "user", type: "address" },
+    ],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+  {
+    type: "function",
+    name: "getBorrowBalance",
+    stateMutability: "view",
+    inputs: [
+      { name: "asset", type: "address" },
+      { name: "user", type: "address" },
+    ],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+] as const;
 
 /**
  * Perp coins on Hyperliquid whose signed position size is treated as ETH delta

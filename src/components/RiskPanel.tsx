@@ -33,11 +33,11 @@ const SIMULATED_PORTFOLIO: LivePortfolio = {
   ],
   assetsUsd: 39290,
   aavePositions: [
-    { chain: "Ethereum", collateralUsd: 20000, debtUsd: 8000, availableToBorrowUsd: 5200, ltvPct: 38.4, healthFactor: 1.32 },
+    { chain: "Ethereum", protocol: "Aave v3", collateralUsd: 20000, debtUsd: 8000, availableToBorrowUsd: 5200, ltvPct: 38.4, healthFactor: 1.32 },
   ],
   aaveCollateralUsd: 20000,
   aaveDebtUsd: 8000,
-  riskAave: { chain: "Ethereum", collateralUsd: 20000, debtUsd: 8000, availableToBorrowUsd: 5200, ltvPct: 38.4, healthFactor: 1.32 },
+  riskAave: { chain: "Ethereum", protocol: "Aave v3", collateralUsd: 20000, debtUsd: 8000, availableToBorrowUsd: 5200, ltvPct: 38.4, healthFactor: 1.32 },
   healthFactor: 1.32,
   netUsd: 51290,
   netDeltaEth: 6.53,

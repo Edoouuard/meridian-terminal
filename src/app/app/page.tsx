@@ -123,8 +123,8 @@ export default function TerminalApp() {
   const livePositions = [
     ...live.assets.map((a) => ({ asset: a.symbol, venue: `${a.venue} · ${a.chain}`, amount: formatAssetAmount(a) })),
     ...live.aavePositions.flatMap((p) => [
-      ...(p.collateralUsd > 0 ? [{ asset: "Aave supply", venue: p.chain, amount: fmtUsd(p.collateralUsd) }] : []),
-      ...(p.debtUsd > 0 ? [{ asset: "Aave borrow", venue: p.chain, amount: "-" + fmtUsd(p.debtUsd) }] : []),
+      ...(p.collateralUsd > 0 ? [{ asset: `${p.protocol} supply`, venue: p.chain, amount: fmtUsd(p.collateralUsd) }] : []),
+      ...(p.debtUsd > 0 ? [{ asset: `${p.protocol} borrow`, venue: p.chain, amount: "-" + fmtUsd(p.debtUsd) }] : []),
     ]),
   ];
   const displayPositions = isConnected ? livePositions : POSITIONS;

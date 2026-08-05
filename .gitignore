@@ -31,3 +31,6 @@ next-env.d.ts
 .env*
 
 .wallets/
+
+# internal marketing/GTM docs (not part of the app)
+/marketing/

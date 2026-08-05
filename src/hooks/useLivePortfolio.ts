@@ -1,13 +1,32 @@
 import { formatUnits } from "viem";
 import { useEffect, useSyncExternalStore } from "react";
 import { useAccount, useBalance, useReadContracts } from "wagmi";
-import { arbitrum, avalanche, base, mainnet, optimism, polygon } from "wagmi/chains";
+import {
+  arbitrum,
+  avalanche,
+  base,
+  bsc,
+  celo,
+  fantom,
+  gnosis,
+  linea,
+  mainnet,
+  mantle,
+  metis,
+  optimism,
+  polygon,
+  scroll,
+  sonic,
+  zkSync,
+} from "wagmi/chains";
 import {
   AAVE_NO_DEBT_HEALTH_FACTOR,
   AAVE_POOL_ABI,
-  AAVE_V3_POOL_BY_CHAIN,
   CHAIN_LABEL,
+  COMET_ABI,
+  COMET_MARKETS,
   ERC20_ABI,
+  LENDING_POOLS_BY_CHAIN,
   SUPPORTED_CHAINS,
   TRACKED_TOKENS_BY_CHAIN,
   perpCoinIsEth,
@@ -15,6 +34,7 @@ import {
 import { fetchClearinghouseState, hyperliquidEnv, type HlAccount } from "@/lib/integrations/hyperliquid-live";
 import { ethPriceFromAssets, netEthDelta, stakingConcentration } from "@/lib/riskModel";
 import { useLivePrices } from "./useLivePrices";
+import { useIndexedPositions } from "./useIndexedPositions";
 
 export interface LiveAsset {
   symbol: string;
@@ -26,6 +46,8 @@ export interface LiveAsset {
 
 export interface LiveAavePosition {
   chain: string;
+  /** Lending protocol (e.g. "Aave v3", "SparkLend"). */
+  protocol: string;
   collateralUsd: number;
   debtUsd: number;
   availableToBorrowUsd: number;
@@ -107,6 +129,7 @@ export function useLivePortfolio(): LivePortfolio {
   const { address, isConnected } = useAccount();
   const hlAccount = useSharedHlAccount();
   const { data: prices } = useLivePrices();
+  const { morpho: indexedMorpho } = useIndexedPositions(address, isConnected);
 
   // Fetch the Hyperliquid clearinghouse state when a wallet connects (read-only,
   // TESTNET default). The result is written to the shared store so the portfolio
@@ -138,6 +161,16 @@ export function useLivePortfolio(): LivePortfolio {
   const optimismBalance = useBalance({ address, chainId: optimism.id, query: { enabled: isConnected } });
   const polygonBalance = useBalance({ address, chainId: polygon.id, query: { enabled: isConnected } });
   const avalancheBalance = useBalance({ address, chainId: avalanche.id, query: { enabled: isConnected } });
+  const bscBalance = useBalance({ address, chainId: bsc.id, query: { enabled: isConnected } });
+  const gnosisBalance = useBalance({ address, chainId: gnosis.id, query: { enabled: isConnected } });
+  const scrollBalance = useBalance({ address, chainId: scroll.id, query: { enabled: isConnected } });
+  const zkSyncBalance = useBalance({ address, chainId: zkSync.id, query: { enabled: isConnected } });
+  const lineaBalance = useBalance({ address, chainId: linea.id, query: { enabled: isConnected } });
+  const mantleBalance = useBalance({ address, chainId: mantle.id, query: { enabled: isConnected } });
+  const metisBalance = useBalance({ address, chainId: metis.id, query: { enabled: isConnected } });
+  const fantomBalance = useBalance({ address, chainId: fantom.id, query: { enabled: isConnected } });
+  const sonicBalance = useBalance({ address, chainId: sonic.id, query: { enabled: isConnected } });
+  const celoBalance = useBalance({ address, chainId: celo.id, query: { enabled: isConnected } });
   const nativeBalanceByChainId: Record<number, typeof mainnetBalance> = {
     [mainnet.id]: mainnetBalance,
     [base.id]: baseBalance,
@@ -145,6 +178,16 @@ export function useLivePortfolio(): LivePortfolio {
     [optimism.id]: optimismBalance,
     [polygon.id]: polygonBalance,
     [avalanche.id]: avalancheBalance,
+    [bsc.id]: bscBalance,
+    [gnosis.id]: gnosisBalance,
+    [scroll.id]: scrollBalance,
+    [zkSync.id]: zkSyncBalance,
+    [linea.id]: lineaBalance,
+    [mantle.id]: mantleBalance,
+    [metis.id]: metisBalance,
+    [fantom.id]: fantomBalance,
+    [sonic.id]: sonicBalance,
+    [celo.id]: celoBalance,
   };
 
   // ERC20 balanceOf across every chain's tracked token list, in one batched call
@@ -163,16 +206,42 @@ export function useLivePortfolio(): LivePortfolio {
     query: { enabled: isConnected && !!address },
   });
 
-  // Aave v3 getUserAccountData, one call per chain, likewise batched into one hook.
-  const aaveContracts = SUPPORTED_CHAINS.map((chain) => ({
-    address: AAVE_V3_POOL_BY_CHAIN[chain.id],
+  // Lending pools (Aave v3 + SparkLend) — getUserAccountData per pool, batched into one hook.
+  // Each contract keeps a parallel { chainId, protocol } descriptor so results map back.
+  const lendingPoolList = SUPPORTED_CHAINS.flatMap((chain) =>
+    (LENDING_POOLS_BY_CHAIN[chain.id] ?? []).map((lp) => ({ chain, protocol: lp.protocol, pool: lp.pool })),
+  );
+  const lendingContracts = lendingPoolList.map((lp) => ({
+    address: lp.pool,
     abi: AAVE_POOL_ABI,
     functionName: "getUserAccountData" as const,
     args: address ? ([address] as const) : undefined,
-    chainId: chain.id,
+    chainId: lp.chain.id,
   }));
-  const aaveQuery = useReadContracts({
-    contracts: aaveContracts,
+  const lendingQuery = useReadContracts({
+    contracts: lendingContracts,
+    query: { enabled: isConnected && !!address },
+  });
+
+  // Compound V3 (Comet) — getSupplyBalance/getBorrowBalance per market (base asset).
+  const cometContracts = COMET_MARKETS.flatMap((m) => [
+    {
+      address: m.market,
+      abi: COMET_ABI,
+      functionName: "getSupplyBalance" as const,
+      args: address ? ([m.baseToken, address] as const) : undefined,
+      chainId: mainnet.id,
+    },
+    {
+      address: m.market,
+      abi: COMET_ABI,
+      functionName: "getBorrowBalance" as const,
+      args: address ? ([m.baseToken, address] as const) : undefined,
+      chainId: mainnet.id,
+    },
+  ]);
+  const cometQuery = useReadContracts({
+    contracts: cometContracts,
     query: { enabled: isConnected && !!address },
   });
 
@@ -204,23 +273,62 @@ export function useLivePortfolio(): LivePortfolio {
   const assets = [...nativeAssets, ...tokenAssets].sort((a, b) => b.usd - a.usd);
   const assetsUsd = assets.reduce((sum, a) => sum + a.usd, 0);
 
-  const aavePositions: LiveAavePosition[] = SUPPORTED_CHAINS.map((chain, i) => {
-    const entry = aaveQuery.data?.[i];
-    if (!entry || entry.status !== "success") return null;
-    const [totalCollateralBase, totalDebtBase, availableBorrowsBase, , ltv, rawHealthFactor] = entry.result;
-    const collateralUsd = Number(formatUnits(totalCollateralBase, 8));
-    const debtUsd = Number(formatUnits(totalDebtBase, 8));
-    if (collateralUsd <= 0 && debtUsd <= 0) return null;
-    const healthFactor = rawHealthFactor >= AAVE_NO_DEBT_HEALTH_FACTOR ? null : Number(formatUnits(rawHealthFactor, 18));
-    return {
-      chain: CHAIN_LABEL[chain.id],
-      collateralUsd,
+  const aavePositions: LiveAavePosition[] = lendingPoolList
+    .map((lp, i) => {
+      const entry = lendingQuery.data?.[i];
+      if (!entry || entry.status !== "success") return null;
+      const [totalCollateralBase, totalDebtBase, availableBorrowsBase, , ltv, rawHealthFactor] = entry.result;
+      const collateralUsd = Number(formatUnits(totalCollateralBase, 8));
+      const debtUsd = Number(formatUnits(totalDebtBase, 8));
+      if (collateralUsd <= 0 && debtUsd <= 0) return null;
+      const healthFactor = rawHealthFactor >= AAVE_NO_DEBT_HEALTH_FACTOR ? null : Number(formatUnits(rawHealthFactor, 18));
+      return {
+        chain: CHAIN_LABEL[lp.chain.id],
+        protocol: lp.protocol,
+        collateralUsd,
+        debtUsd,
+        availableToBorrowUsd: Number(formatUnits(availableBorrowsBase, 8)),
+        ltvPct: Number(ltv) / 100,
+        healthFactor,
+      };
+    })
+    .filter((v): v is LiveAavePosition => v !== null);
+
+  // Compound V3 (Comet) positions — base-token amounts (baseDecimals) valued by the base symbol.
+  COMET_MARKETS.forEach((m, mi) => {
+    const supply = cometQuery.data?.[mi * 2];
+    const borrow = cometQuery.data?.[mi * 2 + 1];
+    const supplyUsd = supply?.status === "success" ? Number(formatUnits(supply.result, m.baseDecimals)) : 0;
+    const borrowUsd = borrow?.status === "success" ? Number(formatUnits(borrow.result, m.baseDecimals)) : 0;
+    if (supplyUsd <= 0 && borrowUsd <= 0) return;
+    // Prix du base token via le prix marché du symbole (fallback simple : supposé 1:1 si stable).
+    const basePrice = priceOf(m.baseSymbol) || 1;
+    aavePositions.push({
+      chain: CHAIN_LABEL[mainnet.id],
+      protocol: m.protocol,
+      collateralUsd: supplyUsd * basePrice,
+      debtUsd: borrowUsd * basePrice,
+      availableToBorrowUsd: 0,
+      ltvPct: 0,
+      healthFactor: null,
+    });
+  });
+
+  // Morpho Blue positions from the official indexer (per-market positions, already in USD).
+  indexedMorpho.forEach((m) => {
+    const collUsd = m.collateralUsd || 0;
+    const debtUsd = m.borrowUsd || 0;
+    if (collUsd <= 0 && debtUsd <= 0) return;
+    aavePositions.push({
+      chain: CHAIN_LABEL[mainnet.id],
+      protocol: m.protocol,
+      collateralUsd: collUsd + (m.supplyUsd || 0),
       debtUsd,
-      availableToBorrowUsd: Number(formatUnits(availableBorrowsBase, 8)),
-      ltvPct: Number(ltv) / 100,
-      healthFactor,
-    };
-  }).filter((v): v is LiveAavePosition => v !== null);
+      availableToBorrowUsd: 0,
+      ltvPct: 0,
+      healthFactor: null,
+    });
+  });
 
   const aaveCollateralUsd = aavePositions.reduce((sum, p) => sum + p.collateralUsd, 0);
   const aaveDebtUsd = aavePositions.reduce((sum, p) => sum + p.debtUsd, 0);
@@ -264,7 +372,7 @@ export function useLivePortfolio(): LivePortfolio {
   return {
     isConnected,
     isLoading:
-      Object.values(nativeBalanceByChainId).some((q) => q.isLoading) || tokenBalancesQuery.isLoading || aaveQuery.isLoading,
+      Object.values(nativeBalanceByChainId).some((q) => q.isLoading) || tokenBalancesQuery.isLoading || lendingQuery.isLoading || cometQuery.isLoading,
     assets,
     assetsUsd,
     aavePositions,

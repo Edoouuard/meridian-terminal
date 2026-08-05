@@ -5,7 +5,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 export const metadata: Metadata = {
   title: "Meridian: DeFi Terminal",
-  description: "Portfolio tracking, protocol yield radar, and prompt to trade execution.",
+  description: "Prompt-to-trade DeFi terminal. Portfolio tracking, yield radar, and order routing across 16 chains and 20+ protocols — Aave, Morpho, Lido, Pendle, Hyperliquid, Uniswap and more.",
 };
 
 export default function RootLayout({
