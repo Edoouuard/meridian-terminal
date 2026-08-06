@@ -19,7 +19,7 @@ import { AAVE_V3_POOL_BY_CHAIN, CHAIN_LABEL } from "./onchain";
  * and converts to base units, rejecting zero / negative / over-precise amounts.
  */
 
-export type OrderType = "supply" | "repay" | "borrow" | "withdraw" | "transfer";
+export type OrderType = "supply" | "repay" | "borrow" | "withdraw" | "transfer" | "approve";
 export type OrderProtocol = "aave" | "eth";
 
 /**
@@ -40,6 +40,8 @@ export interface Order {
   decimals?: number;
   /** Recipient address for `eth` native transfers. */
   to?: Address;
+  /** Spender for an `approve` (ERC20 allowance) order — defaults to the Aave pool. */
+  spender?: Address;
   [k: string]: unknown;
 }
 
@@ -99,6 +101,58 @@ export const AAVE_V3_POOL_REPAY_ABI = [
       { name: "onBehalfOf", type: "address" },
     ],
     outputs: [{ name: "", type: "uint256" }],
+  },
+] as const;
+
+/**
+ * Aave v3 Pool write ABI (withdraw).
+ *   withdraw(asset, amount, to)
+ */
+export const AAVE_V3_POOL_WITHDRAW_ABI = [
+  {
+    type: "function",
+    name: "withdraw",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "asset", type: "address" },
+      { name: "amount", type: "uint256" },
+      { name: "to", type: "address" },
+    ],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+] as const;
+
+/**
+ * Aave v3 Pool write ABI (borrow).
+ *   borrow(asset, amount, interestRateMode, referralCode, onBehalfOf)
+ */
+export const AAVE_V3_POOL_BORROW_ABI = [
+  {
+    type: "function",
+    name: "borrow",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "asset", type: "address" },
+      { name: "amount", type: "uint256" },
+      { name: "interestRateMode", type: "uint256" },
+      { name: "referralCode", type: "uint16" },
+      { name: "onBehalfOf", type: "address" },
+    ],
+    outputs: [],
+  },
+] as const;
+
+/** ERC20 approve(spender, amount) — required before Aave can pull supply/repay assets. */
+export const ERC20_APPROVE_ABI = [
+  {
+    type: "function",
+    name: "approve",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "spender", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
   },
 ] as const;
 
@@ -191,6 +245,46 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           senderIndex: 2,
           description: `Supply ${order.amount} ${assetLabel} as collateral to Aave v3 on ${chainLabel}`,
           riskNote: `Moves real funds on ${chainLabel} — confirm the amount before signing. Your supply earns yield and can be used as collateral (subject to liquidation).`,
+        };
+      }
+      if (order.type === "approve") {
+        // ERC20 allowance so the pool can pull the asset (surfaces before supply/repay).
+        const spender = (order.spender as Address | undefined) ?? pool;
+        return {
+          chainId,
+          address: token,
+          abi: ERC20_APPROVE_ABI,
+          functionName: "approve",
+          args: [spender, amount.value],
+          description:
+            spender === pool
+              ? `Approve Aave v3 to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`
+              : `Approve ${spender.slice(0, 10)}… to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`,
+          riskNote: `Approval lets the spender transfer up to this amount of ${assetLabel}. Confirm the spender before signing.`,
+        };
+      }
+      if (order.type === "withdraw") {
+        return {
+          chainId,
+          address: pool,
+          abi: AAVE_V3_POOL_WITHDRAW_ABI,
+          functionName: "withdraw",
+          args: [token, amount.value, zeroAddress], // `to` patched to the connected sender
+          senderIndex: 2,
+          description: `Withdraw ${order.amount} ${assetLabel} from Aave v3 on ${chainLabel}`,
+          riskNote: `Withdraws ${assetLabel} collateral from Aave on ${chainLabel}. Watch your health factor — confirm before signing.`,
+        };
+      }
+      if (order.type === "borrow") {
+        return {
+          chainId,
+          address: pool,
+          abi: AAVE_V3_POOL_BORROW_ABI,
+          functionName: "borrow",
+          args: [token, amount.value, AAVE_INTEREST_RATE_MODE_VARIABLE, AAVE_REFERRAL_CODE, zeroAddress],
+          senderIndex: 4,
+          description: `Borrow ${order.amount} ${assetLabel} against Aave collateral on ${chainLabel} (variable rate)`,
+          riskNote: `Borrowing creates Aave debt on ${chainLabel} and lowers your health factor. Confirm before signing.`,
         };
       }
       return fail(`Aave v3 does not yet support order type '${order.type}'`);

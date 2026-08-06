@@ -19,27 +19,33 @@ export function useIndexedPositions(address?: string, enabled = false): IndexerP
 
   useEffect(() => {
     if (!enabled || !address) {
-      setMorpho([]);
-      setError(null);
-      return;
+      const t = setTimeout(() => {
+        setMorpho([]);
+        setError(null);
+        setLoading(false);
+      }, 0);
+      return () => clearTimeout(t);
     }
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    fetch(`/api/positions?address=${encodeURIComponent(address)}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("positions request failed"))))
-      .then((data) => {
-        if (cancelled) return;
-        setMorpho(Array.isArray(data?.positions) ? data.positions : []);
-      })
-      .catch((e) => {
-        if (!cancelled) setError((e as Error).message || "Indexer lookup failed");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    const id = setTimeout(() => {
+      setLoading(true);
+      setError(null);
+      fetch(`/api/positions?address=${encodeURIComponent(address)}`)
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error("positions request failed"))))
+        .then((data) => {
+          if (cancelled) return;
+          setMorpho(Array.isArray(data?.positions) ? data.positions : []);
+        })
+        .catch((e) => {
+          if (!cancelled) setError((e as Error).message || "Indexer lookup failed");
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    }, 0);
     return () => {
       cancelled = true;
+      clearTimeout(id);
     };
   }, [address, enabled]);
 

@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useAccount } from "wagmi";
 import { ThreadItem, fmtUsd } from "@/lib/data";
-import { resolveOrderForLeg, protocolLabel } from "@/lib/assetMap";
+import { resolveOrderForLeg, protocolLabel, approveOrderFor } from "@/lib/assetMap";
+import { CHAIN_LABEL } from "@/lib/onchain";
 import type { Order } from "@/lib/execution";
 import type { TradeLeg } from "@/lib/tradePlan";
 import { useExecute, explorerUrlFor } from "@/hooks/useExecute";
@@ -132,10 +133,16 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
   }
 
   if (status === "error") {
-    const msg = error instanceof Error ? error.message : String(error);
+    const raw = error instanceof Error ? error.message : String(error);
+    const msg =
+      raw === "wallet not connected"
+        ? "Connect a wallet to execute"
+        : /reject|declined|user denied|4001/i.test(raw)
+          ? "Signature rejected in your wallet."
+          : `Transaction failed: ${raw}`;
     return (
       <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--risk-bad, #c0392b)" }}>
-        {msg === "wallet not connected" ? "Connect a wallet to execute" : `Execution failed: ${msg}`}
+        {msg}
         <button onClick={reset} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 11 }}>
           clear
         </button>
@@ -155,21 +162,27 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
       </button>
       <ConfirmDialog
         open={confirming}
-        title="Confirm on-chain action"
+        title={order.protocol === "aave" && order.type === "supply" ? "Approve & Supply on Aave" : "Confirm on-chain action"}
         body={
           <div>
             Sign and broadcast <strong>{order.type}</strong> of{" "}
             {typeof order.amount === "bigint"
               ? formatBaseUnits(order.amount, order.decimals ?? 18)
               : String(order.amount)}{" "}
-            {order.symbol ?? ""} on {String(order.protocol)} (chain {order.chainId}).
+            {order.symbol ?? ""} on {String(order.protocol)} ·{" "}
+            {CHAIN_LABEL[order.chainId] ?? `chain ${order.chainId}`}.
+            {order.protocol === "aave" && order.type === "supply" && (
+              <> This will first <strong>approve</strong> Aave to spend the token, then <strong>supply</strong> it.</>
+            )}
           </div>
         }
-        confirmLabel="Sign"
+        confirmLabel={order.protocol === "aave" && order.type === "supply" ? "Approve & Supply" : "Sign"}
         warning="This moves real funds from your wallet."
-        onConfirm={() => {
+        onConfirm={async () => {
           setConfirming(false);
-          execute(order);
+          const approving = approveOrderFor(order);
+          if (approving) await execute(approving);
+          await execute(order);
         }}
         onCancel={() => setConfirming(false)}
       />

@@ -39,6 +39,8 @@ export const DEFAULT_CHAIN_ID = 1;
 export const EXECUTABLE_VENUES: { venue: string; side: string; orderType: Order["type"]; protocol: Order["protocol"] }[] = [
   { venue: "Aave", side: "Supply", orderType: "supply", protocol: "aave" },
   { venue: "Aave", side: "Repay", orderType: "repay", protocol: "aave" },
+  { venue: "Aave", side: "Borrow", orderType: "borrow", protocol: "aave" },
+  { venue: "Aave", side: "Withdraw", orderType: "withdraw", protocol: "aave" },
   { venue: "L1", side: "Transfer", orderType: "transfer", protocol: "eth" },
 ];
 
@@ -138,7 +140,17 @@ export function resolveOrderForLeg(
   // --- Aave v3 supply / repay (executable) ----------------------------------
   if (protocol === "aave") {
     const orderType: Order["type"] | undefined =
-      side === "repay" ? "repay" : side === "supply" ? "supply" : undefined;
+      side === "repay"
+        ? "repay"
+        : side === "supply"
+          ? "supply"
+          : side === "borrow"
+            ? "borrow"
+            : side === "withdraw"
+              ? "withdraw"
+              : side === "approve"
+                ? "approve"
+                : undefined;
     if (!orderType) {
       return { unsupported: `Aave ${leg.side} is not wired for live execution yet` };
     }
@@ -184,4 +196,24 @@ export function resolveOrderForLeg(
     default:
       return { unsupported: `${venue} is not wired for live execution yet` };
   }
+}
+
+/**
+ * Build the ERC20 `approve` order that must precede an Aave `supply` (Aave pulls
+ * the tokens via allowance). Returns null when not applicable (non-Aave supply,
+ * no token). The Execute UI runs this first, then the supply.
+ */
+export function approveOrderFor(order: Order): Order | null {
+  if (order.protocol === "aave" && order.type === "supply" && order.token) {
+    return {
+      type: "approve",
+      protocol: "aave",
+      token: order.token,
+      symbol: order.symbol,
+      amount: order.amount,
+      chainId: order.chainId,
+      decimals: order.decimals,
+    };
+  }
+  return null;
 }
