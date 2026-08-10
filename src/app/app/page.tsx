@@ -9,7 +9,7 @@ import { TickerBanner } from "@/components/TickerBanner";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { HyperliquidPanel } from "@/components/HyperliquidPanel";
-import { ChainCoverage } from "@/components/ChainCoverage";
+import { ChainOverview } from "@/components/ChainOverview";
 import { SolanaPanel } from "@/components/SolanaPanel";
 import { BetaGate } from "@/components/BetaGate";
 import { LiveAsset, LivePortfolio, useLivePortfolio } from "@/hooks/useLivePortfolio";
@@ -233,9 +233,9 @@ export default function TerminalApp() {
           </div>
 
           <RiskPanel live={live} isConnected={isConnected} />
-          <HyperliquidPanel />
-          <HistoryPanel />
-                    <ChainCoverage />
+                    <HyperliquidPanel />
+                    <HistoryPanel />
+                    <ChainOverview />
                     <SolanaPanel />
                   </div>
 
