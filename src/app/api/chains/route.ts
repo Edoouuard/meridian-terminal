@@ -17,6 +17,9 @@ const TARGET_CHAINS: { id: string; name: string; ll: string }[] = [
   { id: "solana", name: "Solana", ll: "Solana" },
 ];
 
+/** Exclude centralized exchanges / wrapped-token placeholders from "biggest protocols". */
+const EXCLUDE_PROTOCOL = /CEX|Binance|Coinbase|OKX|Kraken|Bitfinex|Bybit|KuCoin|Crypto\.com|Gemini|Wrapped|WETH|WBTC| Staked ETH/i;
+
 export interface LiveProtocol {
   name: string;
   tvlUsd: number;
@@ -72,6 +75,7 @@ export async function GET() {
         const top = protocolsData
           .filter((p) => p.chains?.includes(c.ll) || p.chain === c.ll)
           .map((p) => ({ name: p.name, tvlUsd: Math.round(tvlFor(p, c.ll)), category: p.category ?? "other" }))
+          .filter((p) => !EXCLUDE_PROTOCOL.test(p.name))
           .filter((p) => p.tvlUsd > 0)
           .sort((a, b) => b.tvlUsd - a.tvlUsd)
           .slice(0, 5);
