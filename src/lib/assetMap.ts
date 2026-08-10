@@ -17,10 +17,10 @@ import {
  *   - It resolves a leg's asset symbol to an ERC20 address + decimals via
  *     `TRACKED_TOKENS_BY_CHAIN` (the canonical per-chain asset list).
  *   - It maps the leg's USD notional to an exact human-unit amount using the
- *     quote layer (`src/lib/quote.ts`) and a caller-supplied live price list
- *     when available. With a live price the amount is exact (stablecoins peg to
- *     whole units; ETH-like assets divide by price); without one it falls back
- *     to the documented size≈amount approximation.
+ *     quote layer (`src/lib/quote.ts`) and a caller-supplied live price list.
+ *     With a live price the amount is exact (stablecoins peg to whole units;
+ *     ETH-like assets divide by price); WITHOUT one the order is NOT sized at all
+ *     — valuation is HARD-FAIL, never approximated.
  *   - For venues that cannot execute yet (Hyperliquid/Extended perps, Pendle PT,
  *     options, swaps, staking, bridges, Aave borrow), it returns
  *     `{ unsupported: <message> }` instead of ever pretending to succeed.
@@ -53,11 +53,11 @@ export function protocolLabel(protocol: string | undefined): string {
 /**
  * Resolve a leg's USD notional into an exact human-unit amount string.
  *
- * Now backed by the quote layer: when a live price is available for the asset we
+ * Backed by the quote layer: when a live price is available for the asset we
  * divide the notional by the price and format to the token's decimals (exact for
- * 1:1 stablecoins, precise for ETH-like assets). When no price is available we
- * keep the historical approximation (USD notional ≈ token amount). When no size
- * was parsed we fall back to a small, demo-friendly default so the button works.
+ * 1:1 stablecoins, precise for ETH-like assets). When no price is available this
+ * returns `""` — an exact amount cannot be derived, and `resolveOrderForLeg`
+ * refuses to build the order rather than approximating.
  *
  * @param prices optional live price list (symbol -> price); used to quote the asset.
  * @param chainId optional target chain (defaults to `DEFAULT_CHAIN_ID`).
@@ -66,7 +66,9 @@ export function humanAmountForLeg(leg: TradeLeg, prices?: PriceEntry[], chainId?
   const symbol = bareSymbol(leg.asset);
   const price = resolvePriceFromList(prices, symbol);
   const decimals = tokenDecimalsFor(symbol, chainId);
-  return usdToTokenAmount(symbol, leg.sizeUsd, price, decimals).amount;
+  const quote = usdToTokenAmount(symbol, leg.sizeUsd, price, decimals);
+  // HARD-FAIL: no live price -> no exact amount. Return "" rather than approximating.
+  return quote ? quote.amount : "";
 }
 
 /** Decimals for a tracked token symbol on a chain, or 18 when unknown. */
@@ -97,8 +99,8 @@ function bareSymbol(asset: string): string {
  * Amounts are quoted exactly via `src/lib/quote.ts`: when `prices` carries a
  * live price for the asset, the Order's amount is the precise base-unit bigint
  * for the USD notional (stablecoins peg to whole units; ETH-like assets divide
- * by price). When no price is available it falls back to the statistical
- * size≈amount approximation, so the button still works offline.
+ * by price). When no live price is available the order is NOT sized at all and
+ * this returns `{ unsupported }` — valuation hard-fails, never approximates.
  *
  * @param leg     the parsed trade leg (side / asset / protocol / sizeUsd)
  * @param address optional recipient address, required only for native `eth`
@@ -122,7 +124,8 @@ export function resolveOrderForLeg(
   const resolveChainId = chainId ?? DEFAULT_CHAIN_ID;
   const venue = protocolLabel(leg.protocol);
 
-  // Quote the leg's notional once: live price when available, else approximation.
+  // Quote the leg's notional once. HARD-FAIL: `null` (no live price) means we
+  // refuse to size the order rather than approximating the amount.
   const quoteFor = (symbol: string, decimals: number) =>
     usdToTokenAmount(symbol, leg.sizeUsd, resolvePriceFromList(prices, symbol), decimals);
 
@@ -133,6 +136,9 @@ export function resolveOrderForLeg(
     }
     const symbol = bareSymbol(leg.asset) || "ETH";
     const quote = quoteFor(symbol, 18);
+    if (!quote) {
+      return { unsupported: `No live price for ${symbol} — cannot size this order safely. Price feeds down?` };
+    }
     return {
       type: "transfer",
       protocol: "eth",
@@ -169,6 +175,11 @@ export function resolveOrderForLeg(
       };
     }
     const quote = quoteFor(token.symbol, token.decimals);
+    if (!quote) {
+      return {
+        unsupported: `No live price for ${token.symbol} — cannot size this order safely. Price feeds down?`,
+      };
+    }
     return {
       type: orderType,
       protocol: "aave",

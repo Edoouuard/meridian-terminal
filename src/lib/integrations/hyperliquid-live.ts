@@ -30,11 +30,39 @@ export interface HyperliquidEnv {
   testnet: boolean;
 }
 
+/**
+ * Global MAINNET gate for the live Hyperliquid layer.
+ *
+ * TESTNET-FIRST by default. Only when `NEXT_PUBLIC_HL_MAINNET === "true"` (set
+ * in the deployment / .env) does this module route order submission AND account
+ * reads to the REAL Hyperliquid mainnet (https://api.hyperliquid.xyz).
+ *
+ * ⚠️ MAINNET TRADES REAL FUNDS. Mainnet perp orders are irreversible and move
+ * real money on chain. There is no warning, cancellation, or safety net. Ensure
+ * the flag is OFF (or unset) for any development, test, or demo run.
+ */
+export const HL_ENV: "testnet" | "mainnet" =
+  process.env.NEXT_PUBLIC_HL_MAINNET === "true" ? "mainnet" : "testnet";
+
+/** Boolean mainnet marker the UI can display. True ONLY when the flag is set. */
+export const HL_MAINNET: boolean = HL_ENV === "mainnet";
+
+/** Human-readable mainnet marker string the UI can render ("MAINNET" when live). */
+export const HL_ENV_LABEL: "MAINNET" | "TESTNET" = HL_MAINNET ? "MAINNET" : "TESTNET";
+
+/**
+ * Resolve the live Hyperliquid base URLs (info reads + exchange order submit).
+ * The global `NEXT_PUBLIC_HL_MAINNET` flag is the master switch: when it is set
+ * we route to mainnet REGARDLESS of `testnet`. When it is unset (default) we
+ * honor the explicit `testnet` argument — and since callers default that to
+ * true, the module stays on testnet unless the flag is deliberately enabled.
+ */
 export function hyperliquidEnv(testnet: boolean): HyperliquidEnv {
+  const mainnet = HL_MAINNET || !testnet;
   return {
-    infoUrl: testnet ? HYPERLIQUID_TESTNET_INFO_URL : HYPERLIQUID_INFO_URL,
-    exchangeUrl: testnet ? HYPERLIQUID_TESTNET_EXCHANGE_URL : HYPERLIQUID_EXCHANGE_URL,
-    testnet,
+    infoUrl: mainnet ? HYPERLIQUID_INFO_URL : HYPERLIQUID_TESTNET_INFO_URL,
+    exchangeUrl: mainnet ? HYPERLIQUID_EXCHANGE_URL : HYPERLIQUID_TESTNET_EXCHANGE_URL,
+    testnet: !mainnet,
   };
 }
 
@@ -148,7 +176,7 @@ export async function executeHyperliquidPerp(
   if (params.coinQty !== undefined && !(Number.isFinite(params.coinQty) && params.coinQty > 0)) {
     return {
       ok: false,
-      testnet,
+      testnet: env.testnet,
       symbol,
       marketPrice: null,
       order: null as unknown as PerpOrder,
@@ -161,7 +189,7 @@ export async function executeHyperliquidPerp(
   ) {
     return {
       ok: false,
-      testnet,
+      testnet: env.testnet,
       symbol,
       marketPrice: null,
       order: null as unknown as PerpOrder,
@@ -173,11 +201,11 @@ export async function executeHyperliquidPerp(
   if (price === null) {
     return {
       ok: false,
-      testnet,
+      testnet: env.testnet,
       symbol,
       marketPrice: null,
       order: null as unknown as PerpOrder,
-      error: `Could not fetch a live price for ${symbol} on ${testnet ? "Hyperliquid testnet" : "Hyperliquid"}. No order was built or signed.`,
+      error: `Could not fetch a live price for ${symbol} on ${env.testnet ? "Hyperliquid testnet" : "Hyperliquid"}. No order was built or signed.`,
     };
   }
 
@@ -206,7 +234,7 @@ export async function executeHyperliquidPerp(
   const { status, body } = await submitToExchange(req, env);
 
   const ok = status >= 200 && status < 300 && !String(JSON.stringify(body)).includes('"isError"') && !String(JSON.stringify(body)).includes('"type":"err"');
-  return { ok, testnet, symbol, marketPrice: price, order, response: body, error: ok ? undefined : `Hyperliquid rejected the order (HTTP ${status}).` };
+  return { ok, testnet: env.testnet, symbol, marketPrice: price, order, response: body, error: ok ? undefined : `Hyperliquid rejected the order (HTTP ${status}).` };
 }
 
 /** Which venues the live layer can actually route/submit for right now. */

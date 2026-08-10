@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAccount } from "wagmi";
 import { ThreadItem, fmtUsd } from "@/lib/data";
 import { resolveOrderForLeg, protocolLabel, approveOrderFor } from "@/lib/assetMap";
@@ -12,6 +12,7 @@ import { useHyperliquid } from "@/hooks/useHyperliquid";
 import { useLivePrices } from "@/hooks/useLivePrices";
 import { formatBaseUnits, resolvePriceFromList, usdToTokenAmount, type PriceEntry } from "@/lib/quote";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { assessHealthFactorGuardrail } from "@/lib/safety";
 import { recordExecution, type OrderRecordType } from "@/lib/history";
 
 /** Map an execution Order type to a coarse history record type. */
@@ -79,6 +80,12 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
   const { status, data, error, execute, reset } = useExecute();
   const [confirming, setConfirming] = useState(false);
   const recordedRef = useRef<string | null>(null);
+
+  // Health-factor guardrail for REAL-money Aave borrow/withdraw. No live health
+  // factor is available at signing time in this harness, so the helper honestly
+  // reports computable=false and requires an explicit extra confirmation for
+  // any HF-lowering action. The ConfirmDialog surfaces that warning.
+  const guardrail = useMemo(() => assessHealthFactorGuardrail({ orderType: order.type }), [order.type]);
 
   // Log real outcomes to the local order-history store (guarded so a render
   // doesn't double-record the same hash).
@@ -178,6 +185,7 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
         }
         confirmLabel={order.protocol === "aave" && order.type === "supply" ? "Approve & Supply" : "Sign"}
         warning="This moves real funds from your wallet."
+        guardrail={guardrail}
         onConfirm={async () => {
           setConfirming(false);
           const approving = approveOrderFor(order);

@@ -10,6 +10,12 @@
  *   - ETH-like assets use the live price to derive the precise human amount
  *     ("$1000 at ~$4180 -> 0.23923445… ETH" -> exact base units).
  *
+ * HARD-FAIL pricing: a real order is NEVER sized from an approximation. If there
+ * is no live price (missing / not-a-number / non-positive), `usdToTokenAmount`
+ * returns `null` — an explicit UNPRICEABLE signal — so callers refuse to build
+ * the order instead of estimating. Only a valid, positive, finite price produces
+ * a typed amount.
+ *
  * Every function here is a pure, offline helper. Feeding it a price list is the
  * caller's job (they own the live fetch); this module never touches the network.
  * All amounts are validated positive; nothing here ever triggers an execution.
@@ -34,8 +40,8 @@ export interface UsdQuote {
   amount: string;
   /** Exact base-unit amount: Math.round(human * 10^decimals). This is what actually executes. */
   amountBase: bigint;
-  /** true when a real price was used; false when we fell back to the size≈amount approximation. */
-  livePriced: boolean;
+  /** Always true: a `UsdQuote` is only ever produced from a real live price (no approximation). */
+  livePriced: true;
 }
 
 /**
@@ -60,7 +66,7 @@ const DEFAULT_SIZE_USD = 100;
 /**
  * Find a usable price for a symbol in a price list (case/PERP-insensitive).
  * Returns null when absent or not a positive finite number, so callers always
- * fall back gracefully instead of quoting on garbage.
+ * refuse to size the order instead of quoting on garbage.
  */
 export function resolvePriceFromList(
   prices: PriceEntry[] | undefined,
@@ -82,57 +88,45 @@ export function resolvePriceFromList(
  *
  * @param symbol   the human-readable asset symbol (informational).
  * @param sizeUsd  the USD notional (positive). Undefined/<=0 falls back to a default.
- * @param priceUsd the live price in USD per token; null/0 lets us fall back to the
- *                 historical size≈amount approximation (no misleading exactness).
+ * @param priceUsd the live price in USD per token. When null / non-finite / <=0 there
+ *                 is no usable live price.
  * @param decimals token decimals (defaults to 18 when omitted/invalid).
  *
- * SAFETY: never returns a zero/negative base amount — if a price would collapse
- * the quote to dust, it falls back to the approximation rather than emitting 0.
+ * HARD-FAIL pricing: returns `null` (an explicit UNPRICEABLE signal) when there is
+ * no usable live price — a real order must NEVER be sized from an approximation.
+ * The caller is expected to refuse to build the order when `null` comes back. If
+ * the notional would collapse to dust at a real price, that also returns `null`
+ * rather than approximating, since guessing an amount here could hand a
+ * funds-moving harness the wrong number.
+ *
+ * @returns the exact `UsdQuote` when a usable live price exists, otherwise `null`.
  */
 export function usdToTokenAmount(
   symbol: string,
   sizeUsd: number | undefined,
   priceUsd: number | null,
   decimals: number = 18,
-): UsdQuote {
+): UsdQuote | null {
   const dec = Number.isInteger(decimals) && decimals >= 0 ? decimals : 18;
   const size =
     sizeUsd && Number.isFinite(sizeUsd) && sizeUsd > 0 ? sizeUsd : DEFAULT_SIZE_USD;
   const price =
     priceUsd && Number.isFinite(priceUsd) && priceUsd > 0 ? priceUsd : null;
 
-  const scale = BigInt(10) ** BigInt(dec);
-
+  // No usable live price — refuse to size. Never approximate.
   if (price === null) {
-    // No live price — retain the documented approximation (size ≈ human amount).
-    const amountBase = BigInt(Math.round(size)) * scale;
-    return {
-      symbol,
-      sizeUsd: size,
-      priceUsd: null,
-      decimals: dec,
-      amount: formatBaseUnits(amountBase, dec),
-      amountBase,
-      livePriced: false,
-    };
+    return null;
   }
+
+  const scale = BigInt(10) ** BigInt(dec);
 
   // Exact base amount for the notional at the given price.
   const amountBase = BigInt(Math.round((size / price) * Number(scale)));
 
-  // Guard: an ultra-expensive asset (or dust notional) must never zero out the
-  // order. Fall back to the approximation instead of emitting 0 base units.
+  // An ultra-expensive asset (or dust notional) must never be sized from an
+  // approximation either — refuse rather than emit a wrong/zero order.
   if (amountBase <= BigInt(0)) {
-    const fallback = BigInt(Math.round(size)) * scale;
-    return {
-      symbol,
-      sizeUsd: size,
-      priceUsd: price,
-      decimals: dec,
-      amount: formatBaseUnits(fallback, dec),
-      amountBase: fallback,
-      livePriced: false,
-    };
+    return null;
   }
 
   return {

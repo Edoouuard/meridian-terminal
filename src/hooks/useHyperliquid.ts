@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useAccount, useSignTypedData } from "wagmi";
 import { executeHyperliquidPerp, type ExecuteHyperliquidParams } from "@/lib/integrations/hyperliquid-live";
 import type { TypedData } from "@/lib/integrations/types";
@@ -40,6 +40,12 @@ export function useHyperliquid(): UseHyperliquidResult {
   const { address, isConnected } = useAccount();
   const { signTypedDataAsync } = useSignTypedData();
   const [state, setState] = useState<HlState>({ status: "idle" });
+  /**
+   * Idempotency guard: once a perp submission is in flight (or already
+   * confirmed), any further `execute` call is a no-op. A double-click / rapid
+   * re-click can never fire a second EIP-712 signature or a second order.
+   */
+  const submittingRef = useRef(false);
 
   const execute = useCallback(
     async (p: {
@@ -51,38 +57,46 @@ export function useHyperliquid(): UseHyperliquidResult {
       coinQty?: number;
       reduceOnly?: boolean;
     }) => {
-      if (!isConnected || !address) {
-        setState({ status: "error", error: "wallet not connected" });
-        return;
-      }
-      setState({ status: "preparing" });
-      const sign = async (typed: TypedData) => {
-        setState({ status: "signing" });
-        // The typed payload already carries EIP712Domain inside `types`.
-        return signTypedDataAsync({
-          domain: typed.domain as Parameters<typeof signTypedDataAsync>[0]["domain"],
-          types: typed.types as Parameters<typeof signTypedDataAsync>[0]["types"],
-          primaryType: typed.primaryType,
-          message: typed.message as Parameters<typeof signTypedDataAsync>[0]["message"],
-        });
-      };
+      // ANTI DOUBLE-SUBMISSION: no-op while a submission is in flight (or after
+      // a confirmed result). Repeat clicks never re-sign or re-submit an order.
+      if (submittingRef.current) return;
+      submittingRef.current = true;
       try {
-        setState({ status: "submitting" });
-        const params: ExecuteHyperliquidParams = {
-          symbol: p.symbol,
-          isBuy: p.isBuy,
-          sizeUsd: p.sizeUsd,
-          leverage: p.leverage,
-          signer: address,
-          sign,
-          testnet: p.testnet,
-          coinQty: p.coinQty,
-          reduceOnly: p.reduceOnly,
+        if (!isConnected || !address) {
+          setState({ status: "error", error: "wallet not connected" });
+          return;
+        }
+        setState({ status: "preparing" });
+        const sign = async (typed: TypedData) => {
+          setState({ status: "signing" });
+          // The typed payload already carries EIP712Domain inside `types`.
+          return signTypedDataAsync({
+            domain: typed.domain as Parameters<typeof signTypedDataAsync>[0]["domain"],
+            types: typed.types as Parameters<typeof signTypedDataAsync>[0]["types"],
+            primaryType: typed.primaryType,
+            message: typed.message as Parameters<typeof signTypedDataAsync>[0]["message"],
+          });
         };
-        const result = await executeHyperliquidPerp(params);
-        setState({ status: result.ok ? "confirmed" : "error", result, error: result.error });
-      } catch (err) {
-        setState({ status: "error", error: err instanceof Error ? err.message : String(err) });
+        try {
+          setState({ status: "submitting" });
+          const params: ExecuteHyperliquidParams = {
+            symbol: p.symbol,
+            isBuy: p.isBuy,
+            sizeUsd: p.sizeUsd,
+            leverage: p.leverage,
+            signer: address,
+            sign,
+            testnet: p.testnet,
+            coinQty: p.coinQty,
+            reduceOnly: p.reduceOnly,
+          };
+          const result = await executeHyperliquidPerp(params);
+          setState({ status: result.ok ? "confirmed" : "error", result, error: result.error });
+        } catch (err) {
+          setState({ status: "error", error: err instanceof Error ? err.message : String(err) });
+        }
+      } finally {
+        submittingRef.current = false;
       }
     },
     [address, isConnected, signTypedDataAsync],

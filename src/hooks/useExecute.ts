@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useAccount, useSendTransaction, useWriteContract } from "wagmi";
 import { applySender, buildExecution, type ExecutionPlan, type Order } from "@/lib/execution";
 import { mainnet, base, arbitrum, optimism, polygon, avalanche } from "wagmi/chains";
+import { CHAIN_LABEL } from "@/lib/onchain";
 
 export type ExecuteStatus = "idle" | "confirming" | "confirmed" | "error";
 
@@ -51,43 +52,68 @@ export interface UseExecuteResult extends ExecuteState {
  * The ABI/args are validated by `buildExecution` (pure) before any write.
  */
 export function useExecute(): UseExecuteResult {
-  const { address, isConnected } = useAccount();
+  const { address, isConnected, chain } = useAccount();
   const { writeContractAsync } = useWriteContract();
   const { sendTransactionAsync } = useSendTransaction();
 
   const [state, setState] = useState<ExecuteState>({ status: "idle" });
+  /**
+   * Idempotency guard: once a submission is in flight (or already confirmed),
+   * any further call to `execute` is a no-op. A double-click / rapid re-click can
+   * therefore never fire a second signature or a second broadcast. Reset only
+   * via `reset`. Also guards against React 18 double-invocation of the callback.
+   */
+  const submittingRef = useRef(false);
 
   const execute = useCallback(
     async (order: Order) => {
-      setState({ status: "idle" });
-
-      if (!isConnected || !address) {
-        setState({ status: "error", error: new Error("wallet not connected") });
-        return;
-      }
-
-      const built = buildExecution(order);
-      if ("error" in built) {
-        setState({ status: "error", error: new Error(built.error) });
-        return;
-      }
-
-      const plan = applySender(built, address);
-      if ("error" in plan) {
-        setState({ status: "error", error: new Error(plan.error) });
-        return;
-      }
-
-      setState({ status: "confirming" });
+      // ANTI DOUBLE-SUBMISSION: no-op while a submission is in flight. Repeat
+      // clicks never re-sign or re-broadcast. Guard also resets on error.
+      if (submittingRef.current) return;
+      submittingRef.current = true;
       try {
-        const hash = await submitPlan(plan, writeContractAsync, sendTransactionAsync);
-        setState({ status: "confirmed", data: hash });
-      } catch (err) {
-        // Catches both user signer-rejection (e.g. code 4001) and RPC failures.
-        setState({ status: "error", error: err });
+        setState({ status: "idle" });
+
+        if (!isConnected || !address) {
+          setState({ status: "error", error: new Error("wallet not connected") });
+          return;
+        }
+
+        // CHAIN-MATCH CHECK before building/signing: the order is for a specific
+        // chainId; the wallet must be connected to that exact chain. If not, refuse
+        // to build or sign so we never broadcast an order on the wrong network.
+        const connectedChainId = chain?.id;
+        if (connectedChainId !== undefined && order.chainId !== connectedChainId) {
+          const label = CHAIN_LABEL[order.chainId] ?? `chain ${order.chainId}`;
+          setState({ status: "error", error: new Error(`Wrong network - switch to ${label} before signing`) });
+          return;
+        }
+
+        const built = buildExecution(order);
+        if ("error" in built) {
+          setState({ status: "error", error: new Error(built.error) });
+          return;
+        }
+
+        const plan = applySender(built, address);
+        if ("error" in plan) {
+          setState({ status: "error", error: new Error(plan.error) });
+          return;
+        }
+
+        setState({ status: "confirming" });
+        try {
+          const hash = await submitPlan(plan, writeContractAsync, sendTransactionAsync);
+          setState({ status: "confirmed", data: hash });
+        } catch (err) {
+          // Catches both user signer-rejection (e.g. code 4001) and RPC failures.
+          setState({ status: "error", error: err });
+        }
+      } finally {
+        submittingRef.current = false;
       }
     },
-    [address, isConnected, sendTransactionAsync, writeContractAsync],
+    [address, isConnected, chain, sendTransactionAsync, writeContractAsync],
   );
 
   const reset = useCallback(() => setState({ status: "idle" }), []);
