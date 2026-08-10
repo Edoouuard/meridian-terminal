@@ -9,6 +9,8 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@solana/spl-token": "^0.4.15",
+    "@solana/web3.js": "^1.98.4",
     "@tanstack/react-query": "^5",
     "@vercel/blob": "^2.6.1",
     "next": "16.2.11",

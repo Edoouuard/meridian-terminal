@@ -60,17 +60,18 @@ export function protocolLabel(protocol: string | undefined): string {
  * was parsed we fall back to a small, demo-friendly default so the button works.
  *
  * @param prices optional live price list (symbol -> price); used to quote the asset.
+ * @param chainId optional target chain (defaults to `DEFAULT_CHAIN_ID`).
  */
-export function humanAmountForLeg(leg: TradeLeg, prices?: PriceEntry[]): string {
+export function humanAmountForLeg(leg: TradeLeg, prices?: PriceEntry[], chainId?: number): string {
   const symbol = bareSymbol(leg.asset);
   const price = resolvePriceFromList(prices, symbol);
-  const decimals = tokenDecimalsFor(symbol);
+  const decimals = tokenDecimalsFor(symbol, chainId);
   return usdToTokenAmount(symbol, leg.sizeUsd, price, decimals).amount;
 }
 
-/** Decimals for a tracked token symbol on the default chain, or 18 when unknown. */
-function tokenDecimalsFor(symbol: string): number {
-  const token = findToken(symbol, DEFAULT_CHAIN_ID);
+/** Decimals for a tracked token symbol on a chain, or 18 when unknown. */
+function tokenDecimalsFor(symbol: string, chainId?: number): number {
+  const token = findToken(symbol, chainId ?? DEFAULT_CHAIN_ID);
   return token ? token.decimals : 18;
 }
 
@@ -104,15 +105,21 @@ function bareSymbol(asset: string): string {
  *                transfers (used as the `to` of the order).
  * @param prices  optional live price list (symbol -> price) used to quote the
  *                asset exactly. Pass the fetched list from `/api/prices`.
+ * @param chainId optional target chain id (the connected chain). When omitted,
+ *                defaults to `DEFAULT_CHAIN_ID` (mainnet). The leg's token is
+ *                resolved on THIS chain and the resulting order carries that
+ *                chainId, so "supply USDC on Base" routes to Base's Aave pool
+ *                + Base's USDC. unwired chains fall through to `{ unsupported }`.
  */
 export function resolveOrderForLeg(
   leg: TradeLeg,
   address?: Address,
   prices?: PriceEntry[],
+  chainId?: number,
 ): Order | { unsupported: string } {
   const protocol = (leg.protocol || "").toLowerCase().trim();
   const side = (leg.side || "").toLowerCase().trim();
-  const chainId = DEFAULT_CHAIN_ID;
+  const resolveChainId = chainId ?? DEFAULT_CHAIN_ID;
   const venue = protocolLabel(leg.protocol);
 
   // Quote the leg's notional once: live price when available, else approximation.
@@ -131,7 +138,7 @@ export function resolveOrderForLeg(
       protocol: "eth",
       symbol,
       amount: quote.amountBase,
-      chainId,
+      chainId: resolveChainId,
       decimals: 18,
       to: address,
     };
@@ -155,10 +162,10 @@ export function resolveOrderForLeg(
       return { unsupported: `Aave ${leg.side} is not wired for live execution yet` };
     }
     const symbol = bareSymbol(leg.asset);
-    const token = findToken(symbol, chainId);
+    const token = findToken(symbol, resolveChainId);
     if (!token) {
       return {
-        unsupported: `Aave ${orderType} of "${symbol}" is not wired yet: "${symbol}" has no tracked ${chainId === 1 ? "mainnet" : "chain " + chainId} address.`,
+        unsupported: `Aave ${orderType} of "${symbol}" is not wired yet: "${symbol}" has no tracked ${resolveChainId === 1 ? "mainnet" : "chain " + resolveChainId} address.`,
       };
     }
     const quote = quoteFor(token.symbol, token.decimals);
@@ -168,7 +175,7 @@ export function resolveOrderForLeg(
       symbol: token.symbol,
       token: token.address,
       amount: quote.amountBase,
-      chainId,
+      chainId: resolveChainId,
       decimals: token.decimals,
     };
   }

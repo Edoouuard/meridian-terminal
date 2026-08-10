@@ -339,6 +339,8 @@ function PlanCard({ item }: { item: ThreadItem }) {
   const plan = item.plan!;
   // Live price list used to quote each leg's USD notional into an exact token amount.
   const { data: prices } = useLivePrices();
+  // Connected chain routes Aave legs to the wallet's network (multi-EVM execution).
+  const { chain } = useAccount();
   const orderStyle: React.CSSProperties = {
     borderLeft: "2px solid var(--color-accent)",
     paddingLeft: "var(--space-2)",
@@ -359,7 +361,7 @@ function PlanCard({ item }: { item: ThreadItem }) {
         {plan.legs.length > 0 && (
           <div style={orderStyle}>
             {plan.legs.map((leg, i) => {
-              const resolved = resolveOrderForLeg(leg, undefined, prices);
+              const resolved = resolveOrderForLeg(leg, undefined, prices, chain?.id);
               return (
                 <div key={i} style={{ marginTop: i === 0 ? 0 : "var(--space-2)" }}>
                   <OrderRow label={leg.side} value={legRowValue(leg)} />

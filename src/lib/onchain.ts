@@ -121,20 +121,34 @@ export const TRACKED_TOKENS_BY_CHAIN: Record<number, TrackedToken[]> = {
   [base.id]: [
     { symbol: "USDC", address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
     { symbol: "WETH", address: "0x4200000000000000000000000000000000000006", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
+    // Aave v3 Base canonical assets: wstETH (Lido) and cbBTC (Coinbase) are the
+    // chain's ETH-staking / BTC collateral markets. Base has no canonical WBTC.
+    { symbol: "wstETH", address: "0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452", decimals: 18, priceSymbol: "WSTETH", venue: "Lido" },
+    { symbol: "cbBTC", address: "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf", decimals: 8, priceSymbol: "WBTC", venue: "Wallet" },
   ],
   [arbitrum.id]: [
     { symbol: "USDC", address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
     { symbol: "USDT", address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
     { symbol: "WETH", address: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
+    // Aave v3 Arbitrum major-asset markets:
+    { symbol: "WBTC", address: "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", decimals: 8, priceSymbol: "WBTC", venue: "Wallet" },
+    { symbol: "wstETH", address: "0x5979D7b546E38E414f7E9822514be443A4800529", decimals: 18, priceSymbol: "WSTETH", venue: "Lido" },
   ],
   [optimism.id]: [
     { symbol: "USDC", address: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
     { symbol: "USDT", address: "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
     { symbol: "WETH", address: "0x4200000000000000000000000000000000000006", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
+    // Aave v3 Optimism major-asset markets:
+    { symbol: "WBTC", address: "0x68f180fcCe6836688e9084f035309E29Bf0A2095", decimals: 8, priceSymbol: "WBTC", venue: "Wallet" },
+    { symbol: "wstETH", address: "0x1F32b1c2345538c0c6f582fCB022739c4AbeEfa8", decimals: 18, priceSymbol: "WSTETH", venue: "Lido" },
   ],
   [polygon.id]: [
     { symbol: "USDC", address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
     { symbol: "USDT", address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
+    // Aave v3 Polygon major-asset markets:
+    { symbol: "WETH", address: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
+    { symbol: "WBTC", address: "0x1bfd67037b42cf73acF2047067bd4F2C47D9BfD6", decimals: 8, priceSymbol: "WBTC", venue: "Wallet" },
+    { symbol: "wstETH", address: "0x03b54A6e9a984069379fae1a4fC4dBAE93B3bCCD", decimals: 18, priceSymbol: "WSTETH", venue: "Lido" },
   ],
   [bsc.id]: [
     { symbol: "USDT", address: "0x55d398326f99059fF775485246999027B3197955", decimals: 18, priceSymbol: "USDT", venue: "Wallet" },
@@ -161,6 +175,12 @@ export const TRACKED_TOKENS_BY_CHAIN: Record<number, TrackedToken[]> = {
   [avalanche.id]: [
     { symbol: "USDC", address: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
     { symbol: "USDT", address: "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
+    // Aave v3 Avalanche markets. Native AVAX lives as wAVAX in Aave and needs the
+    // WrappedTokenGatewayV3 (wrap+supply) the harness doesn't wire, so it is left
+    // out rather than risking a broken plain-pool supply. WETH.e / WBTC.e are the
+    // canonical Aave v3 Avalanche markets and work directly via pool.supply.
+    { symbol: "WETH", address: "0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
+    { symbol: "WBTC", address: "0x50b7545627a5162F82A992c33b87aDc75187B218", decimals: 8, priceSymbol: "WBTC", venue: "Wallet" },
   ],
 };
 
