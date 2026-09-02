@@ -657,18 +657,7 @@ function PlanCard({ item }: { item: ThreadItem }) {
   );
 }
 
-export function ThreadCard({
-  item,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- backward-compat placeholder, ignored by the real harness
-  executed,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- backward-compat placeholder, ignored by the real harness
-  onExecute,
-}: {
-  item: ThreadItem;
-  /** Backward-compat placeholders kept so legacy callers (landing PromptDemo) still type-check. Ignored by the real harness. */
-  executed?: boolean;
-  onExecute?: () => void;
-}) {
+export function ThreadCard({ item }: { item: ThreadItem }) {
   const orderStyle: React.CSSProperties = {
     borderLeft: "2px solid var(--color-accent)",
     paddingLeft: "var(--space-2)",
