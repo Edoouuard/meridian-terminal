@@ -138,6 +138,29 @@ describe("assetMap — approveOrderFor", () => {
     expect(approveOrderFor({ ...supply, type: "repay" })).toBeNull();
     expect(approveOrderFor({ ...supply, token: undefined })).toBeNull();
   });
+
+  it("derives an approve order from a Uniswap swap order", () => {
+    const swap: Order = {
+      type: "swap",
+      protocol: "uniswap",
+      token: BASE_AARCHING,
+      tokenOut: "0x4200000000000000000000000000000000000006",
+      fee: 3000,
+      amount: 1_000_000_000n,
+      amountOutMinimum: 1n,
+      chainId: BASE_CHAIN_ID,
+      decimals: 6,
+    };
+    const approve = approveOrderFor(swap);
+    expect(approve).not.toBeNull();
+    expect(approve!.type).toBe("approve");
+    expect(approve!.protocol).toBe("uniswap");
+    expect(approve!.token).toBe(BASE_AARCHING);
+  });
+
+  it("returns null for a Uniswap order that isn't a swap", () => {
+    expect(approveOrderFor({ ...supply, protocol: "uniswap", type: "approve" })).toBeNull();
+  });
 });
 
 describe("assetMap — humanAmountForLeg", () => {

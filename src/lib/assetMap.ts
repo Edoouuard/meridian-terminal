@@ -77,8 +77,8 @@ function tokenDecimalsFor(symbol: string, chainId?: number): number {
   return token ? token.decimals : 18;
 }
 
-/** Find a tracked token by symbol on a given chain (case-insensitive). */
-function findToken(symbol: string, chainId: number) {
+/** Find a tracked token by symbol on a given chain (case-insensitive). Exported for use by venue-specific execute buttons (e.g. Uniswap's live-quote flow) that need the same lookup outside resolveOrderForLeg. */
+export function findToken(symbol: string, chainId: number) {
   const tokens = TRACKED_TOKENS_BY_CHAIN[chainId] ?? [];
   return tokens.find((t) => t.symbol.toLowerCase() === symbol.trim().toLowerCase());
 }
@@ -249,6 +249,17 @@ export function approveOrderFor(order: Order): Order | null {
     return {
       type: "approve",
       protocol: "aave",
+      token: order.token,
+      symbol: order.symbol,
+      amount: order.amount,
+      chainId: order.chainId,
+      decimals: order.decimals,
+    };
+  }
+  if (order.protocol === "uniswap" && order.type === "swap" && order.token) {
+    return {
+      type: "approve",
+      protocol: "uniswap",
       token: order.token,
       symbol: order.symbol,
       amount: order.amount,

@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useAccount } from "wagmi";
+import { useAccount, useSimulateContract } from "wagmi";
 import { ThreadItem, fmtUsd } from "@/lib/data";
-import { resolveOrderForLeg, protocolLabel, approveOrderFor } from "@/lib/assetMap";
+import { resolveOrderForLeg, protocolLabel, approveOrderFor, findToken, DEFAULT_CHAIN_ID } from "@/lib/assetMap";
 import { CHAIN_LABEL } from "@/lib/onchain";
 import type { Order } from "@/lib/execution";
 import type { TradeLeg } from "@/lib/tradePlan";
@@ -12,6 +12,13 @@ import { useHyperliquid } from "@/hooks/useHyperliquid";
 import { useLivePrices } from "@/hooks/useLivePrices";
 import { useVaultRisk } from "@/hooks/useVaultRisk";
 import { PHILIDOR_PROTOCOL_ID, type RiskTier } from "@/lib/integrations/philidor";
+import {
+  QUOTER_V2_QUOTE_EXACT_INPUT_SINGLE_ABI,
+  UNISWAP_QUOTER_V2_BY_CHAIN,
+  applySlippage,
+  defaultFeeTier,
+  parseSwapAsset,
+} from "@/lib/integrations/uniswap";
 import { formatBaseUnits, resolvePriceFromList, usdToTokenAmount, type PriceEntry } from "@/lib/quote";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { assessHealthFactorGuardrail } from "@/lib/safety";
@@ -28,6 +35,8 @@ function recordTypeFor(orderType: string): OrderRecordType {
     case "withdraw":
     case "transfer":
       return "withdraw";
+    case "swap":
+      return "swap";
     default:
       return "custom";
   }
@@ -177,7 +186,9 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
             ? "Approve & Supply on Aave"
             : order.protocol === "lido" && order.type === "stake"
               ? "Stake on Lido"
-              : "Confirm on-chain action"
+              : order.protocol === "uniswap" && order.type === "swap"
+                ? "Approve & Swap on Uniswap"
+                : "Confirm on-chain action"
         }
         body={
           <div>
@@ -193,9 +204,22 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
             {order.protocol === "lido" && order.type === "stake" && (
               <> This sends ETH directly to Lido and mints <strong>stETH</strong> 1:1 — no separate approval step.</>
             )}
+            {order.protocol === "uniswap" && order.type === "swap" && (
+              <>
+                {" "}
+                This will first <strong>approve</strong> the Uniswap router, then <strong>swap</strong>, enforcing the
+                minimum-received amount previewed above (0.5% slippage from a live quote).
+              </>
+            )}
           </div>
         }
-        confirmLabel={order.protocol === "aave" && order.type === "supply" ? "Approve & Supply" : "Sign"}
+        confirmLabel={
+          order.protocol === "aave" && order.type === "supply"
+            ? "Approve & Supply"
+            : order.protocol === "uniswap" && order.type === "swap"
+              ? "Approve & Swap"
+              : "Sign"
+        }
         warning="This moves real funds from your wallet."
         guardrail={guardrail}
         onConfirm={async () => {
@@ -340,6 +364,101 @@ function PerpExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry
   );
 }
 
+/**
+ * Live Uniswap v3 swap execution. Unlike Aave/Lido (whose amount is sized
+ * purely from a REST price feed), a swap's `amountOutMinimum` can only come
+ * from a real on-chain quote (QuoterV2.quoteExactInputSingle) taken right
+ * before signing — so this bypasses `resolveOrderForLeg`'s pure/offline
+ * result for "swap" legs (mirrors how PerpExecuteButton bypasses it for
+ * Hyperliquid's live mid-price). Once the quote lands, execution itself
+ * (approve + exactInputSingle) reuses the existing ExecuteButton — same
+ * confirm dialog, same idempotency guard, same honest error handling.
+ */
+function SwapExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry[] }) {
+  const { chain } = useAccount();
+  const chainId = chain?.id ?? DEFAULT_CHAIN_ID;
+
+  const parsed = parseSwapAsset(leg.asset);
+  const tokenIn = parsed ? findToken(parsed.from, chainId) : undefined;
+  const tokenOut = parsed ? findToken(parsed.to, chainId) : undefined;
+  const fee = tokenIn && tokenOut ? defaultFeeTier(tokenIn.symbol, tokenOut.symbol) : undefined;
+
+  const price = tokenIn ? resolvePriceFromList(prices, tokenIn.symbol) : null;
+  const inQuote = tokenIn ? usdToTokenAmount(tokenIn.symbol, leg.sizeUsd, price, tokenIn.decimals) : null;
+
+  const quoterAddress = UNISWAP_QUOTER_V2_BY_CHAIN[chainId];
+  const quoteEnabled = !!(tokenIn && tokenOut && fee && inQuote && quoterAddress);
+  const {
+    data: sim,
+    isLoading: quoting,
+    error: quoteError,
+  } = useSimulateContract({
+    address: quoterAddress,
+    abi: QUOTER_V2_QUOTE_EXACT_INPUT_SINGLE_ABI,
+    functionName: "quoteExactInputSingle",
+    args:
+      tokenIn && tokenOut && fee !== undefined && inQuote
+        ? [{ tokenIn: tokenIn.address, tokenOut: tokenOut.address, amountIn: inQuote.amountBase, fee, sqrtPriceLimitX96: BigInt(0) }]
+        : undefined,
+    chainId,
+    query: { enabled: quoteEnabled },
+  });
+
+  if (!parsed) {
+    return <NotWired venue="Uniswap" reason={`Could not parse a swap pair from "${leg.asset}".`} />;
+  }
+  if (!tokenIn || !tokenOut) {
+    const missing = !tokenIn ? parsed.from : parsed.to;
+    return (
+      <NotWired
+        venue="Uniswap"
+        reason={`"${missing}" has no tracked address on ${CHAIN_LABEL[chainId] ?? `chain ${chainId}`}.`}
+      />
+    );
+  }
+  if (!quoterAddress) {
+    return <NotWired venue="Uniswap" reason={`Uniswap v3 is not supported on ${CHAIN_LABEL[chainId] ?? `chain ${chainId}`}.`} />;
+  }
+  if (!inQuote) {
+    return <NotWired venue="Uniswap" reason={`No live price for ${tokenIn.symbol} — cannot size this order safely.`} />;
+  }
+  if (quoteError) {
+    return <NotWired venue="Uniswap" reason="Could not fetch a live quote from Uniswap right now." />;
+  }
+  if (quoting || !sim) {
+    return (
+      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>Fetching live Uniswap quote…</p>
+    );
+  }
+
+  const amountOut = sim.result[0];
+  const amountOutMinimum = applySlippage(amountOut);
+
+  const order: Order = {
+    type: "swap",
+    protocol: "uniswap",
+    token: tokenIn.address,
+    tokenOut: tokenOut.address,
+    fee,
+    amount: inQuote.amountBase,
+    amountOutMinimum,
+    chainId,
+    decimals: tokenIn.decimals,
+    symbol: tokenIn.symbol,
+  };
+
+  return (
+    <>
+      <OrderRow
+        label="Min received"
+        value={`${formatBaseUnits(amountOutMinimum, tokenOut.decimals)} ${tokenOut.symbol}`}
+        valueColor="var(--color-accent-700)"
+      />
+      <ExecuteButton order={order} label="Swap on Uniswap →" />
+    </>
+  );
+}
+
 function legRowValue(leg: { asset: string; protocol: string; sizeUsd?: number; leverage?: number }): string {
   return `${leg.asset} · ${leg.protocol}${leg.sizeUsd ? ` · ${fmtUsd(leg.sizeUsd)}` : ""}${leg.leverage ? ` · ${leg.leverage}x` : ""}`;
 }
@@ -418,6 +537,8 @@ function PlanCard({ item }: { item: ThreadItem }) {
                   {isUnsupported(resolved) ? (
                     /hyperliquid/i.test(leg.protocol || "") ? (
                       <PerpExecuteButton leg={leg} prices={prices} />
+                    ) : /uniswap/i.test(leg.protocol || "") ? (
+                      <SwapExecuteButton leg={leg} prices={prices} />
                     ) : (
                       <NotWired venue={protocolLabel(leg.protocol)} reason={resolved.unsupported} />
                     )

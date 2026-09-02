@@ -196,3 +196,86 @@ describe("execution — buildExecution lido stake plans", () => {
     expect((res as { error: string }).error).toBe("amount must be positive");
   });
 });
+
+const SWAP_ROUTER_MAINNET = "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45";
+const WSTETH_MAINNET = "0x7f39C581F595B53c5cb19bD0b3f8dA6c935E2Ca0";
+
+function swapOrder(overrides: Partial<Order> = {}): Order {
+  return {
+    type: "swap",
+    protocol: "uniswap",
+    token: USDC_MAINNET,
+    tokenOut: WSTETH_MAINNET,
+    fee: 3000,
+    amount: "1000",
+    amountOutMinimum: 123_000_000_000_000_000n,
+    chainId: 1,
+    decimals: 6,
+    symbol: "USDC",
+    ...overrides,
+  };
+}
+
+describe("execution — buildExecution uniswap swap plans", () => {
+  it("builds a swap plan against SwapRouter02.exactInputSingle with a sender tuple placeholder", () => {
+    const plan = buildExecution(swapOrder()) as ExecutionPlan;
+    expect(plan.address).toBe(SWAP_ROUTER_MAINNET);
+    expect(plan.functionName).toBe("exactInputSingle");
+    expect(plan.senderIndex).toBe(0);
+    expect(plan.senderTupleKey).toBe("recipient");
+    const params = plan.args?.[0] as Record<string, unknown>;
+    expect(params.tokenIn).toBe(USDC_MAINNET);
+    expect(params.tokenOut).toBe(WSTETH_MAINNET);
+    expect(params.fee).toBe(3000);
+    expect(params.amountIn).toBe(1_000_000_000n);
+    expect(params.amountOutMinimum).toBe(123_000_000_000_000_000n);
+    expect(params.recipient).toBe(zeroAddress);
+  });
+
+  it("hard-fails without a positive amountOutMinimum (no slippage protection, no approximation)", () => {
+    const res1 = buildExecution(swapOrder({ amountOutMinimum: undefined }));
+    expect((res1 as { error: string }).error).toContain("requires a positive amountOutMinimum");
+    const res2 = buildExecution(swapOrder({ amountOutMinimum: 0n }));
+    expect((res2 as { error: string }).error).toContain("requires a positive amountOutMinimum");
+  });
+
+  it("rejects a swap missing tokenOut or fee", () => {
+    expect((buildExecution(swapOrder({ tokenOut: undefined })) as { error: string }).error).toContain("requires a tokenOut address");
+    expect((buildExecution(swapOrder({ fee: undefined })) as { error: string }).error).toContain("requires a fee tier");
+  });
+
+  it("rejects Uniswap on an unsupported chain", () => {
+    const res = buildExecution(swapOrder({ chainId: 9999 }));
+    expect((res as { error: string }).error).toContain("Uniswap v3 is not supported");
+  });
+
+  it("rejects an unsupported uniswap order type", () => {
+    const res = buildExecution(swapOrder({ type: "borrow" as Order["type"] }));
+    expect((res as { error: string }).error).toContain("does not yet support order type");
+  });
+
+  it("builds a Uniswap approve plan defaulting the spender to the router", () => {
+    const plan = buildExecution(swapOrder({ type: "approve" })) as ExecutionPlan;
+    expect(plan.functionName).toBe("approve");
+    expect(plan.address).toBe(USDC_MAINNET);
+    expect(plan.args?.[0]).toBe(SWAP_ROUTER_MAINNET);
+    expect(plan.senderIndex).toBeUndefined();
+  });
+});
+
+describe("execution — applySender with a nested tuple sender field", () => {
+  it("patches the sender into the named tuple key without disturbing other fields", () => {
+    const plan = buildExecution(swapOrder()) as ExecutionPlan;
+    const patched = applySender(plan, SENDER) as ExecutionPlan;
+    const params = patched.args?.[0] as Record<string, unknown>;
+    expect(params.recipient).toBe(SENDER);
+    expect(params.tokenIn).toBe(USDC_MAINNET);
+    expect(params.amountOutMinimum).toBe(123_000_000_000_000_000n);
+  });
+
+  it("still fails cleanly when no sender is connected", () => {
+    const plan = buildExecution(swapOrder()) as ExecutionPlan;
+    const res = applySender(plan, undefined);
+    expect((res as { error: string }).error).toBe("wallet not connected");
+  });
+});

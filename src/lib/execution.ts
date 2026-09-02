@@ -1,6 +1,7 @@
 import type { Abi, Address } from "viem";
 import { parseUnits, zeroAddress } from "viem";
 import { AAVE_V3_POOL_BY_CHAIN, CHAIN_LABEL, STETH_ADDRESS } from "./onchain";
+import { SWAP_ROUTER02_EXACT_INPUT_SINGLE_ABI, UNISWAP_SWAP_ROUTER02_BY_CHAIN } from "./integrations/uniswap";
 
 /**
  * Execution layer for Meridian's DeFi terminal.
@@ -19,8 +20,8 @@ import { AAVE_V3_POOL_BY_CHAIN, CHAIN_LABEL, STETH_ADDRESS } from "./onchain";
  * and converts to base units, rejecting zero / negative / over-precise amounts.
  */
 
-export type OrderType = "supply" | "repay" | "borrow" | "withdraw" | "transfer" | "approve" | "stake";
-export type OrderProtocol = "aave" | "eth" | "lido";
+export type OrderType = "supply" | "repay" | "borrow" | "withdraw" | "transfer" | "approve" | "stake" | "swap";
+export type OrderProtocol = "aave" | "eth" | "lido" | "uniswap";
 
 /**
  * Protocol-agnostic order produced by the trade engine. Carries enough to build a
@@ -30,7 +31,7 @@ export type OrderProtocol = "aave" | "eth" | "lido";
 export interface Order {
   type: OrderType;
   protocol: OrderProtocol;
-  /** ERC20 asset address (required for Aave supply/repay; optional for native transfer). */
+  /** ERC20 asset address (required for Aave supply/repay; the input token for a Uniswap swap; optional for native transfer). */
   token?: Address;
   symbol?: string;
   /** Amount in human units (decimal string) OR base units (bigint). */
@@ -40,8 +41,19 @@ export interface Order {
   decimals?: number;
   /** Recipient address for `eth` native transfers. */
   to?: Address;
-  /** Spender for an `approve` (ERC20 allowance) order — defaults to the Aave pool. */
+  /** Spender for an `approve` (ERC20 allowance) order — defaults to the Aave pool / Uniswap router. */
   spender?: Address;
+  /** Output token address for a Uniswap `swap` order. */
+  tokenOut?: Address;
+  /** Uniswap v3 fee tier (500/3000/10000) for a `swap` order. */
+  fee?: number;
+  /**
+   * Minimum output base units a Uniswap `swap` will accept, derived from a
+   * live on-chain quote just before signing. HARD-FAIL: buildExecution
+   * refuses to build a swap plan without a positive value here — never
+   * approximated, matching quote.ts's pricing discipline.
+   */
+  amountOutMinimum?: bigint;
   [k: string]: unknown;
 }
 
@@ -57,6 +69,15 @@ export interface ExecutionPlan {
   value?: bigint;
   /** Index into `args` holding the onBehalfOf/sender placeholder, patched at execution time. */
   senderIndex?: number;
+  /**
+   * When set, the sender is patched into this key of the object at
+   * `args[senderIndex]` rather than replacing `args[senderIndex]` itself.
+   * Needed for calls whose sender-carrying field lives inside a single
+   * struct/tuple argument (e.g. Uniswap's `exactInputSingle(params)`,
+   * whose `recipient` field is nested) rather than a flat positional arg
+   * (e.g. Aave's `supply(asset, amount, onBehalfOf, referralCode)`).
+   */
+  senderTupleKey?: string;
   /** Human-readable summary shown in the UI before signing. */
   description: string;
   /** Safety warning surfaced to the user on every plan. */
@@ -338,6 +359,67 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
       };
     }
 
+    case "uniswap": {
+      const token = order.token;
+      if (!token) return fail("uniswap order requires a token address");
+      const amount = normalizeAmount(order.amount, decimals);
+      if ("error" in amount) return amount;
+      const router = UNISWAP_SWAP_ROUTER02_BY_CHAIN[chainId];
+      if (!router) return fail(`Uniswap v3 is not supported on ${chainLabel}`);
+
+      if (order.type === "approve") {
+        const spender = (order.spender as Address | undefined) ?? router;
+        return {
+          chainId,
+          address: token,
+          abi: ERC20_APPROVE_ABI,
+          functionName: "approve",
+          args: [spender, amount.value],
+          description:
+            spender === router
+              ? `Approve Uniswap v3 to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`
+              : `Approve ${spender.slice(0, 10)}… to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`,
+          riskNote: `Approval lets the spender transfer up to this amount of ${assetLabel}. Confirm the spender before signing.`,
+        };
+      }
+
+      if (order.type === "swap") {
+        const tokenOut = order.tokenOut;
+        const fee = order.fee;
+        if (!tokenOut) return fail("uniswap swap requires a tokenOut address");
+        if (!fee) return fail("uniswap swap requires a fee tier");
+        const amountOutMinimum = order.amountOutMinimum;
+        // HARD-FAIL: never sign a swap without a positive minimum received,
+        // derived from a live on-chain quote. No fallback, no approximation.
+        if (amountOutMinimum === undefined || amountOutMinimum <= BigInt(0)) {
+          return fail("uniswap swap requires a positive amountOutMinimum from a live quote — refusing to swap without slippage protection");
+        }
+        return {
+          chainId,
+          address: router,
+          abi: SWAP_ROUTER02_EXACT_INPUT_SINGLE_ABI,
+          functionName: "exactInputSingle",
+          args: [
+            {
+              tokenIn: token,
+              tokenOut,
+              fee,
+              recipient: zeroAddress, // patched to the connected sender via senderTupleKey
+              amountIn: amount.value,
+              amountOutMinimum,
+              sqrtPriceLimitX96: BigInt(0),
+            },
+          ],
+          senderIndex: 0,
+          senderTupleKey: "recipient",
+          description: `Swap ${order.amount} ${assetLabel} via Uniswap v3 on ${chainLabel} (minimum output enforced by a live quote)`,
+          riskNote: `Moves real funds on ${chainLabel} — the minimum you receive is enforced on-chain from a live quote taken just before signing.`,
+        };
+      }
+
+      return fail(`Uniswap does not yet support order type '${order.type}'`);
+    }
+
     default:
       return fail(`unknown protocol '${String(order.protocol)}'`);
   }
@@ -358,6 +440,14 @@ export function applySender(
   if (plan.senderIndex < 0 || plan.senderIndex >= args.length) {
     return fail("execution plan has an invalid sender placeholder index");
   }
-  args[plan.senderIndex] = sender;
+  if (plan.senderTupleKey !== undefined) {
+    const tuple = args[plan.senderIndex];
+    if (typeof tuple !== "object" || tuple === null) {
+      return fail("execution plan's sender placeholder is not a tuple");
+    }
+    args[plan.senderIndex] = { ...(tuple as Record<string, unknown>), [plan.senderTupleKey]: sender };
+  } else {
+    args[plan.senderIndex] = sender;
+  }
   return { ...plan, args };
 }
