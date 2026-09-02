@@ -3,6 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useAccount } from "wagmi";
+import { useQuery } from "@tanstack/react-query";
+import type { YieldSnapshot } from "@/app/api/yield/route";
 import { ThreadCard } from "@/components/ThreadCard";
 import { RiskPanel } from "@/components/RiskPanel";
 import { TickerBanner } from "@/components/TickerBanner";
@@ -33,7 +35,6 @@ import {
   ROTATION_BARS,
   ThreadItem,
   ThreadType,
-  YIELD_CHART,
   fmtUsd,
 } from "@/lib/data";
 
@@ -88,6 +89,15 @@ export default function TerminalApp() {
   const { isConnected } = useAccount();
   const live = useLivePortfolio();
   const feed = useLiveFeed();
+  const { data: yieldSnapshot, isLoading: yieldLoading } = useQuery<YieldSnapshot | null>({
+    queryKey: ["yield-snapshot"],
+    queryFn: async () => {
+      const res = await fetch("/api/yield");
+      if (!res.ok) throw new Error("yield fetch failed");
+      return res.json();
+    },
+    staleTime: 5 * 60_000,
+  });
 
   const isLiveFeed = !feed.loading && !!feed.data;
 
@@ -145,7 +155,14 @@ export default function TerminalApp() {
   function addExample(type: ThreadType, text?: string) {
     const thesis = text ?? (type !== "custom" ? EXAMPLE_THESIS_FOR_TYPE[type] : undefined);
     const routed = thesis ? routeThesis(thesis) : { type, text };
-    setThread((cur) => (cur.some((t) => t.type === routed.type) ? cur : cur.concat([routed])));
+    setThread((cur) => {
+      // Dedup-by-type only applies to the canned quick-prompt buttons (no
+      // explicit text). A "Discuss ->" click from a live news mover always
+      // carries its own distinct text (a specific coin) and should always be
+      // added, even when another thread of the same resolved type exists.
+      if (!text && cur.some((t) => t.type === routed.type)) return cur;
+      return cur.concat([routed]);
+    });
   }
 
   function submitPrompt() {
@@ -291,23 +308,25 @@ export default function TerminalApp() {
                   </svg>
                 </div>
                 <div className="card" style={{ gap: 4, padding: "var(--space-3)" }}>
-                  <p style={{ margin: 0, fontSize: 12, fontWeight: 600, fontFamily: "var(--font-heading)" }}>Yield, 30 days: lock now or wait?</p>
-                  <svg width="100%" height="30" viewBox="0 0 36 30" preserveAspectRatio="none">
-                    <polyline points={YIELD_CHART.fixedPoints} fill="none" stroke="var(--color-accent)" strokeWidth={1.6} />
-                    <polyline
-                      points={YIELD_CHART.varPoints}
-                      fill="none"
-                      stroke="var(--color-neutral-500)"
-                      strokeWidth={1.6}
-                      strokeDasharray="2,2"
-                    />
-                  </svg>
-                  <p style={{ margin: 0, fontSize: 11 }}>
-                    <span style={{ color: "var(--color-accent-700)" }}>Pendle fixed, steady at 9.8%</span>
-                  </p>
-                  <p style={{ margin: 0, fontSize: 11 }} className="text-muted">
-                    Aave variable, down from 6.8% to 5.2%
-                  </p>
+                  <p style={{ margin: 0, fontSize: 12, fontWeight: 600, fontFamily: "var(--font-heading)" }}>Aave USDC variable APY, live</p>
+                  {yieldSnapshot ? (
+                    <>
+                      <p style={{ margin: 0, fontSize: 22, fontFamily: "var(--font-heading)", fontVariantNumeric: "tabular-nums" }}>
+                        {yieldSnapshot.apy.toFixed(2)}%
+                      </p>
+                      <p style={{ margin: 0, fontSize: 11 }} className="text-muted">
+                        {yieldSnapshot.apyPct7D !== null
+                          ? `${yieldSnapshot.apyPct7D >= 0 ? "+" : ""}${yieldSnapshot.apyPct7D.toFixed(2)}pp over 7 days`
+                          : "7-day trend unavailable"}
+                        {yieldSnapshot.apyPct30D !== null &&
+                          ` · ${yieldSnapshot.apyPct30D >= 0 ? "+" : ""}${yieldSnapshot.apyPct30D.toFixed(2)}pp over 30 days`}
+                      </p>
+                    </>
+                  ) : (
+                    <p style={{ margin: 0, fontSize: 11 }} className="text-muted">
+                      {yieldLoading ? "Fetching live yield data…" : "No live yield data right now."}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>

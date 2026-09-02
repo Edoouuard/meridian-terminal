@@ -1,14 +1,23 @@
 "use client";
 
 import { useState } from "react";
-import { ALPHA, NEWS, type AlphaTag, type NewsItem, type ThreadType } from "@/lib/data";
+import { useQuery } from "@tanstack/react-query";
+import type { ThreadType } from "@/lib/data";
 import type { LiveFeedState } from "@/hooks/useLiveFeed";
+import type { AlphaEntry, AlphaTag } from "@/app/api/alpha/route";
 
 const ALPHA_TAG_CLASS: Record<AlphaTag, string> = {
   "New protocol": "tag-neutral",
-  "Points farm": "tag-accent",
-  "Airdrop rumor": "tag-outline",
+  Momentum: "tag-accent",
 };
+
+interface LiveNewsRow {
+  protocol: string;
+  metric: string;
+  text: string;
+  /** Coin symbol as Hyperliquid reports it, used to build a "Discuss →" thesis for this exact mover. */
+  coin: string;
+}
 
 function fmtUsdCompact(n: number): string {
   const abs = Math.abs(n);
@@ -23,23 +32,46 @@ function fmtPct(n: number): string {
   return `${sign}${n.toFixed(1)}%`;
 }
 
+function useAlpha() {
+  return useQuery<AlphaEntry[]>({
+    queryKey: ["alpha"],
+    queryFn: async () => {
+      const res = await fetch("/api/alpha");
+      if (!res.ok) throw new Error("alpha fetch failed");
+      return res.json();
+    },
+    staleTime: 10 * 60_000,
+  });
+}
+
 /**
- * The "DeFi news / Alpha" column. When a live feed is available it renders a
- * funding-rate strip plus a top-movers market brief derived from Hyperliquid's
- * metaAndAssetCtxs (markPx/prevDayPx change, dayNtlVlm as flow proxy). When the
- * feed is unavailable (loading or errored), it falls back to the static
- * NEWS / ALPHA demo data so the UI never breaks.
+ * The "DeFi news / Alpha" column. Both tabs are live or they say so —
+ * neither ever silently swaps in static demo content:
+ *   - News: a funding-rate strip plus a top-movers brief, derived from
+ *     Hyperliquid's metaAndAssetCtxs (markPx/prevDayPx change, dayNtlVlm as
+ *     flow proxy).
+ *   - Alpha: newly-listed protocols and 7-day TVL momentum, derived from
+ *     DefiLlama's free /protocols API (see /api/alpha) — real `listedAt` and
+ *     `change_7d` fields, not editorialized "points farm" / "airdrop rumor"
+ *     content, since there is no honest free source for that.
+ * When a feed is down, the tab says so instead of falling back to stale
+ * content that looks live but isn't.
  */
-export function NewsFeed({ feed, onAddThread }: { feed: LiveFeedState; onAddThread: (type: ThreadType) => void }) {
+export function NewsFeed({ feed, onAddThread }: { feed: LiveFeedState; onAddThread: (type: ThreadType, text?: string) => void }) {
   const [tab, setTab] = useState<"news" | "alpha">("news");
 
   const isLive = !feed.loading && !!feed.data && feed.data.funding.length > 0;
 
-  const liveNews: NewsItem[] = feed.data?.highlights?.movers.map((m) => ({
-    protocol: m.coin,
-    metric: fmtPct(m.changePct),
-    text: `${m.coin} is ${Math.abs(m.changePct).toFixed(1)}% on the 24h with ${fmtUsdCompact(m.dayNtlVlm)} in traded notional — Hyperliquid perp feed.`,
-  })) ?? [];
+  const liveNews: LiveNewsRow[] =
+    feed.data?.highlights?.movers.map((m) => ({
+      protocol: m.coin,
+      metric: fmtPct(m.changePct),
+      text: `${m.coin} is ${Math.abs(m.changePct).toFixed(1)}% on the 24h with ${fmtUsdCompact(m.dayNtlVlm)} in traded notional — Hyperliquid perp feed.`,
+      coin: m.coin,
+    })) ?? [];
+
+  const alpha = useAlpha();
+  const alphaEntries = alpha.data ?? [];
 
   return (
     <>
@@ -79,46 +111,54 @@ export function NewsFeed({ feed, onAddThread }: { feed: LiveFeedState; onAddThre
             </div>
           )}
 
-          {/* Live top movers when the feed is up, else static NEWS. */}
-          {isLive && liveNews.length > 0
-            ? liveNews.map((n, i) => <NewsRow key={i} n={n} onDiscuss={onAddThread} />)
-            : NEWS.map((n, i) => <NewsRow key={i} n={n} onDiscuss={onAddThread} />)}
+          {isLive && liveNews.length > 0 ? (
+            liveNews.map((n, i) => <NewsRow key={i} n={n} onDiscuss={onAddThread} />)
+          ) : (
+            <p className="text-muted" style={{ fontSize: 12, margin: "var(--space-2) 0 0" }}>
+              {feed.loading ? "Fetching live market feed…" : "No live news feed right now — Hyperliquid's market data is unreachable."}
+            </p>
+          )}
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column" }}>
-          {ALPHA.map((a, i) => (
-            <div key={i} style={{ padding: "var(--space-2) 0", borderBottom: "1px solid var(--color-divider)" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <span className={`tag ${ALPHA_TAG_CLASS[a.tag]}`} style={{ marginBottom: 4 }}>
-                  {a.protocol}
-                </span>
-                <span style={{ fontSize: 12, fontVariantNumeric: "tabular-nums", color: "var(--color-accent-700)" }}>{a.metric}</span>
+          {alphaEntries.length > 0 ? (
+            alphaEntries.map((a, i) => (
+              <div key={i} style={{ padding: "var(--space-2) 0", borderBottom: "1px solid var(--color-divider)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                  <span className={`tag ${ALPHA_TAG_CLASS[a.tag]}`} style={{ marginBottom: 4 }}>
+                    {a.protocol}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      fontVariantNumeric: "tabular-nums",
+                      color: a.metric.startsWith("-") ? "var(--risk-serious)" : "var(--color-accent-700)",
+                    }}
+                  >
+                    {a.metric}
+                  </span>
+                </div>
+                <p style={{ margin: "4px 0 0", fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }} className="text-muted">
+                  {a.tag}
+                </p>
+                <p style={{ margin: "4px 0 0", fontSize: 13, lineHeight: 1.4 }}>{a.text}</p>
               </div>
-              <p style={{ margin: "4px 0 0", fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }} className="text-muted">
-                {a.tag}
-              </p>
-              <p style={{ margin: "4px 0 0", fontSize: 13, lineHeight: 1.4 }}>{a.text}</p>
-              {a.action && (
-                <a
-                  href="#"
-                  style={{ textDecoration: "none", fontSize: 12 }}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    onAddThread(a.action as ThreadType);
-                  }}
-                >
-                  Add to thread →
-                </a>
-              )}
-            </div>
-          ))}
+            ))
+          ) : (
+            <p className="text-muted" style={{ fontSize: 12, margin: "var(--space-2) 0 0" }}>
+              {alpha.isLoading ? "Fetching live protocol data…" : "No live alpha right now — DefiLlama's protocol feed is unreachable."}
+            </p>
+          )}
+          <p className="text-muted" style={{ fontSize: 10, margin: "var(--space-2) 0 0" }}>
+            New listings and 7-day TVL momentum from DefiLlama&apos;s free API — not editorial calls.
+          </p>
         </div>
       )}
     </>
   );
 }
 
-function NewsRow({ n, onDiscuss }: { n: NewsItem; onDiscuss: (type: ThreadType) => void }) {
+function NewsRow({ n, onDiscuss }: { n: LiveNewsRow; onDiscuss: (type: ThreadType, text?: string) => void }) {
   return (
     <div style={{ padding: "var(--space-2) 0", borderBottom: "1px solid var(--color-divider)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
@@ -128,18 +168,16 @@ function NewsRow({ n, onDiscuss }: { n: NewsItem; onDiscuss: (type: ThreadType) 
         <span style={{ fontSize: 12, fontVariantNumeric: "tabular-nums", color: "var(--color-accent-700)" }}>{n.metric}</span>
       </div>
       <p style={{ margin: "4px 0 0", fontSize: 13, lineHeight: 1.4 }}>{n.text}</p>
-      {n.action && (
-        <a
-          href="#"
-          style={{ textDecoration: "none", fontSize: 12 }}
-          onClick={(e) => {
-            e.preventDefault();
-            onDiscuss(n.action as ThreadType);
-          }}
-        >
-          Discuss →
-        </a>
-      )}
+      <a
+        href="#"
+        style={{ textDecoration: "none", fontSize: 12 }}
+        onClick={(e) => {
+          e.preventDefault();
+          onDiscuss("perp", `I think ${n.coin} outperforms this month`);
+        }}
+      >
+        Discuss →
+      </a>
     </div>
   );
 }
