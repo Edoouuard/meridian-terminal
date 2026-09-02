@@ -191,6 +191,29 @@ export function resolveOrderForLeg(
     };
   }
 
+  // --- Lido staking (executable, ETH only, mainnet only) --------------------
+  if (protocol === "lido" && side === "stake") {
+    const symbol = bareSymbol(leg.asset);
+    if (symbol !== "ETH" && symbol !== "stETH") {
+      return { unsupported: `Lido only stakes ETH — "${symbol}" is not supported.` };
+    }
+    if (resolveChainId !== 1) {
+      return { unsupported: "Lido staking is only available on Ethereum mainnet — switch networks to stake." };
+    }
+    const quote = quoteFor("ETH", 18);
+    if (!quote) {
+      return { unsupported: "No live price for ETH — cannot size this order safely. Price feeds down?" };
+    }
+    return {
+      type: "stake",
+      protocol: "lido",
+      symbol: "ETH",
+      amount: quote.amountBase,
+      chainId: resolveChainId,
+      decimals: 18,
+    };
+  }
+
   // --- Directional / hedge / beta-neutral / options perps (NOT wired) -------
   if (side === "long" || side === "short" || side === "open" || /perp|option|call|put/i.test(leg.asset)) {
     return { unsupported: `${venue} perps not wired for live execution yet` };
@@ -201,7 +224,7 @@ export function resolveOrderForLeg(
     case "pendle":
       return { unsupported: "Pendle fixed-yield (PT) not wired for live execution yet" };
     case "lido":
-      return { unsupported: "Lido staking not wired for live execution yet" };
+      return { unsupported: `Lido ${leg.side || "action"} not wired for live execution yet (staking ETH is; unstaking/withdrawal is not)` };
     case "morpho":
       return { unsupported: "Morpho vaults not wired for live execution yet" };
     case "uniswap":

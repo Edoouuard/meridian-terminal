@@ -1,6 +1,6 @@
 import type { Abi, Address } from "viem";
 import { parseUnits, zeroAddress } from "viem";
-import { AAVE_V3_POOL_BY_CHAIN, CHAIN_LABEL } from "./onchain";
+import { AAVE_V3_POOL_BY_CHAIN, CHAIN_LABEL, STETH_ADDRESS } from "./onchain";
 
 /**
  * Execution layer for Meridian's DeFi terminal.
@@ -19,8 +19,8 @@ import { AAVE_V3_POOL_BY_CHAIN, CHAIN_LABEL } from "./onchain";
  * and converts to base units, rejecting zero / negative / over-precise amounts.
  */
 
-export type OrderType = "supply" | "repay" | "borrow" | "withdraw" | "transfer" | "approve";
-export type OrderProtocol = "aave" | "eth";
+export type OrderType = "supply" | "repay" | "borrow" | "withdraw" | "transfer" | "approve" | "stake";
+export type OrderProtocol = "aave" | "eth" | "lido";
 
 /**
  * Protocol-agnostic order produced by the trade engine. Carries enough to build a
@@ -139,6 +139,22 @@ export const AAVE_V3_POOL_BORROW_ABI = [
       { name: "onBehalfOf", type: "address" },
     ],
     outputs: [],
+  },
+] as const;
+
+/**
+ * Lido stETH `submit` — payable, mints stETH 1:1 for the ETH sent as `value`.
+ *   submit(address _referral) payable returns (uint256)
+ * The referral address is an optional Lido analytics tag; Meridian passes the
+ * zero address (no referral program integration).
+ */
+export const LIDO_STETH_SUBMIT_ABI = [
+  {
+    type: "function",
+    name: "submit",
+    stateMutability: "payable",
+    inputs: [{ name: "_referral", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
   },
 ] as const;
 
@@ -302,6 +318,23 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         value: amount.value,
         description: `Send ${order.amount} native ${CHAIN_LABEL[chainId] ?? "ETH"} to ${to} on ${chainLabel}`,
         riskNote: `Moves real funds on ${chainLabel} — confirm the recipient and amount before signing. Native transfers are irreversible once confirmed.`,
+      };
+    }
+
+    case "lido": {
+      if (order.type !== "stake") return fail(`Lido only supports 'stake', got '${order.type}'`);
+      if (chainId !== 1) return fail(`Lido staking is only supported on Ethereum mainnet, not ${chainLabel}`);
+      const amount = normalizeAmount(order.amount, decimals);
+      if ("error" in amount) return amount;
+      return {
+        chainId,
+        address: STETH_ADDRESS,
+        abi: LIDO_STETH_SUBMIT_ABI,
+        functionName: "submit",
+        args: [zeroAddress],
+        value: amount.value,
+        description: `Stake ${order.amount} ETH via Lido on ${chainLabel} for stETH`,
+        riskNote: `Moves real ETH on ${chainLabel} and mints stETH 1:1 — unwinding later goes through Lido's own withdrawal queue, not an instant reverse. Confirm the amount before signing.`,
       };
     }
 

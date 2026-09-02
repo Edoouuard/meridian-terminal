@@ -160,3 +160,39 @@ describe("execution — eth native transfer + applySender", () => {
     expect(applySender(plan, SENDER)).toBe(plan);
   });
 });
+
+const STETH_MAINNET = "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84";
+
+describe("execution — buildExecution lido stake plans", () => {
+  it("builds a payable stake plan against Lido's stETH submit()", () => {
+    const plan = buildExecution({
+      type: "stake",
+      protocol: "lido",
+      symbol: "ETH",
+      amount: "1",
+      decimals: 18,
+      chainId: 1,
+    }) as ExecutionPlan;
+    expect(plan.address).toBe(STETH_MAINNET);
+    expect(plan.functionName).toBe("submit");
+    expect(plan.args).toEqual([zeroAddress]);
+    expect(plan.value).toBe(1_000_000_000_000_000_000n);
+    expect(plan.senderIndex).toBeUndefined();
+  });
+
+  it("rejects Lido staking off mainnet", () => {
+    const res = buildExecution({ type: "stake", protocol: "lido", amount: "1", decimals: 18, chainId: 8453 });
+    expect("error" in res).toBe(true);
+    expect((res as { error: string }).error).toContain("only supported on Ethereum mainnet");
+  });
+
+  it("rejects a non-stake order type for Lido", () => {
+    const res = buildExecution({ type: "supply" as Order["type"], protocol: "lido", amount: "1", decimals: 18, chainId: 1 });
+    expect((res as { error: string }).error).toContain("only supports 'stake'");
+  });
+
+  it("propagates normalizeAmount errors for a stake order", () => {
+    const res = buildExecution({ type: "stake", protocol: "lido", amount: "0", decimals: 18, chainId: 1 });
+    expect((res as { error: string }).error).toBe("amount must be positive");
+  });
+});

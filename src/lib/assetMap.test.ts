@@ -65,6 +65,54 @@ describe("assetMap — resolveOrderForLeg (Aave supply on Base)", () => {
   });
 });
 
+const ETH_PRICE: PriceEntry[] = [{ symbol: "ETH", price: 4000 }];
+
+describe("assetMap — resolveOrderForLeg (Lido stake)", () => {
+  function stakeLeg(partial: Partial<TradeLeg> = {}): TradeLeg {
+    return { side: "Stake", asset: "stETH", protocol: "Lido", sizeUsd: 4000, ...partial };
+  }
+
+  it("routes 'stake ETH' to a real Lido stake order on mainnet", () => {
+    const order = resolveOrderForLeg(stakeLeg(), undefined, ETH_PRICE, 1) as Order;
+    expect(order.type).toBe("stake");
+    expect(order.protocol).toBe("lido");
+    expect(order.symbol).toBe("ETH");
+    expect(order.chainId).toBe(1);
+    expect(order.decimals).toBe(18);
+    // $4000 at $4000/ETH → exactly 1 ETH in base units
+    expect(order.amount).toBe(1_000_000_000_000_000_000n);
+  });
+
+  it("also accepts a bare 'ETH' leg asset (not just 'stETH')", () => {
+    const order = resolveOrderForLeg(stakeLeg({ asset: "ETH" }), undefined, ETH_PRICE, 1) as Order;
+    expect(order.type).toBe("stake");
+  });
+
+  it("rejects staking any asset other than ETH/stETH", () => {
+    const res = resolveOrderForLeg(stakeLeg({ asset: "SOL" }), undefined, ETH_PRICE, 1);
+    expect("unsupported" in res).toBe(true);
+    expect(res.unsupported).toContain("Lido only stakes ETH");
+  });
+
+  it("rejects Lido staking off mainnet", () => {
+    const res = resolveOrderForLeg(stakeLeg(), undefined, ETH_PRICE, BASE_CHAIN_ID);
+    expect("unsupported" in res).toBe(true);
+    expect(res.unsupported).toContain("Ethereum mainnet");
+  });
+
+  it("hard-fails with no live ETH price", () => {
+    const res = resolveOrderForLeg(stakeLeg(), undefined, undefined, 1);
+    expect("unsupported" in res).toBe(true);
+    expect(res.unsupported).toContain("No live price for ETH");
+  });
+
+  it("leaves other Lido actions (e.g. unstake) unsupported", () => {
+    const res = resolveOrderForLeg(stakeLeg({ side: "Unstake" }), undefined, ETH_PRICE, 1);
+    expect("unsupported" in res).toBe(true);
+    expect(res.unsupported).toContain("not wired");
+  });
+});
+
 describe("assetMap — approveOrderFor", () => {
   const supply: Order = {
     type: "supply",

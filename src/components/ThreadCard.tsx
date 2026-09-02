@@ -10,6 +10,8 @@ import type { TradeLeg } from "@/lib/tradePlan";
 import { useExecute, explorerUrlFor } from "@/hooks/useExecute";
 import { useHyperliquid } from "@/hooks/useHyperliquid";
 import { useLivePrices } from "@/hooks/useLivePrices";
+import { useVaultRisk } from "@/hooks/useVaultRisk";
+import { PHILIDOR_PROTOCOL_ID, type RiskTier } from "@/lib/integrations/philidor";
 import { formatBaseUnits, resolvePriceFromList, usdToTokenAmount, type PriceEntry } from "@/lib/quote";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { assessHealthFactorGuardrail } from "@/lib/safety";
@@ -19,6 +21,7 @@ import { recordExecution, type OrderRecordType } from "@/lib/history";
 function recordTypeFor(orderType: string): OrderRecordType {
   switch (orderType) {
     case "supply":
+    case "stake":
       return "deposit";
     case "repay":
     case "borrow":
@@ -169,7 +172,13 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
       </button>
       <ConfirmDialog
         open={confirming}
-        title={order.protocol === "aave" && order.type === "supply" ? "Approve & Supply on Aave" : "Confirm on-chain action"}
+        title={
+          order.protocol === "aave" && order.type === "supply"
+            ? "Approve & Supply on Aave"
+            : order.protocol === "lido" && order.type === "stake"
+              ? "Stake on Lido"
+              : "Confirm on-chain action"
+        }
         body={
           <div>
             Sign and broadcast <strong>{order.type}</strong> of{" "}
@@ -180,6 +189,9 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
             {CHAIN_LABEL[order.chainId] ?? `chain ${order.chainId}`}.
             {order.protocol === "aave" && order.type === "supply" && (
               <> This will first <strong>approve</strong> Aave to spend the token, then <strong>supply</strong> it.</>
+            )}
+            {order.protocol === "lido" && order.type === "stake" && (
+              <> This sends ETH directly to Lido and mints <strong>stETH</strong> 1:1 — no separate approval step.</>
             )}
           </div>
         }
@@ -332,6 +344,35 @@ function legRowValue(leg: { asset: string; protocol: string; sizeUsd?: number; l
   return `${leg.asset} · ${leg.protocol}${leg.sizeUsd ? ` · ${fmtUsd(leg.sizeUsd)}` : ""}${leg.leverage ? ` · ${leg.leverage}x` : ""}`;
 }
 
+const RISK_TIER_COLOR: Record<RiskTier, string> = {
+  Prime: "var(--risk-good)",
+  Core: "var(--risk-warning)",
+  Edge: "var(--risk-serious)",
+};
+
+/**
+ * Live vault risk score (Philidor, free API — see lib/integrations/philidor.ts)
+ * for a leg's protocol + asset, e.g. supplying USDC on Aave. Only queries for
+ * protocols Philidor scores and plain single-token asset symbols (skips
+ * PT/perp/swap legs whose `asset` isn't a bare symbol); renders nothing when
+ * there is no match or the upstream is unavailable.
+ */
+function LegRiskBadge({ leg }: { leg: TradeLeg }) {
+  const protocolId = PHILIDOR_PROTOCOL_ID[leg.protocol];
+  const plainAsset = /^[A-Za-z]{2,10}$/.test(leg.asset) ? leg.asset : undefined;
+  const enabled = !!protocolId && !!plainAsset;
+  const { data } = useVaultRisk({ protocol: leg.protocol, asset: plainAsset, limit: 1, enabled });
+  const top = data?.[0];
+  if (!enabled || !top) return null;
+  return (
+    <OrderRow
+      label="Vault risk"
+      value={`${top.riskTier} · ${top.riskScore.toFixed(1)}/10 (Philidor)`}
+      valueColor={RISK_TIER_COLOR[top.riskTier]}
+    />
+  );
+}
+
 /**
  * Type predicate to disambiguate an unsupported result from an `Order`. `Order`
  * carries a `[k: string]: unknown` index signature, so a bare `"unsupported" in r`
@@ -373,6 +414,7 @@ function PlanCard({ item }: { item: ThreadItem }) {
               return (
                 <div key={i} style={{ marginTop: i === 0 ? 0 : "var(--space-2)" }}>
                   <OrderRow label={leg.side} value={legRowValue(leg)} />
+                  <LegRiskBadge leg={leg} />
                   {isUnsupported(resolved) ? (
                     /hyperliquid/i.test(leg.protocol || "") ? (
                       <PerpExecuteButton leg={leg} prices={prices} />

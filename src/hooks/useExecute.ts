@@ -123,8 +123,10 @@ export function useExecute(): UseExecuteResult {
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
- * Route a finished plan to the right wagmi call. Native transfers carry `value`;
- * everything else is a contract write against the plan's ABI.
+ * Route a finished plan to the right wagmi call:
+ *   - a plan with an ABI (Aave, Lido's payable `submit`, ...) is a contract
+ *     write — `value` rides along when the call is itself payable (Lido).
+ *   - a plan with no ABI but a `value` is a plain native transfer.
  *
  * The plan's runtime ABI is intentionally cleared to `any` here: `buildExecution`
  * guarantees abi/functionName/args are a self-consistent set, but wagmi's
@@ -138,19 +140,20 @@ async function submitPlan(
   writeContractAsync: WriteAsync,
   sendTransactionAsync: WriteAsync,
 ): Promise<`0x${string}`> {
+  if (plan.address && plan.abi && plan.functionName && plan.args) {
+    return writeContractAsync({
+      chainId: plan.chainId,
+      address: plan.address,
+      abi: plan.abi,
+      functionName: plan.functionName,
+      args: plan.args,
+      ...(plan.value !== undefined ? { value: plan.value } : {}),
+    });
+  }
   if (plan.value !== undefined) {
     if (!plan.address) throw new Error("native transfer is missing a recipient (address)");
     return sendTransactionAsync({ chainId: plan.chainId, to: plan.address, value: plan.value });
   }
-  if (!plan.address || !plan.abi || !plan.functionName || !plan.args) {
-    throw new Error("execution plan is missing required write fields");
-  }
-  return writeContractAsync({
-    chainId: plan.chainId,
-    address: plan.address,
-    abi: plan.abi,
-    functionName: plan.functionName,
-    args: plan.args,
-  });
+  throw new Error("execution plan is missing required write fields");
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
