@@ -5,26 +5,6 @@ export interface ThreadItem {
   text?: string;
 }
 
-export const TX_HASHES: Record<Exclude<ThreadType, "custom">, string> = {
-  pendle: "0x4f2a9e1b...9c31",
-  betaneutral: "0x8b71c02f...2e04",
-  perp: "0x1a9d5b83...77f0",
-  swap: "0x62c4f710...b0a9",
-  hedge: "0x9de731a4...5f88",
-};
-
-export const HEDGE_KEYWORDS = [
-  "hedge",
-  "protect",
-  "downside",
-  "insure",
-  "drawdown",
-  "crash",
-  "bear market",
-  "dump",
-  "correction",
-];
-
 export function fmtUsd(n: number): string {
   return (n < 0 ? "-" : "") + "$" + Math.abs(Math.round(n)).toLocaleString("en-US");
 }
@@ -136,5 +116,4 @@ export const TOP_CRYPTOS: CryptoTicker[] = [
   { symbol: "APT", price: "$9.84", change: -1.1 },
 ];
 
-export const WALLET_ADDRESS = "0x7A3f…9B2c";
 export const PORTFOLIO_VALUE = 128400;

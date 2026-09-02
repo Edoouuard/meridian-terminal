@@ -277,7 +277,9 @@ export default function TerminalApp() {
             </p>
             <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: "var(--space-3)", minWidth: 0 }}>
               <div className="card" style={{ gap: 6, padding: "var(--space-2)", minWidth: 0 }}>
-                <p style={{ margin: 0, fontSize: 12, fontWeight: 600, fontFamily: "var(--font-heading)" }}>Net TVL flows, 7 days</p>
+                <p style={{ margin: 0, fontSize: 12, fontWeight: 600, fontFamily: "var(--font-heading)" }}>
+                  Net TVL flows, 7 days{liveBars && liveBars.length > 0 ? "" : " (example)"}
+                </p>
                 <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 2, minWidth: 0 }}>
                   {displayBars.map((rb) => (
                     <div key={rb.name} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, minWidth: 0 }}>
@@ -298,6 +300,7 @@ export default function TerminalApp() {
                 <div className="card" style={{ gap: 4, padding: "var(--space-3)" }}>
                   <p style={{ margin: 0, fontSize: 12, fontWeight: 600, fontFamily: "var(--font-heading)" }}>
                     Fastest growing: {displayHighlight.protocol}
+                    {fastestLive ? "" : " (example)"}
                   </p>
                   <p style={{ margin: 0, fontSize: 11 }} className="text-muted">
                     {displayHighlight.tvlStart} → <strong style={{ color: "var(--color-text)" }}>{displayHighlight.tvlEnd}</strong>{" "}
