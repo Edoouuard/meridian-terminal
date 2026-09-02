@@ -69,11 +69,32 @@ function OrderRow({ label, value, valueColor }: { label: string; value: React.Re
   );
 }
 
-/** Honest "not wired yet" — never fakes a success for a venue the harness can't sign. */
+/**
+ * Honest "not wired yet" — never fakes a success for a venue the harness
+ * can't sign. Styled to visually read as unavailable (dashed border, muted
+ * background) with a "Building" tag, so it's obvious at a glance before
+ * reading the text.
+ */
 function NotWired({ venue, reason }: { venue: string; reason: string }) {
   return (
-    <div style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)", display: "flex", flexDirection: "column", gap: 2 }}>
-      <span>Live execution not wired for {venue} yet</span>
+    <div
+      style={{
+        margin: "6px 0 0",
+        padding: "6px 8px",
+        borderRadius: 6,
+        border: "1px dashed var(--color-divider)",
+        background: "var(--color-neutral-100)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 3,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+        <span className="tag tag-neutral" style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+          Building
+        </span>
+        <span style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>{venue} isn&apos;t live yet</span>
+      </div>
       <span className="text-muted" style={{ fontSize: 11 }}>
         {reason}
       </span>
@@ -624,8 +645,14 @@ function PlanCard({ item }: { item: ThreadItem }) {
           <div style={orderStyle}>
             {plan.legs.map((leg, i) => {
               const resolved = resolveOrderForLeg(leg, undefined, prices, chain?.id);
+              // These three venues resolve their own live execution path
+              // (a fresh on-chain quote, a live vault lookup, ...) even when
+              // resolveOrderForLeg's pure/offline pass can't build the order
+              // itself — see PerpExecuteButton/SwapExecuteButton/MorphoExecuteButton.
+              const liveVenue = /hyperliquid|uniswap|morpho/i.test(leg.protocol || "");
+              const building = isUnsupported(resolved) && !liveVenue;
               return (
-                <div key={i} style={{ marginTop: i === 0 ? 0 : "var(--space-2)" }}>
+                <div key={i} style={{ marginTop: i === 0 ? 0 : "var(--space-2)", opacity: building ? 0.55 : 1 }}>
                   <OrderRow label={leg.side} value={legRowValue(leg)} />
                   <LegRiskBadge leg={leg} />
                   {isUnsupported(resolved) ? (
@@ -658,117 +685,15 @@ function PlanCard({ item }: { item: ThreadItem }) {
 }
 
 export function ThreadCard({ item }: { item: ThreadItem }) {
-  const orderStyle: React.CSSProperties = {
-    borderLeft: "2px solid var(--color-accent)",
-    paddingLeft: "var(--space-2)",
-    fontSize: 13,
-  };
-
-  // Dynamic plan-driven card takes priority over the canned fallbacks.
+  // Every ThreadItem reaching this component is built by routeThesis() (typed
+  // prompts, quick-prompt buttons, and news/alpha "discuss" links all go
+  // through it now), which always attaches a `.plan` — so this always
+  // resolves to the dynamic, live-execution-status-accurate PlanCard. The
+  // fallback below is a defensive guard for the (currently theoretical)
+  // case of a plan-less ThreadItem — `plan` is optional in the type, so
+  // something could construct one without it.
   if (item.plan) {
     return <PlanCard item={item} />;
-  }
-
-  if (item.type === "pendle") {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-        <UserBubble>
-          Liquid restaking yield on ETH is going to compress over the next 3 months. How do I lock in the current
-          rate?
-        </UserBubble>
-        <div style={{ maxWidth: "90%" }}>
-          <p style={{ margin: "0 0 6px", fontSize: 14 }}>
-            The implied PT weETH June 2027 rate is <strong>9.8% fixed</strong>, versus 6.4% average variable yield on
-            weETH. The spread has widened by 140bps this week.
-          </p>
-          <div style={orderStyle}>
-            <OrderRow label="Buy" value="PT weETH · Pendle · June 26, 2027" />
-            <OrderRow label="Amount" value="$15,000" />
-            <OrderRow label="Fixed APY" value="9.8%" valueColor="var(--color-accent-700)" />
-            <NotWired venue="Pendle" reason="Pendle fixed-yield (PT) not wired for live execution yet" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (item.type === "betaneutral") {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-        <UserBubble>I want to farm Hyperliquid points on ETH without directional risk.</UserBubble>
-        <div style={{ maxWidth: "90%" }}>
-          <p style={{ margin: "0 0 6px", fontSize: 14 }}>
-            A long on Hyperliquid paired with an equivalent short on Extended cancels the delta while keeping 100% of
-            the volume eligible for points. Net funding: +2.7% annualized in your favor.
-          </p>
-          <div style={orderStyle}>
-            <OrderRow label="Long" value="ETH PERP · Hyperliquid · $20,000 · 3.0x" />
-            <OrderRow label="Short" value="ETH PERP · Extended · $20,000 · 3.0x" />
-            <OrderRow label="Net delta" value="0.00 ETH" valueColor="var(--color-accent-700)" />
-            <NotWired venue="Hyperliquid / Extended" reason="Perp venues not wired for live execution yet" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (item.type === "perp") {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-        <UserBubble>I think SOL will outperform ETH this month.</UserBubble>
-        <div style={{ maxWidth: "90%" }}>
-          <p style={{ margin: "0 0 6px", fontSize: 14 }}>
-            Momentum on SOL is positive, and Hyperliquid funding is close to neutral (+0.3% annualized), so there is
-            no meaningful carry cost for a directional long.
-          </p>
-          <div style={orderStyle}>
-            <OrderRow label="Long" value="SOL PERP · Hyperliquid · $8,000 · 4.0x" />
-            <OrderRow label="Est. liquidation" value="$131" />
-            <NotWired venue="Hyperliquid" reason="Hyperliquid perps not wired for live execution yet" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (item.type === "swap") {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-        <UserBubble>I want to move out of USDC into stETH.</UserBubble>
-        <div style={{ maxWidth: "90%" }}>
-          <p style={{ margin: "0 0 6px", fontSize: 14 }}>
-            The most efficient route is a direct USDC to wstETH swap through an aggregator, with an estimated 0.04%
-            slippage on $10,000.
-          </p>
-          <div style={orderStyle}>
-            <OrderRow label="Swap" value="$10,000 USDC → wstETH" />
-            <OrderRow label="Est. received" value="2.94 wstETH" />
-            <NotWired venue="Uniswap" reason="Uniswap swaps not wired for live execution yet" />
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (item.type === "hedge") {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-        <UserBubble>{item.text || "How do I hedge my portfolio against a broader market downturn?"}</UserBubble>
-        <div style={{ maxWidth: "90%" }}>
-          <p style={{ margin: "0 0 6px", fontSize: 14 }}>
-            Your book currently carries <strong>+0.62 ETH</strong> of net directional delta, and stETH plus PT weETH
-            make up <strong>42%</strong> of the portfolio in liquid staking and restaking risk. A partial short on
-            Hyperliquid brings the delta close to flat without touching either yield leg.
-          </p>
-          <div style={orderStyle}>
-            <OrderRow label="Short" value="ETH PERP · Hyperliquid · $13,000 · 1.0x" />
-            <OrderRow label="Resulting net delta" value="≈0.02 ETH" valueColor="var(--risk-good)" />
-            <OrderRow label="Est. cost of carry" value="-1.1% annualized" />
-            <NotWired venue="Hyperliquid" reason="Hyperliquid perps not wired for live execution yet" />
-          </div>
-        </div>
-      </div>
-    );
   }
 
   return (

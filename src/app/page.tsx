@@ -16,7 +16,7 @@ import { LiveAsset, LivePortfolio, useLivePortfolio } from "@/hooks/useLivePortf
 import { useLiveFeed } from "@/hooks/useLiveFeed";
 import { NewsFeed } from "@/components/NewsFeed";
 import { CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
-import { routeThesis } from "@/lib/routeThesis";
+import { EXAMPLE_THESIS_FOR_TYPE, routeThesis } from "@/lib/routeThesis";
 import { recordExecution } from "@/lib/history";
 
 // Expose the local order-history API on the page module so real execution
@@ -79,7 +79,10 @@ function buildLiveAllocation(live: LivePortfolio): { label: string; pct: number;
 }
 
 export default function TerminalApp() {
-  const [thread, setThread] = useState<ThreadItem[]>([{ type: "pendle" }, { type: "betaneutral" }]);
+  const [thread, setThread] = useState<ThreadItem[]>([
+    routeThesis(EXAMPLE_THESIS_FOR_TYPE.pendle),
+    routeThesis(EXAMPLE_THESIS_FOR_TYPE.betaneutral),
+  ]);
   const [promptText, setPromptText] = useState("");
 
   const { isConnected } = useAccount();
@@ -134,8 +137,15 @@ export default function TerminalApp() {
 
   const usedTypes = new Set(thread.map((t) => t.type));
 
+  // Quick-prompt buttons and news/alpha "discuss" links both land here. Routes
+  // through the real engine (routeThesis) rather than pushing static demo
+  // content, so what's shown always reflects actual live-execution status —
+  // no separate hardcoded card that can silently go stale once a venue gets
+  // wired up for real.
   function addExample(type: ThreadType, text?: string) {
-    setThread((cur) => (cur.some((t) => t.type === type) ? cur : cur.concat([{ type, text }])));
+    const thesis = text ?? (type !== "custom" ? EXAMPLE_THESIS_FOR_TYPE[type] : undefined);
+    const routed = thesis ? routeThesis(thesis) : { type, text };
+    setThread((cur) => (cur.some((t) => t.type === routed.type) ? cur : cur.concat([routed])));
   }
 
   function submitPrompt() {
@@ -335,8 +345,14 @@ export default function TerminalApp() {
           </div>
 
           <div style={{ flex: "none", display: "flex", gap: 6, flexWrap: "wrap", margin: "var(--space-3) 0 var(--space-2)" }}>
-            <button className="btn btn-secondary" style={{ fontSize: 12 }} disabled={usedTypes.has("pendle")} onClick={() => addExample("pendle")}>
-              Lock a fixed yield
+            <button
+              className="btn btn-secondary"
+              style={{ fontSize: 12, opacity: 0.6, borderStyle: "dashed" }}
+              disabled={usedTypes.has("pendle")}
+              onClick={() => addExample("pendle")}
+              title="Pendle isn't wired for live execution yet"
+            >
+              Lock a fixed yield · Building
             </button>
             <button
               className="btn btn-secondary"
