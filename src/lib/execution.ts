@@ -2,6 +2,7 @@ import type { Abi, Address } from "viem";
 import { parseUnits, zeroAddress } from "viem";
 import { AAVE_V3_POOL_BY_CHAIN, CHAIN_LABEL, STETH_ADDRESS } from "./onchain";
 import { SWAP_ROUTER02_EXACT_INPUT_SINGLE_ABI, UNISWAP_SWAP_ROUTER02_BY_CHAIN } from "./integrations/uniswap";
+import { ERC4626_DEPOSIT_ABI } from "./integrations/morpho";
 
 /**
  * Execution layer for Meridian's DeFi terminal.
@@ -21,7 +22,7 @@ import { SWAP_ROUTER02_EXACT_INPUT_SINGLE_ABI, UNISWAP_SWAP_ROUTER02_BY_CHAIN } 
  */
 
 export type OrderType = "supply" | "repay" | "borrow" | "withdraw" | "transfer" | "approve" | "stake" | "swap";
-export type OrderProtocol = "aave" | "eth" | "lido" | "uniswap";
+export type OrderProtocol = "aave" | "eth" | "lido" | "uniswap" | "morpho";
 
 /**
  * Protocol-agnostic order produced by the trade engine. Carries enough to build a
@@ -54,6 +55,8 @@ export interface Order {
    * approximated, matching quote.ts's pricing discipline.
    */
   amountOutMinimum?: bigint;
+  /** ERC-4626 vault contract address for a Morpho `supply` order (resolved live from Philidor, not a fixed per-chain constant). */
+  vaultAddress?: Address;
   [k: string]: unknown;
 }
 
@@ -418,6 +421,45 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
       }
 
       return fail(`Uniswap does not yet support order type '${order.type}'`);
+    }
+
+    case "morpho": {
+      const token = order.token;
+      if (!token) return fail("morpho order requires a token address");
+      const amount = normalizeAmount(order.amount, decimals);
+      if ("error" in amount) return amount;
+
+      if (order.type === "approve") {
+        const spender = order.spender as Address | undefined;
+        if (!spender) return fail("morpho approve requires a spender (vault) address");
+        return {
+          chainId,
+          address: token,
+          abi: ERC20_APPROVE_ABI,
+          functionName: "approve",
+          args: [spender, amount.value],
+          description: `Approve this Morpho vault to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`,
+          riskNote: `Approval lets the vault transfer up to this amount of ${assetLabel}. Confirm the vault address before signing.`,
+        };
+      }
+
+      if (order.type === "supply") {
+        const vault = order.vaultAddress;
+        if (!vault) return fail("morpho supply requires a vaultAddress");
+        return {
+          chainId,
+          address: vault,
+          abi: ERC4626_DEPOSIT_ABI,
+          functionName: "deposit",
+          // [assets, receiver] — receiver patched to the connected sender by useExecute via `senderIndex`.
+          args: [amount.value, zeroAddress],
+          senderIndex: 1,
+          description: `Deposit ${order.amount} ${assetLabel} into a Morpho vault on ${chainLabel}`,
+          riskNote: `Moves real funds on ${chainLabel} into a third-party Morpho vault — its live risk tier was shown before you confirmed. Withdrawal isn't wired in Meridian yet; use the vault's own interface to exit.`,
+        };
+      }
+
+      return fail(`Morpho does not yet support order type '${order.type}'`);
     }
 
     default:

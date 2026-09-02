@@ -25,9 +25,15 @@ export type RiskTier = "Prime" | "Core" | "Edge";
 export interface VaultRisk {
   id: string;
   name: string;
+  /** The vault's own on-chain contract address (ERC-4626 for Morpho/Yearn/Beefy vaults) — the deposit target, not the underlying asset. */
+  address: string;
   protocol: string;
   chain: string;
+  /** Numeric chain id (e.g. 1 for Ethereum), for routing an execution to the right network. */
+  chainId: number | null;
   assetSymbol: string;
+  /** The underlying asset's ERC20 address on `chainId`. */
+  assetAddress: string;
   tvlUsd: number;
   aprNet: number;
   riskScore: number;
@@ -54,9 +60,12 @@ export const PHILIDOR_PROTOCOL_ID: Record<string, string> = {
 interface RawVault {
   id?: unknown;
   name?: unknown;
+  address?: unknown;
   protocol_name?: unknown;
   chain_name?: unknown;
+  chain_id?: unknown;
   asset_symbol?: unknown;
+  asset_address?: unknown;
   tvl_usd?: unknown;
   apr_net?: unknown;
   total_score?: unknown;
@@ -86,9 +95,12 @@ export function normalizeVault(raw: RawVault): VaultRisk | null {
   return {
     id: raw.id,
     name: raw.name,
+    address: typeof raw.address === "string" ? raw.address : "",
     protocol: typeof raw.protocol_name === "string" ? raw.protocol_name : "",
     chain: typeof raw.chain_name === "string" ? raw.chain_name : "",
+    chainId: typeof raw.chain_id === "number" && Number.isFinite(raw.chain_id) ? raw.chain_id : null,
     assetSymbol: typeof raw.asset_symbol === "string" ? raw.asset_symbol : "",
+    assetAddress: typeof raw.asset_address === "string" ? raw.asset_address : "",
     tvlUsd: num(raw.tvl_usd),
     aprNet: num(raw.apr_net),
     riskScore: raw.total_score,

@@ -267,5 +267,17 @@ export function approveOrderFor(order: Order): Order | null {
       decimals: order.decimals,
     };
   }
+  if (order.protocol === "morpho" && order.type === "supply" && order.token && order.vaultAddress) {
+    return {
+      type: "approve",
+      protocol: "morpho",
+      token: order.token,
+      symbol: order.symbol,
+      amount: order.amount,
+      chainId: order.chainId,
+      decimals: order.decimals,
+      spender: order.vaultAddress,
+    };
+  }
   return null;
 }

@@ -6,9 +6,12 @@ describe("philidor — normalizeVault", () => {
     const v = normalizeVault({
       id: "aave-1-0xabc",
       name: "Aave Ethereum USDC",
+      address: "0x98c23e9d8f34fefb1b7bd6a91b7ff122f4e16f5c",
       protocol_name: "Aave",
       chain_name: "Ethereum",
+      chain_id: 1,
       asset_symbol: "USDC",
+      asset_address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
       tvl_usd: 2_284_335_608.5,
       apr_net: 0.0344,
       total_score: 9.02,
@@ -17,6 +20,9 @@ describe("philidor — normalizeVault", () => {
     });
     expect(v).not.toBeNull();
     expect(v!.id).toBe("aave-1-0xabc");
+    expect(v!.address).toBe("0x98c23e9d8f34fefb1b7bd6a91b7ff122f4e16f5c");
+    expect(v!.chainId).toBe(1);
+    expect(v!.assetAddress).toBe("0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48");
     expect(v!.riskTier).toBe("Prime");
     expect(v!.riskScore).toBe(9.02);
     expect(v!.isAudited).toBe(true);
@@ -45,9 +51,12 @@ describe("philidor — normalizeVault", () => {
   it("defaults optional numeric/string/bool fields when absent", () => {
     const v = normalizeVault({ id: "x", name: "y", total_score: 5, risk_tier: "Edge" });
     expect(v).not.toBeNull();
+    expect(v!.address).toBe("");
     expect(v!.protocol).toBe("");
     expect(v!.chain).toBe("");
+    expect(v!.chainId).toBeNull();
     expect(v!.assetSymbol).toBe("");
+    expect(v!.assetAddress).toBe("");
     expect(v!.tvlUsd).toBe(0);
     expect(v!.aprNet).toBe(0);
     expect(v!.isAudited).toBe(false);

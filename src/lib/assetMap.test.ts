@@ -161,6 +161,27 @@ describe("assetMap — approveOrderFor", () => {
   it("returns null for a Uniswap order that isn't a swap", () => {
     expect(approveOrderFor({ ...supply, protocol: "uniswap", type: "approve" })).toBeNull();
   });
+
+  it("derives an approve order from a Morpho supply order, spender set to the vault", () => {
+    const MORPHO_VAULT = "0xBEeFFF209270748ddd194831b3fa287a5386f5bC";
+    const morphoSupply: Order = {
+      type: "supply",
+      protocol: "morpho",
+      token: BASE_AARCHING,
+      vaultAddress: MORPHO_VAULT,
+      amount: 1_000_000_000n,
+      chainId: BASE_CHAIN_ID,
+      decimals: 6,
+    };
+    const approve = approveOrderFor(morphoSupply);
+    expect(approve).not.toBeNull();
+    expect(approve!.protocol).toBe("morpho");
+    expect(approve!.spender).toBe(MORPHO_VAULT);
+  });
+
+  it("returns null for a Morpho supply order missing a vaultAddress", () => {
+    expect(approveOrderFor({ ...supply, protocol: "morpho", vaultAddress: undefined })).toBeNull();
+  });
 });
 
 describe("assetMap — humanAmountForLeg", () => {

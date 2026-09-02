@@ -263,6 +263,65 @@ describe("execution — buildExecution uniswap swap plans", () => {
   });
 });
 
+const MORPHO_VAULT = "0xBEeFFF209270748ddd194831b3fa287a5386f5bC";
+
+function morphoSupplyOrder(overrides: Partial<Order> = {}): Order {
+  return {
+    type: "supply",
+    protocol: "morpho",
+    token: USDC_MAINNET,
+    vaultAddress: MORPHO_VAULT,
+    amount: "1000",
+    chainId: 1,
+    decimals: 6,
+    symbol: "USDC",
+    ...overrides,
+  };
+}
+
+describe("execution — buildExecution morpho vault plans", () => {
+  it("builds an ERC-4626 deposit plan with the sender patched into receiver", () => {
+    const plan = buildExecution(morphoSupplyOrder()) as ExecutionPlan;
+    expect(plan.address).toBe(MORPHO_VAULT);
+    expect(plan.functionName).toBe("deposit");
+    expect(plan.args?.[0]).toBe(1_000_000_000n);
+    expect(plan.args?.[1]).toBe(zeroAddress);
+    expect(plan.senderIndex).toBe(1);
+    expect(plan.senderTupleKey).toBeUndefined();
+
+    const patched = applySender(plan, SENDER) as ExecutionPlan;
+    expect(patched.args?.[1]).toBe(SENDER);
+    expect(patched.args?.[0]).toBe(1_000_000_000n);
+  });
+
+  it("rejects a supply order missing a vaultAddress", () => {
+    const res = buildExecution(morphoSupplyOrder({ vaultAddress: undefined }));
+    expect((res as { error: string }).error).toContain("requires a vaultAddress");
+  });
+
+  it("rejects an unsupported morpho order type", () => {
+    const res = buildExecution(morphoSupplyOrder({ type: "borrow" as Order["type"] }));
+    expect((res as { error: string }).error).toContain("does not yet support order type");
+  });
+
+  it("requires a token address for the approve step", () => {
+    const res = buildExecution(morphoSupplyOrder({ token: undefined }));
+    expect((res as { error: string }).error).toContain("requires a token address");
+  });
+
+  it("builds an approve plan against the caller-supplied vault spender (no default)", () => {
+    const plan = buildExecution(morphoSupplyOrder({ type: "approve", spender: MORPHO_VAULT })) as ExecutionPlan;
+    expect(plan.functionName).toBe("approve");
+    expect(plan.address).toBe(USDC_MAINNET);
+    expect(plan.args?.[0]).toBe(MORPHO_VAULT);
+  });
+
+  it("rejects an approve order with no spender (morpho has no fixed default vault)", () => {
+    const res = buildExecution(morphoSupplyOrder({ type: "approve" }));
+    expect((res as { error: string }).error).toContain("requires a spender");
+  });
+});
+
 describe("execution — applySender with a nested tuple sender field", () => {
   it("patches the sender into the named tuple key without disturbing other fields", () => {
     const plan = buildExecution(swapOrder()) as ExecutionPlan;

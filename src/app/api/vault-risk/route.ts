@@ -16,6 +16,7 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const protocolNames = searchParams.get("protocol");
   const asset = searchParams.get("asset") ?? undefined;
+  const chain = searchParams.get("chain") ?? undefined;
   const limitParam = searchParams.get("limit");
   const limit = limitParam ? parseInt(limitParam, 10) : undefined;
 
@@ -28,6 +29,7 @@ export async function GET(req: NextRequest) {
   const vaults = await searchVaults({
     protocol: protocolIds || undefined,
     asset,
+    chain,
     limit,
     sortBy: "total_score",
     sortOrder: "desc",

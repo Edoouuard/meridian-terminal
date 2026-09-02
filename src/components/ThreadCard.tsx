@@ -12,6 +12,7 @@ import { useHyperliquid } from "@/hooks/useHyperliquid";
 import { useLivePrices } from "@/hooks/useLivePrices";
 import { useVaultRisk } from "@/hooks/useVaultRisk";
 import { PHILIDOR_PROTOCOL_ID, type RiskTier } from "@/lib/integrations/philidor";
+import { MIN_MORPHO_RISK_SCORE } from "@/lib/integrations/morpho";
 import {
   QUOTER_V2_QUOTE_EXACT_INPUT_SINGLE_ABI,
   UNISWAP_QUOTER_V2_BY_CHAIN,
@@ -188,7 +189,9 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
               ? "Stake on Lido"
               : order.protocol === "uniswap" && order.type === "swap"
                 ? "Approve & Swap on Uniswap"
-                : "Confirm on-chain action"
+                : order.protocol === "morpho" && order.type === "supply"
+                  ? "Approve & Deposit on Morpho"
+                  : "Confirm on-chain action"
         }
         body={
           <div>
@@ -211,6 +214,13 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
                 minimum-received amount previewed above (0.5% slippage from a live quote).
               </>
             )}
+            {order.protocol === "morpho" && order.type === "supply" && (
+              <>
+                {" "}
+                This will first <strong>approve</strong> the vault previewed above, then <strong>deposit</strong> into
+                it. Withdrawal isn&apos;t wired in Meridian yet — use the vault&apos;s own interface to exit.
+              </>
+            )}
           </div>
         }
         confirmLabel={
@@ -218,7 +228,9 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
             ? "Approve & Supply"
             : order.protocol === "uniswap" && order.type === "swap"
               ? "Approve & Swap"
-              : "Sign"
+              : order.protocol === "morpho" && order.type === "supply"
+                ? "Approve & Deposit"
+                : "Sign"
         }
         warning="This moves real funds from your wallet."
         guardrail={guardrail}
@@ -459,6 +471,88 @@ function SwapExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry
   );
 }
 
+/**
+ * Live Morpho vault deposit. Morpho Blue has no single canonical pool like
+ * Aave — deposits go into one of hundreds of MetaMorpho vaults, each its own
+ * ERC-4626 contract. Rather than hardcode a curated vault list, this resolves
+ * the vault to deposit into at execute-time from Philidor's live risk data
+ * (same source as the Vault Risk panel / LegRiskBadge), scoped to the
+ * connected wallet's chain so no network-switch flow is needed, and gated to
+ * MIN_MORPHO_RISK_SCORE so a low-scoring (Edge-tier) vault is never silently
+ * picked for a one-click deposit. Once resolved, execution (approve +
+ * deposit) reuses the existing ExecuteButton, same as SwapExecuteButton does.
+ */
+function MorphoExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry[] }) {
+  const { chain } = useAccount();
+  const chainId = chain?.id ?? DEFAULT_CHAIN_ID;
+  const chainName = CHAIN_LABEL[chainId];
+  const symbol = (leg.asset || "").trim();
+
+  const { data: vaults, isLoading } = useVaultRisk({
+    protocol: "Morpho",
+    asset: symbol || undefined,
+    chain: chainName,
+    limit: 1,
+    enabled: !!symbol && !!chainName,
+  });
+  const vault = vaults?.[0];
+
+  const token = findToken(symbol, chainId);
+  const price = token ? resolvePriceFromList(prices, token.symbol) : null;
+  const quote = token ? usdToTokenAmount(token.symbol, leg.sizeUsd, price, token.decimals) : null;
+
+  if (!chainName) {
+    return <NotWired venue="Morpho" reason={`Chain ${chainId} is not supported for Morpho vault deposits.`} />;
+  }
+  if (isLoading) {
+    return <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>Finding the best-rated Morpho {symbol} vault…</p>;
+  }
+  if (!vault) {
+    return (
+      <NotWired
+        venue="Morpho"
+        reason={`No live Morpho ${symbol} vault found on ${chainName} — try another asset or switch networks.`}
+      />
+    );
+  }
+  if (vault.riskScore < MIN_MORPHO_RISK_SCORE) {
+    return (
+      <NotWired
+        venue="Morpho"
+        reason={`The best available Morpho ${symbol} vault on ${chainName} scores ${vault.riskScore.toFixed(1)}/10 (${vault.riskTier}) — below Meridian's ${MIN_MORPHO_RISK_SCORE}/10 floor for one-click deposits.`}
+      />
+    );
+  }
+  if (!vault.address || !vault.assetAddress) {
+    return <NotWired venue="Morpho" reason="Live vault data is missing an on-chain address — cannot build a safe order." />;
+  }
+  if (!token) {
+    return <NotWired venue="Morpho" reason={`"${symbol}" has no tracked address on ${chainName}.`} />;
+  }
+  if (!quote) {
+    return <NotWired venue="Morpho" reason={`No live price for ${symbol} — cannot size this order safely.`} />;
+  }
+
+  const order: Order = {
+    type: "supply",
+    protocol: "morpho",
+    token: token.address,
+    vaultAddress: vault.address as `0x${string}`,
+    amount: quote.amountBase,
+    chainId,
+    decimals: token.decimals,
+    symbol: token.symbol,
+  };
+
+  return (
+    <>
+      <OrderRow label="Vault" value={vault.name} />
+      <OrderRow label="Risk" value={`${vault.riskTier} · ${vault.riskScore.toFixed(1)}/10 (Philidor)`} valueColor={RISK_TIER_COLOR[vault.riskTier]} />
+      <ExecuteButton order={order} label="Deposit on Morpho →" />
+    </>
+  );
+}
+
 function legRowValue(leg: { asset: string; protocol: string; sizeUsd?: number; leverage?: number }): string {
   return `${leg.asset} · ${leg.protocol}${leg.sizeUsd ? ` · ${fmtUsd(leg.sizeUsd)}` : ""}${leg.leverage ? ` · ${leg.leverage}x` : ""}`;
 }
@@ -539,6 +633,8 @@ function PlanCard({ item }: { item: ThreadItem }) {
                       <PerpExecuteButton leg={leg} prices={prices} />
                     ) : /uniswap/i.test(leg.protocol || "") ? (
                       <SwapExecuteButton leg={leg} prices={prices} />
+                    ) : /morpho/i.test(leg.protocol || "") ? (
+                      <MorphoExecuteButton leg={leg} prices={prices} />
                     ) : (
                       <NotWired venue={protocolLabel(leg.protocol)} reason={resolved.unsupported} />
                     )
