@@ -9,6 +9,7 @@ import type { Order } from "@/lib/execution";
 import type { TradeLeg } from "@/lib/tradePlan";
 import { useExecute, explorerUrlFor } from "@/hooks/useExecute";
 import { useHyperliquid } from "@/hooks/useHyperliquid";
+import { useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
 import { useLivePrices } from "@/hooks/useLivePrices";
 import { useVaultRisk } from "@/hooks/useVaultRisk";
 import { PHILIDOR_PROTOCOL_ID, type RiskTier } from "@/lib/integrations/philidor";
@@ -268,10 +269,15 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
 }
 
 /**
- * Live Hyperliquid perp execution (testnet by default). Fetches the live mid
- * price + asset index, signs the EIP-712 order with the wallet, submits to the
- * exchange API, and reports the real status. Honest: any failure surfaces as
- * error, never a fake success.
+ * Live Hyperliquid perp execution. Fetches the live mid price + asset index,
+ * signs the EIP-712 order with the wallet, submits to the exchange API, and
+ * reports the real status. Honest: any failure surfaces as error, never a
+ * fake success.
+ *
+ * Shares its testnet/mainnet selection with HyperliquidPanel's toggle
+ * (useSharedHlEnv) rather than hardcoding testnet — opening a position from
+ * a thesis and closing one from the panel now always agree on which network
+ * they're touching.
  *
  * The USD notional is quoted to an exact coin quantity via the live price list
  * (passed in), and that coinQty is handed to the Hyperliquid layer so the fill
@@ -280,6 +286,7 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
  */
 function PerpExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry[] }) {
   const { isConnected } = useAccount();
+  const env = useSharedHlEnv();
   const { status, result, error, execute, reset } = useHyperliquid();
   const [confirming, setConfirming] = useState(false);
 
@@ -336,7 +343,7 @@ function PerpExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry
   if (status === "confirmed" && result) {
     return (
       <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-accent-700)" }}>
-        Order on Hyperliquid testnet: {result.marketPrice ? "$" + result.marketPrice.toFixed(4) : "n/a"} →{" "}
+        Order on Hyperliquid {env}: {result.marketPrice ? "$" + result.marketPrice.toFixed(4) : "n/a"} →{" "}
         {JSON.stringify(result.response)}
         <button onClick={reset} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 11 }}>
           clear
@@ -364,15 +371,15 @@ function PerpExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry
         onClick={() => setConfirming(true)}
         title={isConnected ? undefined : "Connect a wallet first"}
       >
-        Open {side === "short" ? "short" : "long"} {symbol} on Hyperliquid →
+        Open {side === "short" ? "short" : "long"} {symbol} on Hyperliquid {env} →
       </button>
       <ConfirmDialog
         open={confirming}
-        title={`Confirm ${isBuy ? "long" : "short"} ${symbol} on Hyperliquid`}
+        title={`Confirm ${isBuy ? "long" : "short"} ${symbol} on Hyperliquid ${env}`}
         body={
           <div>
             Market order: {isBuy ? "long" : "short"} {symbol.toUpperCase()} ({fmtUsd(sizeUsd)}
-            {leverage ? ` at ${leverage}x` : ""}).
+            {leverage ? ` at ${leverage}x` : ""}) on Hyperliquid {env}.
             {hlQuote && coinQty !== undefined ? (
               <>
                 {" "}
@@ -386,10 +393,10 @@ function PerpExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry
           </div>
         }
         confirmLabel="Sign & submit"
-        warning="TESTNET by default — no real funds."
+        warning={env === "testnet" ? "TESTNET — no real funds." : "Mainnet — real funds. Confirm carefully."}
         onConfirm={() => {
           setConfirming(false);
-          execute({ symbol, isBuy, sizeUsd, leverage, testnet: true, coinQty });
+          execute({ symbol, isBuy, sizeUsd, leverage, testnet: env === "testnet", coinQty });
         }}
         onCancel={() => setConfirming(false)}
       />

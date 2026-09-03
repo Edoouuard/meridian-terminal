@@ -129,24 +129,48 @@ export function resolveOrderForLeg(
   const quoteFor = (symbol: string, decimals: number) =>
     usdToTokenAmount(symbol, leg.sizeUsd, resolvePriceFromList(prices, symbol), decimals);
 
-  // --- Native L1 transfer (executable) -------------------------------------
+  // --- Native ETH transfer (executable, mainnet only) -----------------------
+  // The recipient comes from the thesis itself (leg.to, parsed by tradePlan's
+  // "transfer" intent) — falling back to the `address` param only for a
+  // caller that already knows the recipient some other way.
   if (protocol === "eth" || side === "transfer") {
-    if (!address) {
-      return { unsupported: "Native transfer needs a recipient address; nothing wired here yet." };
+    const recipient = (leg.to as Address | undefined) ?? address;
+    if (!recipient) {
+      return { unsupported: "Send needs a recipient address — include one like 0x1234... in your thesis." };
     }
     const symbol = bareSymbol(leg.asset) || "ETH";
-    const quote = quoteFor(symbol, 18);
+    if (symbol !== "ETH") {
+      return { unsupported: `Only native ETH sends are wired — "${symbol}" transfers aren't yet.` };
+    }
+    if (resolveChainId !== 1) {
+      return { unsupported: "Native ETH sends are only wired on Ethereum mainnet — switch networks to send." };
+    }
+    // A literal quantity ("send 0.5 ETH") is already exact — no live price
+    // needed or used. execution.ts's normalizeAmount parses this decimal
+    // string directly into base units.
+    if (leg.sizeToken) {
+      return {
+        type: "transfer",
+        protocol: "eth",
+        symbol: "ETH",
+        amount: leg.sizeToken,
+        chainId: resolveChainId,
+        decimals: 18,
+        to: recipient,
+      };
+    }
+    const quote = quoteFor("ETH", 18);
     if (!quote) {
-      return { unsupported: `No live price for ${symbol} — cannot size this order safely. Price feeds down?` };
+      return { unsupported: "No live price for ETH — cannot size this order safely. Price feeds down?" };
     }
     return {
       type: "transfer",
       protocol: "eth",
-      symbol,
+      symbol: "ETH",
       amount: quote.amountBase,
       chainId: resolveChainId,
       decimals: 18,
-      to: address,
+      to: recipient,
     };
   }
 

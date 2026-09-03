@@ -30,6 +30,7 @@ export type TradeIntent =
   | "restake"
   | "options"
   | "bridge"
+  | "transfer"
   | "unknown";
 
 export interface TradeLeg {
@@ -39,6 +40,17 @@ export interface TradeLeg {
   sizeUsd?: number;
   leverage?: number;
   note?: string;
+  /** Recipient address, only set for a "transfer" leg (parsed from the thesis text itself). */
+  to?: string;
+  /**
+   * A literal, exact token-unit quantity (e.g. "0.5" for "send 0.5 ETH") as a
+   * decimal string — set only for a "transfer" leg when the thesis gave a
+   * unit amount rather than a dollar figure. sizeUsd's amount is otherwise
+   * always in USD, which parseThesis has no live price to convert a literal
+   * unit quantity into; this field carries the exact amount through
+   * unconverted instead of silently reinterpreting or dropping it.
+   */
+  sizeToken?: string;
 }
 
 export interface TradePlan {
@@ -73,6 +85,7 @@ export const DEFAULT_SIZES: Record<TradeIntent, number> = {
   restake: 10000,
   options: 5000,
   bridge: 10000,
+  transfer: 1000,
   unknown: 0,
 };
 
@@ -158,6 +171,27 @@ function parseSwap(text: string): { from: string; to: string } | undefined {
   const m = text.match(SWAP_RE);
   if (!m) return undefined;
   return { from: canonAsset(m[1]), to: canonAsset(m[2]) };
+}
+
+/** A raw EVM address (checksum case preserved — matched against the original, non-lowercased text). */
+const ADDRESS_RE = /0x[a-fA-F0-9]{40}/;
+
+function parseRecipient(text: string): string | undefined {
+  const m = text.match(ADDRESS_RE);
+  return m ? m[0] : undefined;
+}
+
+/**
+ * A literal "N ETH" quantity — e.g. "0.5" from "send 0.5 ETH to 0x...".
+ * Deliberately narrow (ETH only): native-transfer execution only supports
+ * ETH today (see assetMap.ts), and parseAmount's dollar reading already
+ * treats a plain number as USD, so this only fires for the unambiguous
+ * "<number> ETH" shape, never one already prefixed with "$".
+ */
+function parseEthQuantity(text: string): string | undefined {
+  const m = text.match(/\$?\s*([0-9]+(?:\.[0-9]+)?)\s*eth\b/i);
+  if (!m || m[0].trim().startsWith("$")) return undefined;
+  return m[1];
 }
 
 /**
@@ -264,7 +298,11 @@ function resolveIntent(
   swap: { from: string; to: string } | undefined,
   protocol: string | undefined,
   direction: "long" | "short" | undefined,
+  recipient: string | undefined,
 ): TradeIntent {
+  // Checked first and unambiguously: an explicit send/transfer verb next to a
+  // real address is never something else (a hedge, a swap, ...).
+  if (recipient && /\b(send|transfer)\b/i.test(t)) return "transfer";
   if (/hedge|protect|downside|drawdown|crash|correction|bear market|dump|insure/i.test(t)) return "hedge";
   if (/beta ?neutral|delta ?neutral|no directional risk|without directional risk|farm .*points|points (farm|season)|basis neutral/i.test(t))
     return "betaNeutral";
@@ -329,7 +367,8 @@ export function parseThesis(rawText: string): TradePlan {
   const direction = parseDirection(t);
   const swap = parseSwap(text);
   const leverage = parseLeverage(text);
-  const intent = resolveIntent(t, swap, protocol, direction);
+  const recipient = parseRecipient(text);
+  const intent = resolveIntent(t, swap, protocol, direction, recipient);
 
   const size = amount ?? (intent !== "unknown" ? DEFAULT_SIZES[intent] : undefined);
   let legs: TradeLeg[] = [];
@@ -419,6 +458,25 @@ export function parseThesis(rawText: string): TradePlan {
     case "bridge": {
       legs = [{ side: "Bridge", asset: base, protocol: protocol ?? "Cross-chain", sizeUsd: size }];
       summary = `Bridge ~${fmtUsd(size ?? 0)} ${base}${protocol ? ` via ${protocol}` : " to another chain"}.`;
+      break;
+    }
+    case "transfer": {
+      // resolveIntent only ever returns "transfer" when a recipient was found.
+      const tokenQty = base === "ETH" ? parseEthQuantity(text) : undefined;
+      legs = [
+        {
+          side: "Transfer",
+          asset: base,
+          protocol: "Wallet",
+          sizeUsd: tokenQty ? undefined : size,
+          sizeToken: tokenQty,
+          to: recipient,
+          note: "Direct send",
+        },
+      ];
+      summary = tokenQty
+        ? `Send ${tokenQty} ${base} directly to ${recipient}.`
+        : `Send ~${fmtUsd(size ?? 0)} ${base} directly to ${recipient}.`;
       break;
     }
     default: {

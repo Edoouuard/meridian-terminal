@@ -90,3 +90,40 @@ describe("tradePlan — other intents + robustness", () => {
     expect(planToThreadType(parseThesis("stake 2 ETH"))).toBe("pendle");
   });
 });
+
+describe("tradePlan — transfer intent (send X to an address)", () => {
+  const ADDR = "0x1234567890123456789012345678901234567890";
+
+  it("parses 'send 0.5 ETH to 0x...' with the EXACT literal amount, not a USD default", () => {
+    const plan = parseThesis(`send 0.5 ETH to ${ADDR}`);
+    expect(plan.intent).toBe("transfer");
+    expect(plan.legs).toHaveLength(1);
+    expect(plan.legs[0]).toMatchObject({ side: "Transfer", asset: "ETH", to: ADDR, sizeToken: "0.5" });
+    expect(plan.legs[0].sizeUsd).toBeUndefined();
+    expect(plan.summary).toContain("0.5 ETH");
+    expect(plan.summary).toContain(ADDR);
+  });
+
+  it("also recognizes 'transfer' as the verb", () => {
+    const plan = parseThesis(`transfer 1000 to ${ADDR}`);
+    expect(plan.intent).toBe("transfer");
+    expect(plan.legs[0].to).toBe(ADDR);
+  });
+
+  it("falls back to a USD default (not a wrong literal amount) when no unit quantity is given", () => {
+    const plan = parseThesis(`send ETH to ${ADDR}`);
+    expect(plan.intent).toBe("transfer");
+    expect(plan.legs[0].sizeToken).toBeUndefined();
+    expect(plan.legs[0].sizeUsd).toBe(1000); // DEFAULT_SIZES.transfer
+  });
+
+  it("does not misfire without an address present", () => {
+    // "send" alone (no 0x address) must not be mistaken for a transfer.
+    const plan = parseThesis("I will send more capital into DeFi this month");
+    expect(plan.intent).not.toBe("transfer");
+  });
+
+  it("maps to the 'custom' legacy thread type", () => {
+    expect(planToThreadType(parseThesis(`send 1 ETH to ${ADDR}`))).toBe("custom");
+  });
+});

@@ -113,6 +113,59 @@ describe("assetMap — resolveOrderForLeg (Lido stake)", () => {
   });
 });
 
+const RECIPIENT = "0x1111111111111111111111111111111111111111";
+
+describe("assetMap — resolveOrderForLeg (native ETH transfer)", () => {
+  function transferLeg(partial: Partial<TradeLeg> = {}): TradeLeg {
+    return { side: "Transfer", asset: "ETH", protocol: "Wallet", sizeUsd: 2000, to: RECIPIENT, ...partial };
+  }
+
+  it("routes a thesis-sourced recipient (leg.to) to a real transfer order on mainnet", () => {
+    const order = resolveOrderForLeg(transferLeg(), undefined, ETH_PRICE, 1) as Order;
+    expect(order.type).toBe("transfer");
+    expect(order.protocol).toBe("eth");
+    expect(order.symbol).toBe("ETH");
+    expect(order.to).toBe(RECIPIENT);
+    expect(order.chainId).toBe(1);
+  });
+
+  it("falls back to an explicitly-passed address when the leg carries none", () => {
+    const order = resolveOrderForLeg({ ...transferLeg(), to: undefined }, RECIPIENT, ETH_PRICE, 1) as Order;
+    expect(order.to).toBe(RECIPIENT);
+  });
+
+  it("refuses without any recipient at all", () => {
+    const res = resolveOrderForLeg({ ...transferLeg(), to: undefined }, undefined, ETH_PRICE, 1);
+    expect("unsupported" in res).toBe(true);
+    expect(res.unsupported).toContain("recipient address");
+  });
+
+  it("refuses a non-ETH asset (no ERC20 send wired)", () => {
+    const res = resolveOrderForLeg(transferLeg({ asset: "USDC" }), undefined, ETH_PRICE, 1);
+    expect("unsupported" in res).toBe(true);
+    expect(res.unsupported).toContain("Only native ETH sends");
+  });
+
+  it("refuses off mainnet", () => {
+    const res = resolveOrderForLeg(transferLeg(), undefined, ETH_PRICE, BASE_CHAIN_ID);
+    expect("unsupported" in res).toBe(true);
+    expect(res.unsupported).toContain("Ethereum mainnet");
+  });
+
+  it("hard-fails with no live ETH price", () => {
+    const res = resolveOrderForLeg(transferLeg(), undefined, undefined, 1);
+    expect("unsupported" in res).toBe(true);
+    expect(res.unsupported).toContain("No live price for ETH");
+  });
+
+  it("uses an exact literal quantity (sizeToken) with no live price needed", () => {
+    // No price list at all — a literal quantity must not depend on one.
+    const order = resolveOrderForLeg(transferLeg({ sizeToken: "0.5", sizeUsd: undefined }), undefined, undefined, 1) as Order;
+    expect(order.amount).toBe("0.5");
+    expect(order.decimals).toBe(18);
+  });
+});
+
 describe("assetMap — approveOrderFor", () => {
   const supply: Order = {
     type: "supply",

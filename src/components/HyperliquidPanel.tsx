@@ -6,6 +6,7 @@ import { useHyperliquid } from "@/hooks/useHyperliquid";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { fmtUsd } from "@/lib/data";
 import { setSharedHlAccount, useSharedHlAccount } from "@/hooks/useLivePortfolio";
+import { setSharedHlEnv, useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
 import {
   fetchClearinghouseState,
   fetchOpenOrders,
@@ -25,7 +26,7 @@ function fmtPx(n: number): string {
  */
 export function HyperliquidPanel() {
   const { address, isConnected } = useAccount();
-  const [env, setEnv] = useState<"testnet" | "mainnet">("testnet");
+  const env = useSharedHlEnv();
   const account = useSharedHlAccount();
   const [orders, setOrders] = useState<HlOpenOrder[]>([]);
   const [loading, setLoading] = useState(false);
@@ -87,7 +88,7 @@ export function HyperliquidPanel() {
           <button
             className="btn btn-secondary"
             style={{ fontSize: 10, padding: "2px 8px" }}
-            onClick={() => setEnv((e) => (e === "testnet" ? "mainnet" : "testnet"))}
+            onClick={() => setSharedHlEnv(env === "testnet" ? "mainnet" : "testnet")}
           >
             {env === "testnet" ? "switch" : "switch"}
           </button>
