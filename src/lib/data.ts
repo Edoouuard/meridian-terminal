@@ -82,38 +82,38 @@ export const HIGHLIGHT = {
   points: "4,25 8,22 12,19 16,15 20,12 24,8 28,5 32,2",
 };
 
-export interface CryptoTicker {
-  symbol: string;
-  price: string;
-  change: number;
-}
-
-export const TOP_CRYPTOS: CryptoTicker[] = [
-  { symbol: "BTC", price: "$118,420", change: 1.8 },
-  { symbol: "ETH", price: "$4,180", change: 2.4 },
-  { symbol: "USDT", price: "$1.00", change: 0.0 },
-  { symbol: "XRP", price: "$2.86", change: -0.6 },
-  { symbol: "BNB", price: "$842", change: 1.1 },
-  { symbol: "SOL", price: "$214", change: 3.7 },
-  { symbol: "USDC", price: "$1.00", change: 0.0 },
-  { symbol: "DOGE", price: "$0.284", change: -1.2 },
-  { symbol: "TRX", price: "$0.318", change: 0.4 },
-  { symbol: "ADA", price: "$0.812", change: -0.9 },
-  { symbol: "HYPE", price: "$38.40", change: 6.2 },
-  { symbol: "LINK", price: "$24.15", change: 2.1 },
-  { symbol: "AVAX", price: "$42.80", change: 1.5 },
-  { symbol: "SUI", price: "$4.62", change: 4.3 },
-  { symbol: "XLM", price: "$0.412", change: -0.3 },
-  { symbol: "TON", price: "$6.28", change: 0.8 },
-  { symbol: "SHIB", price: "$0.0000228", change: -1.5 },
-  { symbol: "LTC", price: "$118.60", change: 0.6 },
-  { symbol: "DOT", price: "$6.94", change: -0.4 },
-  { symbol: "BCH", price: "$612", change: 1.9 },
-  { symbol: "HBAR", price: "$0.284", change: 0.2 },
-  { symbol: "UNI", price: "$12.85", change: 1.3 },
-  { symbol: "PEPE", price: "$0.0000214", change: 5.8 },
-  { symbol: "NEAR", price: "$6.12", change: 2.6 },
-  { symbol: "APT", price: "$9.84", change: -1.1 },
+/**
+ * Symbols shown in the ticker, in display order — nothing more. There are no
+ * hardcoded prices/changes here on purpose: TickerBanner only ever renders a
+ * symbol once /api/prices (CoinGecko, live) actually returns it, so this list
+ * can never silently stand in for real data going stale.
+ */
+export const TOP_CRYPTO_SYMBOLS = [
+  "BTC",
+  "ETH",
+  "USDT",
+  "XRP",
+  "BNB",
+  "SOL",
+  "USDC",
+  "DOGE",
+  "TRX",
+  "ADA",
+  "HYPE",
+  "LINK",
+  "AVAX",
+  "SUI",
+  "XLM",
+  "TON",
+  "SHIB",
+  "LTC",
+  "DOT",
+  "BCH",
+  "HBAR",
+  "UNI",
+  "PEPE",
+  "NEAR",
+  "APT",
 ];
 
 export const PORTFOLIO_VALUE = 128400;

@@ -102,7 +102,7 @@ function canonAsset(token: string): string {
 
 /*
  * Recognised assets, longest token first so wstETH wins over ETH. Overlaps the
- * terminal's TOP_CRYPTOS ticker. \b word boundaries avoid matching inside words.
+ * terminal's TOP_CRYPTO_SYMBOLS ticker. \b word boundaries avoid matching inside words.
  */
 const ASSET_PATTERNS: Array<[RegExp, string]> = [
   [/\bwst\s?eth\b/i, "wstETH"],
