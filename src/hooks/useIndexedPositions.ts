@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
-import type { IndexedLendingPosition } from "@/app/api/positions/route";
+import type { IndexedLendingPosition, IndexedVaultPosition } from "@/app/api/positions/route";
 
 export interface IndexerPositions {
   morpho: IndexedLendingPosition[];
+  /** MetaMorpho vault (ERC-4626) positions — what a Morpho "supply" order actually created, and what a "withdraw" order needs to find. */
+  vaults: IndexedVaultPosition[];
   loading: boolean;
   error: string | null;
 }
@@ -14,6 +16,7 @@ export interface IndexerPositions {
  */
 export function useIndexedPositions(address?: string, enabled = false): IndexerPositions {
   const [morpho, setMorpho] = useState<IndexedLendingPosition[]>([]);
+  const [vaults, setVaults] = useState<IndexedVaultPosition[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,6 +24,7 @@ export function useIndexedPositions(address?: string, enabled = false): IndexerP
     if (!enabled || !address) {
       const t = setTimeout(() => {
         setMorpho([]);
+        setVaults([]);
         setError(null);
         setLoading(false);
       }, 0);
@@ -35,6 +39,7 @@ export function useIndexedPositions(address?: string, enabled = false): IndexerP
         .then((data) => {
           if (cancelled) return;
           setMorpho(Array.isArray(data?.positions) ? data.positions : []);
+          setVaults(Array.isArray(data?.vaults) ? data.vaults : []);
         })
         .catch((e) => {
           if (!cancelled) setError((e as Error).message || "Indexer lookup failed");
@@ -49,5 +54,5 @@ export function useIndexedPositions(address?: string, enabled = false): IndexerP
     };
   }, [address, enabled]);
 
-  return { morpho, loading, error };
+  return { morpho, vaults, loading, error };
 }

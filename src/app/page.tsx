@@ -11,6 +11,7 @@ import { TickerBanner } from "@/components/TickerBanner";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { HyperliquidPanel } from "@/components/HyperliquidPanel";
+import { LidoWithdrawalsPanel } from "@/components/LidoWithdrawalsPanel";
 import { ChainOverview } from "@/components/ChainOverview";
 import { VaultRiskPanel } from "@/components/VaultRiskPanel";
 import { SolanaPanel } from "@/components/SolanaPanel";
@@ -261,6 +262,7 @@ export default function TerminalApp() {
           <RiskPanel live={live} isConnected={isConnected} />
                     <VaultRiskPanel />
                     <HyperliquidPanel />
+                    <LidoWithdrawalsPanel />
                     <HistoryPanel />
                     <ChainOverview />
                     <SolanaPanel />

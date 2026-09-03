@@ -31,6 +31,7 @@ export type TradeIntent =
   | "options"
   | "bridge"
   | "transfer"
+  | "withdraw"
   | "unknown";
 
 export interface TradeLeg {
@@ -86,6 +87,7 @@ export const DEFAULT_SIZES: Record<TradeIntent, number> = {
   options: 5000,
   bridge: 10000,
   transfer: 1000,
+  withdraw: 5000,
   unknown: 0,
 };
 
@@ -312,6 +314,7 @@ function resolveIntent(
   if (/buy a put|buy puts|buy calls|buy a call/i.test(t)) return "options";
   if (/restake|re[- ]?stake|eigenlayer|points\/vault/i.test(t)) return "restake";
   if (/repay|rembourser|remboursement|reduce.*debt|pay back/i.test(t)) return "repay";
+  if (/\bwithdraw\b|\bunstake\b|\bredeem\b|retirer|retrait/i.test(t)) return "withdraw";
   if (/\bborrow\b|emprunt|emprunter|leverage (up|against)|pull (liquidity|margin)/i.test(t)) return "borrow";
   if (/\bsupply\b|\blend\b|\bdeposit\b|pr[eè]ter|\bmargin\b/i.test(t)) return "supply";
   if (/\bstake\b|staked|stake (to|in)|yield (farm|vault)|lido/i.test(t)) return "stake";
@@ -346,6 +349,7 @@ export function planToThreadType(plan: TradePlan): ThreadType {
     case "restake":
       return "pendle";
     case "borrow":
+    case "withdraw":
       return "custom";
     default:
       return "custom";
@@ -436,6 +440,11 @@ export function parseThesis(rawText: string): TradePlan {
     case "repay": {
       legs = [{ side: "Repay", asset: base, protocol: protocol ?? "Aave", sizeUsd: size, note: "Reduce debt" }];
       summary = `Repay ~${fmtUsd(size ?? 0)} ${base} on ${protocol ?? "Aave"} to lower your debt and raise the health factor.`;
+      break;
+    }
+    case "withdraw": {
+      legs = [{ side: "Withdraw", asset: base, protocol: protocol ?? "Aave", sizeUsd: size, note: "Exit position" }];
+      summary = `Withdraw ~${fmtUsd(size ?? 0)} ${base} from ${protocol ?? "Aave"}${amount ? "" : " (or your full position if smaller)"}.`;
       break;
     }
     case "stake": {

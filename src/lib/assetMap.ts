@@ -248,9 +248,9 @@ export function resolveOrderForLeg(
     case "pendle":
       return { unsupported: "Pendle fixed-yield (PT) not wired for live execution yet" };
     case "lido":
-      return { unsupported: `Lido ${leg.side || "action"} not wired for live execution yet (staking ETH is; unstaking/withdrawal is not)` };
+      return { unsupported: `Lido ${leg.side || "action"} not wired for live execution yet` };
     case "morpho":
-      return { unsupported: "Morpho vaults not wired for live execution yet" };
+      return { unsupported: `Morpho ${leg.side || "action"} not wired for live execution yet` };
     case "uniswap":
       return { unsupported: "Uniswap swaps not wired for live execution yet" };
     case "eigenlayer":
@@ -301,6 +301,17 @@ export function approveOrderFor(order: Order): Order | null {
       chainId: order.chainId,
       decimals: order.decimals,
       spender: order.vaultAddress,
+    };
+  }
+  if (order.protocol === "lido" && order.type === "unstake" && order.token) {
+    return {
+      type: "approve",
+      protocol: "lido",
+      token: order.token,
+      symbol: order.symbol,
+      amount: order.amount,
+      chainId: order.chainId,
+      decimals: order.decimals,
     };
   }
   return null;

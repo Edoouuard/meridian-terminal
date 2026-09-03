@@ -1,15 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useAccount, useSimulateContract } from "wagmi";
+import { useAccount, useBalance, useSimulateContract } from "wagmi";
 import { ThreadItem, fmtUsd } from "@/lib/data";
 import { resolveOrderForLeg, protocolLabel, approveOrderFor, findToken, DEFAULT_CHAIN_ID } from "@/lib/assetMap";
-import { CHAIN_LABEL } from "@/lib/onchain";
+import { CHAIN_LABEL, STETH_ADDRESS } from "@/lib/onchain";
 import type { Order } from "@/lib/execution";
 import type { TradeLeg } from "@/lib/tradePlan";
 import { useExecute, explorerUrlFor } from "@/hooks/useExecute";
 import { useHyperliquid } from "@/hooks/useHyperliquid";
 import { useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
+import { useIndexedPositions } from "@/hooks/useIndexedPositions";
 import { useLivePrices } from "@/hooks/useLivePrices";
 import { useVaultRisk } from "@/hooks/useVaultRisk";
 import { PHILIDOR_PROTOCOL_ID, type RiskTier } from "@/lib/integrations/philidor";
@@ -207,13 +208,21 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
         title={
           order.protocol === "aave" && order.type === "supply"
             ? "Approve & Supply on Aave"
-            : order.protocol === "lido" && order.type === "stake"
-              ? "Stake on Lido"
-              : order.protocol === "uniswap" && order.type === "swap"
-                ? "Approve & Swap on Uniswap"
-                : order.protocol === "morpho" && order.type === "supply"
-                  ? "Approve & Deposit on Morpho"
-                  : "Confirm on-chain action"
+            : order.protocol === "aave" && order.type === "withdraw"
+              ? "Withdraw from Aave"
+              : order.protocol === "lido" && order.type === "stake"
+                ? "Stake on Lido"
+                : order.protocol === "lido" && order.type === "unstake"
+                  ? "Approve & Request Withdrawal on Lido"
+                  : order.protocol === "lido" && order.type === "claim"
+                    ? "Claim Lido Withdrawal"
+                    : order.protocol === "uniswap" && order.type === "swap"
+                      ? "Approve & Swap on Uniswap"
+                      : order.protocol === "morpho" && order.type === "supply"
+                        ? "Approve & Deposit on Morpho"
+                        : order.protocol === "morpho" && order.type === "withdraw"
+                          ? "Withdraw from Morpho"
+                          : "Confirm on-chain action"
         }
         body={
           <div>
@@ -239,9 +248,22 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
             {order.protocol === "morpho" && order.type === "supply" && (
               <>
                 {" "}
-                This will first <strong>approve</strong> the vault previewed above, then <strong>deposit</strong> into
-                it. Withdrawal isn&apos;t wired in Meridian yet — use the vault&apos;s own interface to exit.
+                This will first <strong>approve</strong> the vault previewed above, then <strong>deposit</strong> into it.
               </>
+            )}
+            {order.protocol === "morpho" && order.type === "withdraw" && (
+              <> This withdraws directly from the vault back to your wallet — no approval step needed.</>
+            )}
+            {order.protocol === "lido" && order.type === "unstake" && (
+              <>
+                {" "}
+                This will first <strong>approve</strong> Lido&apos;s withdrawal queue, then lock your stETH into a{" "}
+                <strong>withdrawal request</strong>. It is not instant — Lido&apos;s oracle finalizes requests
+                (typically a few days), after which you can claim the ETH from the Lido panel.
+              </>
+            )}
+            {order.protocol === "lido" && order.type === "claim" && (
+              <> Sends the finalized ETH from this request straight to your wallet.</>
             )}
           </div>
         }
@@ -252,7 +274,11 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
               ? "Approve & Swap"
               : order.protocol === "morpho" && order.type === "supply"
                 ? "Approve & Deposit"
-                : "Sign"
+                : order.protocol === "lido" && order.type === "unstake"
+                  ? "Approve & Request Withdrawal"
+                  : order.protocol === "lido" && order.type === "claim"
+                    ? "Claim ETH"
+                    : "Sign"
         }
         warning="This moves real funds from your wallet."
         guardrail={guardrail}
@@ -581,6 +607,136 @@ function MorphoExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEnt
   );
 }
 
+/**
+ * Live Morpho vault withdrawal. Unlike supply (which picks a NEW vault via
+ * live Philidor risk data), withdraw needs to find the vault the user is
+ * ALREADY in — read from the official Morpho indexer (same one
+ * useLivePortfolio uses for read-only display, see useIndexedPositions). An
+ * unspecified amount withdraws the full position; a requested amount is
+ * capped to it — never over-withdraws, since capping down is always safe
+ * but guessing up could try to pull more than the vault holds. No approval
+ * step: ERC-4626 withdraw needs no allowance when receiver/owner are both
+ * the caller, which is the only shape Meridian ever builds.
+ */
+function MorphoWithdrawButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry[] }) {
+  const { chain, address } = useAccount();
+  const chainId = chain?.id ?? DEFAULT_CHAIN_ID;
+  const symbol = (leg.asset || "").trim();
+
+  const { vaults, loading } = useIndexedPositions(address, !!address);
+
+  if (!address) {
+    return <NotWired venue="Morpho" reason="Connect a wallet to withdraw." />;
+  }
+  if (loading) {
+    return <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>Finding your Morpho position…</p>;
+  }
+
+  const candidates = vaults.filter((v) => v.assetSymbol.toUpperCase() === symbol.toUpperCase() && v.chainId === chainId);
+  const position = candidates.sort((a, b) => b.assetsUsd - a.assetsUsd)[0];
+  if (!position) {
+    return (
+      <NotWired
+        venue="Morpho"
+        reason={`No Morpho ${symbol} position found on ${CHAIN_LABEL[chainId] ?? `chain ${chainId}`} to withdraw from.`}
+      />
+    );
+  }
+
+  const positionAssets = BigInt(position.assets);
+  const price = resolvePriceFromList(prices, symbol);
+  const requestedQuote = leg.sizeUsd && price ? usdToTokenAmount(symbol, leg.sizeUsd, price, position.assetDecimals) : null;
+  // Cap to the real position — never withdraw more than it holds. No
+  // explicit amount (or no live price to size one) means "withdraw everything".
+  const amountBase = requestedQuote && requestedQuote.amountBase < positionAssets ? requestedQuote.amountBase : positionAssets;
+
+  if (amountBase <= BigInt(0)) {
+    return <NotWired venue="Morpho" reason="Nothing to withdraw from this position." />;
+  }
+
+  const order: Order = {
+    type: "withdraw",
+    protocol: "morpho",
+    token: position.assetAddress as `0x${string}`,
+    vaultAddress: position.vaultAddress as `0x${string}`,
+    amount: amountBase,
+    chainId,
+    decimals: position.assetDecimals,
+    symbol,
+  };
+
+  return (
+    <>
+      <OrderRow label="Vault" value={position.vaultName} />
+      <OrderRow
+        label="Withdrawing"
+        value={`${formatBaseUnits(amountBase, position.assetDecimals)} of ${formatBaseUnits(positionAssets, position.assetDecimals)} ${symbol}`}
+      />
+      <ExecuteButton order={order} label="Withdraw from Morpho →" />
+    </>
+  );
+}
+
+/**
+ * Live Lido unstake — the REQUEST half only. Locks stETH into Lido's
+ * withdrawal queue (see lib/integrations/lido.ts); the queue is not instant
+ * (Lido's oracle finalizes requests over time), so this alone doesn't
+ * return ETH — see LidoWithdrawalsPanel for viewing status and claiming
+ * once finalized. Sized off the connected wallet's real stETH balance
+ * (read live), capped the same way Morpho withdraw is: an unspecified
+ * amount requests the full balance; a requested amount is capped to it.
+ */
+function LidoUnstakeButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry[] }) {
+  const { chain, address } = useAccount();
+  const chainId = chain?.id ?? DEFAULT_CHAIN_ID;
+  const { data: balance, isLoading } = useBalance({
+    address,
+    token: STETH_ADDRESS,
+    chainId: 1,
+    query: { enabled: !!address },
+  });
+
+  if (!address) {
+    return <NotWired venue="Lido" reason="Connect a wallet to unstake." />;
+  }
+  if (chainId !== 1) {
+    return <NotWired venue="Lido" reason="Lido unstaking is only wired on Ethereum mainnet — switch networks." />;
+  }
+  if (isLoading) {
+    return <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>Reading your stETH balance…</p>;
+  }
+
+  const positionWei = balance?.value ?? BigInt(0);
+  if (positionWei <= BigInt(0)) {
+    return <NotWired venue="Lido" reason="No stETH balance found to unstake." />;
+  }
+
+  // stETH tracks ETH ~1:1 — reuse the live ETH price to size a requested USD amount.
+  const price = resolvePriceFromList(prices, "ETH");
+  const requestedQuote = leg.sizeUsd && price ? usdToTokenAmount("ETH", leg.sizeUsd, price, 18) : null;
+  const amountBase = requestedQuote && requestedQuote.amountBase < positionWei ? requestedQuote.amountBase : positionWei;
+
+  const order: Order = {
+    type: "unstake",
+    protocol: "lido",
+    token: STETH_ADDRESS,
+    amount: amountBase,
+    chainId: 1,
+    decimals: 18,
+    symbol: "stETH",
+  };
+
+  return (
+    <>
+      <OrderRow
+        label="Requesting"
+        value={`${formatBaseUnits(amountBase, 18)} of ${formatBaseUnits(positionWei, 18)} stETH`}
+      />
+      <ExecuteButton order={order} label="Request withdrawal on Lido →" />
+    </>
+  );
+}
+
 function legRowValue(leg: { asset: string; protocol: string; sizeUsd?: number; leverage?: number }): string {
   return `${leg.asset} · ${leg.protocol}${leg.sizeUsd ? ` · ${fmtUsd(leg.sizeUsd)}` : ""}${leg.leverage ? ` · ${leg.leverage}x` : ""}`;
 }
@@ -652,11 +808,15 @@ function PlanCard({ item }: { item: ThreadItem }) {
           <div style={orderStyle}>
             {plan.legs.map((leg, i) => {
               const resolved = resolveOrderForLeg(leg, undefined, prices, chain?.id);
-              // These three venues resolve their own live execution path
-              // (a fresh on-chain quote, a live vault lookup, ...) even when
+              const legSide = (leg.side || "").toLowerCase();
+              const isMorpho = /morpho/i.test(leg.protocol || "");
+              const isLidoWithdraw = /lido/i.test(leg.protocol || "") && legSide === "withdraw";
+              // These venues resolve their own live execution path (a fresh
+              // on-chain quote, a live vault/position lookup, ...) even when
               // resolveOrderForLeg's pure/offline pass can't build the order
-              // itself — see PerpExecuteButton/SwapExecuteButton/MorphoExecuteButton.
-              const liveVenue = /hyperliquid|uniswap|morpho/i.test(leg.protocol || "");
+              // itself — see PerpExecuteButton/SwapExecuteButton/MorphoExecuteButton/
+              // MorphoWithdrawButton/LidoUnstakeButton.
+              const liveVenue = /hyperliquid|uniswap/i.test(leg.protocol || "") || isMorpho || isLidoWithdraw;
               const building = isUnsupported(resolved) && !liveVenue;
               return (
                 <div key={i} style={{ marginTop: i === 0 ? 0 : "var(--space-2)", opacity: building ? 0.55 : 1 }}>
@@ -667,8 +827,10 @@ function PlanCard({ item }: { item: ThreadItem }) {
                       <PerpExecuteButton leg={leg} prices={prices} />
                     ) : /uniswap/i.test(leg.protocol || "") ? (
                       <SwapExecuteButton leg={leg} prices={prices} />
-                    ) : /morpho/i.test(leg.protocol || "") ? (
-                      <MorphoExecuteButton leg={leg} prices={prices} />
+                    ) : isMorpho ? (
+                      legSide === "withdraw" ? <MorphoWithdrawButton leg={leg} prices={prices} /> : <MorphoExecuteButton leg={leg} prices={prices} />
+                    ) : isLidoWithdraw ? (
+                      <LidoUnstakeButton leg={leg} prices={prices} />
                     ) : (
                       <NotWired venue={protocolLabel(leg.protocol)} reason={resolved.unsupported} />
                     )

@@ -186,14 +186,57 @@ describe("execution — buildExecution lido stake plans", () => {
     expect((res as { error: string }).error).toContain("only supported on Ethereum mainnet");
   });
 
-  it("rejects a non-stake order type for Lido", () => {
+  it("rejects an order type Lido genuinely doesn't support", () => {
     const res = buildExecution({ type: "supply" as Order["type"], protocol: "lido", amount: "1", decimals: 18, chainId: 1 });
-    expect((res as { error: string }).error).toContain("only supports 'stake'");
+    expect((res as { error: string }).error).toContain("does not yet support order type");
   });
 
   it("propagates normalizeAmount errors for a stake order", () => {
     const res = buildExecution({ type: "stake", protocol: "lido", amount: "0", decimals: 18, chainId: 1 });
     expect((res as { error: string }).error).toBe("amount must be positive");
+  });
+});
+
+const LIDO_WQ = "0x889edC2eDab5f40e902b864aD4d7AdE8E412F9B1";
+
+describe("execution — buildExecution lido unstake/claim plans", () => {
+  it("builds an approve plan defaulting the spender to the withdrawal queue", () => {
+    const plan = buildExecution({ type: "approve", protocol: "lido", amount: "1", decimals: 18, chainId: 1 }) as ExecutionPlan;
+    expect(plan.functionName).toBe("approve");
+    expect(plan.address).toBe(STETH_MAINNET);
+    expect(plan.args?.[0]).toBe(LIDO_WQ);
+  });
+
+  it("builds an unstake (requestWithdrawals) plan with owner patched via senderIndex", () => {
+    const plan = buildExecution({ type: "unstake", protocol: "lido", amount: "1", decimals: 18, chainId: 1 }) as ExecutionPlan;
+    expect(plan.address).toBe(LIDO_WQ);
+    expect(plan.functionName).toBe("requestWithdrawals");
+    expect(plan.args?.[0]).toEqual([1_000_000_000_000_000_000n]);
+    expect(plan.args?.[1]).toBe(zeroAddress);
+    expect(plan.senderIndex).toBe(1);
+
+    const patched = applySender(plan, SENDER) as ExecutionPlan;
+    expect(patched.args?.[1]).toBe(SENDER);
+  });
+
+  it("builds a claim plan for a specific request id", () => {
+    const plan = buildExecution({
+      type: "claim",
+      protocol: "lido",
+      amount: "0",
+      decimals: 18,
+      chainId: 1,
+      requestId: 42n,
+    }) as ExecutionPlan;
+    expect(plan.address).toBe(LIDO_WQ);
+    expect(plan.functionName).toBe("claimWithdrawal");
+    expect(plan.args).toEqual([42n]);
+    expect(plan.senderIndex).toBeUndefined();
+  });
+
+  it("rejects a claim with no requestId", () => {
+    const res = buildExecution({ type: "claim", protocol: "lido", amount: "0", decimals: 18, chainId: 1 });
+    expect((res as { error: string }).error).toContain("requires a requestId");
   });
 });
 
@@ -319,6 +362,26 @@ describe("execution — buildExecution morpho vault plans", () => {
   it("rejects an approve order with no spender (morpho has no fixed default vault)", () => {
     const res = buildExecution(morphoSupplyOrder({ type: "approve" }));
     expect((res as { error: string }).error).toContain("requires a spender");
+  });
+
+  it("builds an ERC-4626 withdraw plan with BOTH receiver and owner patched via senderIndices", () => {
+    const plan = buildExecution(morphoSupplyOrder({ type: "withdraw" })) as ExecutionPlan;
+    expect(plan.address).toBe(MORPHO_VAULT);
+    expect(plan.functionName).toBe("withdraw");
+    expect(plan.args?.[0]).toBe(1_000_000_000n);
+    expect(plan.args?.[1]).toBe(zeroAddress);
+    expect(plan.args?.[2]).toBe(zeroAddress);
+    expect(plan.senderIndices).toEqual([1, 2]);
+
+    const patched = applySender(plan, SENDER) as ExecutionPlan;
+    expect(patched.args?.[1]).toBe(SENDER);
+    expect(patched.args?.[2]).toBe(SENDER);
+    expect(patched.args?.[0]).toBe(1_000_000_000n);
+  });
+
+  it("rejects a withdraw order missing a vaultAddress", () => {
+    const res = buildExecution(morphoSupplyOrder({ type: "withdraw", vaultAddress: undefined }));
+    expect((res as { error: string }).error).toContain("requires a vaultAddress");
   });
 });
 

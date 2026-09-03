@@ -67,6 +67,29 @@ describe("tradePlan — borrowing / supply / repay intents", () => {
     expect(plan.intent).toBe("repay");
     expect(plan.legs[0].side).toBe("Repay");
   });
+
+  it("parses a withdraw intent, defaulting to Aave", () => {
+    const plan = parseThesis("withdraw 3k USDC");
+    expect(plan.intent).toBe("withdraw");
+    expect(plan.legs[0]).toMatchObject({ side: "Withdraw", protocol: "Aave", sizeUsd: 3000 });
+  });
+
+  it("routes a withdraw intent to Lido when named", () => {
+    const plan = parseThesis("unstake my ETH from Lido");
+    expect(plan.intent).toBe("withdraw");
+    expect(plan.legs[0].protocol).toBe("Lido");
+  });
+
+  it("routes a withdraw intent to Morpho when named ('redeem')", () => {
+    const plan = parseThesis("redeem my USDC from Morpho");
+    expect(plan.intent).toBe("withdraw");
+    expect(plan.legs[0].protocol).toBe("Morpho");
+  });
+
+  it("does not confuse 'unstake' with the unrelated 'stake' intent", () => {
+    // \bstake\b must not match inside "unstake".
+    expect(parseThesis("unstake my ETH from Lido").intent).toBe("withdraw");
+  });
 });
 
 describe("tradePlan — other intents + robustness", () => {

@@ -2,7 +2,12 @@ import type { Abi, Address } from "viem";
 import { parseUnits, zeroAddress } from "viem";
 import { AAVE_V3_POOL_BY_CHAIN, CHAIN_LABEL, STETH_ADDRESS } from "./onchain";
 import { SWAP_ROUTER02_EXACT_INPUT_SINGLE_ABI, UNISWAP_SWAP_ROUTER02_BY_CHAIN } from "./integrations/uniswap";
-import { ERC4626_DEPOSIT_ABI } from "./integrations/morpho";
+import { ERC4626_DEPOSIT_ABI, ERC4626_WITHDRAW_ABI } from "./integrations/morpho";
+import {
+  LIDO_CLAIM_WITHDRAWAL_ABI,
+  LIDO_REQUEST_WITHDRAWALS_ABI,
+  LIDO_WITHDRAWAL_QUEUE_ADDRESS,
+} from "./integrations/lido";
 
 /**
  * Execution layer for Meridian's DeFi terminal.
@@ -21,7 +26,7 @@ import { ERC4626_DEPOSIT_ABI } from "./integrations/morpho";
  * and converts to base units, rejecting zero / negative / over-precise amounts.
  */
 
-export type OrderType = "supply" | "repay" | "borrow" | "withdraw" | "transfer" | "approve" | "stake" | "swap";
+export type OrderType = "supply" | "repay" | "borrow" | "withdraw" | "transfer" | "approve" | "stake" | "swap" | "unstake" | "claim";
 export type OrderProtocol = "aave" | "eth" | "lido" | "uniswap" | "morpho";
 
 /**
@@ -55,8 +60,10 @@ export interface Order {
    * approximated, matching quote.ts's pricing discipline.
    */
   amountOutMinimum?: bigint;
-  /** ERC-4626 vault contract address for a Morpho `supply` order (resolved live from Philidor, not a fixed per-chain constant). */
+  /** ERC-4626 vault contract address for a Morpho `supply`/`withdraw` order (resolved live from Philidor for supply, or from the user's own live position for withdraw). */
   vaultAddress?: Address;
+  /** Lido withdrawal request id for a `claim` order (from getWithdrawalRequests / the request tx). */
+  requestId?: bigint;
   [k: string]: unknown;
 }
 
@@ -72,6 +79,13 @@ export interface ExecutionPlan {
   value?: bigint;
   /** Index into `args` holding the onBehalfOf/sender placeholder, patched at execution time. */
   senderIndex?: number;
+  /**
+   * Multiple flat `args` indices that all get patched to the same sender —
+   * e.g. ERC-4626 `withdraw(assets, receiver, owner)` needs both `receiver`
+   * and `owner` set to the connected wallet. Additive to `senderIndex`
+   * (both may be set; every index across the two gets patched).
+   */
+  senderIndices?: number[];
   /**
    * When set, the sender is patched into this key of the object at
    * `args[senderIndex]` rather than replacing `args[senderIndex]` itself.
@@ -346,20 +360,69 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
     }
 
     case "lido": {
-      if (order.type !== "stake") return fail(`Lido only supports 'stake', got '${order.type}'`);
-      if (chainId !== 1) return fail(`Lido staking is only supported on Ethereum mainnet, not ${chainLabel}`);
-      const amount = normalizeAmount(order.amount, decimals);
-      if ("error" in amount) return amount;
-      return {
-        chainId,
-        address: STETH_ADDRESS,
-        abi: LIDO_STETH_SUBMIT_ABI,
-        functionName: "submit",
-        args: [zeroAddress],
-        value: amount.value,
-        description: `Stake ${order.amount} ETH via Lido on ${chainLabel} for stETH`,
-        riskNote: `Moves real ETH on ${chainLabel} and mints stETH 1:1 — unwinding later goes through Lido's own withdrawal queue, not an instant reverse. Confirm the amount before signing.`,
-      };
+      if (chainId !== 1) return fail(`Lido is only supported on Ethereum mainnet, not ${chainLabel}`);
+
+      if (order.type === "stake") {
+        const amount = normalizeAmount(order.amount, decimals);
+        if ("error" in amount) return amount;
+        return {
+          chainId,
+          address: STETH_ADDRESS,
+          abi: LIDO_STETH_SUBMIT_ABI,
+          functionName: "submit",
+          args: [zeroAddress],
+          value: amount.value,
+          description: `Stake ${order.amount} ETH via Lido on ${chainLabel} for stETH`,
+          riskNote: `Moves real ETH on ${chainLabel} and mints stETH 1:1 — unwinding later goes through Lido's own withdrawal queue, not an instant reverse. Confirm the amount before signing.`,
+        };
+      }
+
+      if (order.type === "approve") {
+        const spender = (order.spender as Address | undefined) ?? LIDO_WITHDRAWAL_QUEUE_ADDRESS;
+        const amount = normalizeAmount(order.amount, decimals);
+        if ("error" in amount) return amount;
+        return {
+          chainId,
+          address: STETH_ADDRESS,
+          abi: ERC20_APPROVE_ABI,
+          functionName: "approve",
+          args: [spender, amount.value],
+          description: `Approve Lido's withdrawal queue to spend up to ${order.amount} stETH on ${chainLabel}`,
+          riskNote: `Approval lets the withdrawal queue transfer up to this amount of stETH. Confirm before signing.`,
+        };
+      }
+
+      if (order.type === "unstake") {
+        const amount = normalizeAmount(order.amount, decimals);
+        if ("error" in amount) return amount;
+        return {
+          chainId,
+          address: LIDO_WITHDRAWAL_QUEUE_ADDRESS,
+          abi: LIDO_REQUEST_WITHDRAWALS_ABI,
+          functionName: "requestWithdrawals",
+          // [amounts, owner] — owner patched to the connected sender by useExecute via `senderIndex`.
+          args: [[amount.value], zeroAddress],
+          senderIndex: 1,
+          description: `Request withdrawal of ${order.amount} stETH from Lido on ${chainLabel}`,
+          riskNote: `This locks your stETH into Lido's withdrawal queue — it is not instant. Once the queue finalizes your request (Lido's oracle, typically a few days), come back and claim the ETH.`,
+        };
+      }
+
+      if (order.type === "claim") {
+        const requestId = order.requestId;
+        if (requestId === undefined) return fail("lido claim requires a requestId");
+        return {
+          chainId,
+          address: LIDO_WITHDRAWAL_QUEUE_ADDRESS,
+          abi: LIDO_CLAIM_WITHDRAWAL_ABI,
+          functionName: "claimWithdrawal",
+          args: [requestId],
+          description: `Claim finalized Lido withdrawal request #${requestId} on ${chainLabel}`,
+          riskNote: `Sends the finalized ETH from this request to your wallet. Only works once the request is finalized.`,
+        };
+      }
+
+      return fail(`Lido does not yet support order type '${order.type}'`);
     }
 
     case "uniswap": {
@@ -455,7 +518,24 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           args: [amount.value, zeroAddress],
           senderIndex: 1,
           description: `Deposit ${order.amount} ${assetLabel} into a Morpho vault on ${chainLabel}`,
-          riskNote: `Moves real funds on ${chainLabel} into a third-party Morpho vault — its live risk tier was shown before you confirmed. Withdrawal isn't wired in Meridian yet; use the vault's own interface to exit.`,
+          riskNote: `Moves real funds on ${chainLabel} into a third-party Morpho vault — its live risk tier was shown before you confirmed.`,
+        };
+      }
+
+      if (order.type === "withdraw") {
+        const vault = order.vaultAddress;
+        if (!vault) return fail("morpho withdraw requires a vaultAddress");
+        return {
+          chainId,
+          address: vault,
+          abi: ERC4626_WITHDRAW_ABI,
+          functionName: "withdraw",
+          // [assets, receiver, owner] — both receiver and owner patched to the
+          // connected sender (a self-withdrawal never needs an allowance check).
+          args: [amount.value, zeroAddress, zeroAddress],
+          senderIndices: [1, 2],
+          description: `Withdraw ${order.amount} ${assetLabel} from a Morpho vault on ${chainLabel}`,
+          riskNote: `Withdraws real funds from a Morpho vault on ${chainLabel} back to your wallet. Confirm the amount before signing.`,
         };
       }
 
@@ -476,20 +556,23 @@ export function applySender(
   plan: ExecutionPlan,
   sender: Address | undefined,
 ): ExecutionPlan | { error: string } {
-  if (plan.senderIndex === undefined) return plan;
+  const indices = [...(plan.senderIndices ?? []), ...(plan.senderIndex !== undefined ? [plan.senderIndex] : [])];
+  if (indices.length === 0) return plan;
   if (!sender) return fail("wallet not connected");
   const args = [...(plan.args ?? [])];
-  if (plan.senderIndex < 0 || plan.senderIndex >= args.length) {
-    return fail("execution plan has an invalid sender placeholder index");
-  }
-  if (plan.senderTupleKey !== undefined) {
-    const tuple = args[plan.senderIndex];
-    if (typeof tuple !== "object" || tuple === null) {
-      return fail("execution plan's sender placeholder is not a tuple");
+  for (const idx of indices) {
+    if (idx < 0 || idx >= args.length) {
+      return fail("execution plan has an invalid sender placeholder index");
     }
-    args[plan.senderIndex] = { ...(tuple as Record<string, unknown>), [plan.senderTupleKey]: sender };
-  } else {
-    args[plan.senderIndex] = sender;
+    if (plan.senderTupleKey !== undefined) {
+      const tuple = args[idx];
+      if (typeof tuple !== "object" || tuple === null) {
+        return fail("execution plan's sender placeholder is not a tuple");
+      }
+      args[idx] = { ...(tuple as Record<string, unknown>), [plan.senderTupleKey]: sender };
+    } else {
+      args[idx] = sender;
+    }
   }
   return { ...plan, args };
 }

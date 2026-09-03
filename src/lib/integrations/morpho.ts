@@ -34,3 +34,23 @@ export const ERC4626_DEPOSIT_ABI = [
     outputs: [{ name: "shares", type: "uint256" }],
   },
 ] as const;
+
+/**
+ * EIP-4626 withdraw(assets, receiver, owner) -> shares. When receiver/owner
+ * are both the connected wallet (the only case Meridian builds), no prior
+ * allowance is needed — the standard only checks allowance when
+ * owner != msg.sender.
+ */
+export const ERC4626_WITHDRAW_ABI = [
+  {
+    type: "function",
+    name: "withdraw",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "assets", type: "uint256" },
+      { name: "receiver", type: "address" },
+      { name: "owner", type: "address" },
+    ],
+    outputs: [{ name: "shares", type: "uint256" }],
+  },
+] as const;
