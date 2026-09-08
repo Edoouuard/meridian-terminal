@@ -146,7 +146,9 @@ export function HyperliquidPanel() {
                   <span style={{ fontVariantNumeric: "tabular-nums" }}>{Math.abs(p.size).toFixed(4)}</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between" }} className="text-muted">
-                  <span>Entry {fmtPx(p.entryPx)} · {p.leverage}x</span>
+                  <span>
+                    Entry {fmtPx(p.entryPx)} · {p.leverage}x{p.liquidationPx > 0 ? ` · liq ${fmtPx(p.liquidationPx)}` : ""}
+                  </span>
                   <span style={{ color: ok ? "var(--risk-good)" : "var(--risk-serious)", fontVariantNumeric: "tabular-nums" }}>
                     {ok ? "+" : ""}
                     {fmtUsd(p.unrealizedPnl)}

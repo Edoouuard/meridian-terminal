@@ -45,6 +45,29 @@ describe("tradePlan — parseThesis directional", () => {
   });
 });
 
+describe("tradePlan — beta-neutral short-venue selection", () => {
+  it("defaults the short leg to Extended when no other venue is named", () => {
+    const plan = parseThesis("Farm HYPE points without directional risk");
+    expect(plan.intent).toBe("betaNeutral");
+    expect(plan.legs.map((l) => l.protocol)).toEqual(["Hyperliquid", "Extended"]);
+  });
+
+  it("still defaults to Extended when the thesis names Hyperliquid itself", () => {
+    const plan = parseThesis("Farm Hyperliquid points on ETH without directional risk");
+    expect(plan.legs.map((l) => l.protocol)).toEqual(["Hyperliquid", "Extended"]);
+  });
+
+  it("routes the short leg to Lighter when the thesis names it", () => {
+    const plan = parseThesis("Farm points on Lighter without directional risk");
+    expect(plan.legs.map((l) => l.protocol)).toEqual(["Hyperliquid", "Lighter"]);
+  });
+
+  it("routes the short leg to Ondo when the thesis names it", () => {
+    const plan = parseThesis("Delta neutral TSLA points farm on Ondo");
+    expect(plan.legs.map((l) => l.protocol)).toEqual(["Hyperliquid", "Ondo"]);
+  });
+});
+
 describe("tradePlan — borrowing / supply / repay intents", () => {
   it("parses 'borrow 10k USDC on Aave'", () => {
     const plan = parseThesis("borrow 10k USDC on Aave");

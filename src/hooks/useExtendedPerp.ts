@@ -14,7 +14,7 @@ export interface ExtendedPerpState {
 }
 
 export interface UseExtendedPerpResult extends ExtendedPerpState {
-  execute: (p: { signer: ExtendedSigner; symbol: string; isBuy: boolean; sizeUsd: number; prices?: PriceEntry[]; reduceOnly?: boolean }) => Promise<void>;
+  execute: (p: { signer: ExtendedSigner; symbol: string; isBuy: boolean; sizeUsd: number; prices?: PriceEntry[]; reduceOnly?: boolean; qtyOverride?: number }) => Promise<void>;
   reset: () => void;
 }
 

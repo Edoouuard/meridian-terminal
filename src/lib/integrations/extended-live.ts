@@ -57,9 +57,16 @@ export interface ExecuteExtendedParams {
   signer: ExtendedSigner;
   symbol: string;
   isBuy: boolean;
+  /** USD notional to size from a live price. Ignored when `qtyOverride` is set. */
   sizeUsd: number;
   prices?: PriceEntry[];
   reduceOnly?: boolean;
+  /**
+   * Exact base-asset quantity to use verbatim instead of deriving one from
+   * `sizeUsd` / a live price — for closing a known position exactly (a
+   * price-derived qty would drift from the real position size).
+   */
+  qtyOverride?: number;
 }
 
 export interface ExecuteExtendedResult {
@@ -85,8 +92,12 @@ export async function executeExtendedPerp(params: ExecuteExtendedParams): Promis
   const market = toExtendedMarket(symbol);
   const network = params.signer.network;
 
-  if (!(Number.isFinite(params.sizeUsd) && params.sizeUsd > 0)) {
+  const hasOverride = params.qtyOverride !== undefined;
+  if (!hasOverride && !(Number.isFinite(params.sizeUsd) && params.sizeUsd > 0)) {
     return { ok: false, network, market, error: `Refusing to execute: notional size for ${symbol} must be positive. No order was built or signed.` };
+  }
+  if (hasOverride && !(Number.isFinite(params.qtyOverride) && (params.qtyOverride as number) > 0)) {
+    return { ok: false, network, market, error: `Refusing to execute: quantity for ${symbol} must be positive.` };
   }
 
   const price = resolvePriceFromList(params.prices, symbol);
@@ -94,7 +105,7 @@ export async function executeExtendedPerp(params: ExecuteExtendedParams): Promis
     return { ok: false, network, market, error: `No live price for ${symbol} — cannot size this order safely. No order was built or signed.` };
   }
 
-  const qty = params.sizeUsd / price;
+  const qty = hasOverride ? (params.qtyOverride as number) : params.sizeUsd / price;
   if (!(Number.isFinite(qty) && qty > 0)) {
     return { ok: false, network, market, error: `Computed a non-positive size for ${symbol} — refusing to submit.` };
   }

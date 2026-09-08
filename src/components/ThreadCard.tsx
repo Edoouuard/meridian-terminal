@@ -17,6 +17,7 @@ import { useExtendedPerp } from "@/hooks/useExtendedPerp";
 import { useLifiPerpsSetup } from "@/hooks/useLifiPerpsSetup";
 import { useLifiPerpOrder } from "@/hooks/useLifiPerpOrder";
 import { LIFI_PROVIDER_LABEL, type LifiPerpsProviderId } from "@/lib/integrations/lifiPerps";
+import { useSharedOndoEnv } from "@/hooks/useOndoEnv";
 import { useIndexedPositions } from "@/hooks/useIndexedPositions";
 import { useLivePrices } from "@/hooks/useLivePrices";
 import { useVaultRisk } from "@/hooks/useVaultRisk";
@@ -569,6 +570,7 @@ function ExtendedPerpExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: Pr
  */
 function LifiPerpExecuteButton({ leg, prices, provider }: { leg: TradeLeg; prices?: PriceEntry[]; provider: LifiPerpsProviderId }) {
   const label = LIFI_PROVIDER_LABEL[provider];
+  const ondoEnv = useSharedOndoEnv();
   const setup = useLifiPerpsSetup(provider);
   const { status, result, error, execute, reset } = useLifiPerpOrder(provider);
   const [confirming, setConfirming] = useState(false);
@@ -669,7 +671,7 @@ function LifiPerpExecuteButton({ leg, prices, provider }: { leg: TradeLeg; price
           </div>
         }
         confirmLabel="Sign & submit"
-        warning="Real funds. Confirm carefully."
+        warning={provider === "ondo" && ondoEnv === "sandbox" ? "SANDBOX — no real funds." : "Real funds. Confirm carefully."}
         onConfirm={() => {
           setConfirming(false);
           execute({ symbol, isBuy, sizeUsd, prices });

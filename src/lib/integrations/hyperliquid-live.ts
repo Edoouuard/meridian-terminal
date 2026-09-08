@@ -249,6 +249,8 @@ export interface HlPosition {
   notional: number;
   unrealizedPnl: number;
   leverage: number;
+  /** 0 when Hyperliquid reports none (e.g. fully isolated-margin-covered). */
+  liquidationPx: number;
 }
 
 /** The user's Hyperliquid account snapshot. */
@@ -268,6 +270,7 @@ interface RawPosition {
     unrealizedPnl?: string;
     notional?: string;
     leverage?: { value?: number | string };
+    liquidationPx?: string | null;
   };
 }
 
@@ -294,6 +297,7 @@ function parseClearinghouseState(data: {
       notional: num(p.notional ?? p.positionValue),
       unrealizedPnl: num(p.unrealizedPnl),
       leverage: num(p.leverage?.value ?? 1),
+      liquidationPx: p.liquidationPx ? num(p.liquidationPx) : 0,
     }))
     .filter((p) => Math.abs(p.size) > 0.00000001);
   const totalMargin = num(ch.marginSummary?.totalMarginUsed);
