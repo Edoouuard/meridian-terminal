@@ -10,6 +10,8 @@ import type { TradeLeg } from "@/lib/tradePlan";
 import { useExecute, explorerUrlFor } from "@/hooks/useExecute";
 import { useHyperliquid } from "@/hooks/useHyperliquid";
 import { useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
+import { useExtendedAccount } from "@/hooks/useExtendedAccount";
+import { useExtendedPerp } from "@/hooks/useExtendedPerp";
 import { useIndexedPositions } from "@/hooks/useIndexedPositions";
 import { useLivePrices } from "@/hooks/useLivePrices";
 import { useVaultRisk } from "@/hooks/useVaultRisk";
@@ -431,6 +433,128 @@ function PerpExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry
 }
 
 /**
+ * Live Extended perp execution. Extended (ex-X10) is a StarkEx venue: orders
+ * are signed with a Stark L2 key, not the connected wallet, so this needs a
+ * connected Extended account (see ExtendedConnectPanel / useExtendedAccount)
+ * rather than just a wallet connection. Not connected -> an honest NotWired
+ * that says exactly what to do, same as every other unwired path here.
+ */
+function ExtendedPerpExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry[] }) {
+  const signer = useExtendedAccount();
+  const { status, result, error, execute, reset } = useExtendedPerp();
+  const [confirming, setConfirming] = useState(false);
+
+  const symbol = (leg.asset || "").replace(/PERP$/i, "").trim() || "ETH";
+  const sizeUsd = leg.sizeUsd && leg.sizeUsd > 0 ? leg.sizeUsd : 1000;
+  const side = (leg.side || "").toLowerCase();
+  const isBuy = side.startsWith("long") || side === "buy";
+
+  const price = resolvePriceFromList(prices, symbol);
+  const coinQty = price !== null ? sizeUsd / price : undefined;
+
+  const recordedRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (status === "confirmed" && result && recordedRef.current !== "ok") {
+      recordedRef.current = "ok";
+      recordExecution({
+        type: isBuy ? "buy" : "sell",
+        label: `${isBuy ? "Long" : "Short"} ${symbol} (Extended)`,
+        amount: result.qty,
+        asset: symbol,
+        protocol: "Extended",
+        status: "confirmed",
+      });
+    } else if (status === "error" && recordedRef.current !== "error") {
+      recordedRef.current = "error";
+      recordExecution({
+        type: isBuy ? "buy" : "sell",
+        label: `${isBuy ? "Long" : "Short"} ${symbol} on Extended (failed)`,
+        asset: symbol,
+        protocol: "Extended",
+        status: "error",
+      });
+    }
+  }, [status, result, isBuy, symbol]);
+
+  if (!signer) {
+    return (
+      <NotWired
+        venue="Extended"
+        reason="Connect your Extended account (API key + Stark key from extended.exchange → API management) in the Extended panel to trade this leg live."
+      />
+    );
+  }
+
+  if (status === "submitting") {
+    return (
+      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>
+        Signing and submitting to Extended…
+      </p>
+    );
+  }
+
+  if (status === "confirmed" && result) {
+    return (
+      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-accent-700)" }}>
+        Order on Extended {result.network}: {result.market} {JSON.stringify(result.order)}
+        <button onClick={reset} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 11 }}>
+          clear
+        </button>
+      </p>
+    );
+  }
+
+  if (status === "error") {
+    return (
+      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--risk-bad, #c0392b)" }}>
+        {`Extended: ${error ?? "execution failed"}`}
+        <button onClick={reset} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 11 }}>
+          clear
+        </button>
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <button
+        className="btn btn-primary"
+        style={{ fontSize: 13, marginTop: 6, cursor: "pointer" }}
+        onClick={() => setConfirming(true)}
+      >
+        Open {side === "short" ? "short" : "long"} {symbol} on Extended {signer.network} →
+      </button>
+      <ConfirmDialog
+        open={confirming}
+        title={`Confirm ${isBuy ? "long" : "short"} ${symbol} on Extended ${signer.network}`}
+        body={
+          <div>
+            IOC market order: {isBuy ? "long" : "short"} {symbol.toUpperCase()} ({fmtUsd(sizeUsd)}) on Extended{" "}
+            {signer.network}, vault {signer.vaultId}.
+            {coinQty !== undefined ? (
+              <>
+                {" "}
+                ≈ <strong>{coinQty.toFixed(4)}</strong> {symbol.toUpperCase()} at ~${price!.toFixed(2)} each, signed
+                with your Stark key and submitted directly to Extended.
+              </>
+            ) : (
+              <> No live price for {symbol} yet — signing will be refused if one isn&apos;t available.</>
+            )}
+          </div>
+        }
+        confirmLabel="Sign & submit"
+        warning={signer.network === "testnet" ? "TESTNET — no real funds." : "Mainnet — real funds. Confirm carefully."}
+        onConfirm={() => {
+          setConfirming(false);
+          execute({ signer, symbol, isBuy, sizeUsd, prices });
+        }}
+        onCancel={() => setConfirming(false)}
+      />
+    </>
+  );
+}
+
+/**
  * Live Uniswap v3 swap execution. Unlike Aave/Lido (whose amount is sized
  * purely from a REST price feed), a swap's `amountOutMinimum` can only come
  * from a real on-chain quote (QuoterV2.quoteExactInputSingle) taken right
@@ -814,9 +938,10 @@ function PlanCard({ item }: { item: ThreadItem }) {
               // These venues resolve their own live execution path (a fresh
               // on-chain quote, a live vault/position lookup, ...) even when
               // resolveOrderForLeg's pure/offline pass can't build the order
-              // itself — see PerpExecuteButton/SwapExecuteButton/MorphoExecuteButton/
-              // MorphoWithdrawButton/LidoUnstakeButton.
-              const liveVenue = /hyperliquid|uniswap/i.test(leg.protocol || "") || isMorpho || isLidoWithdraw;
+              // itself — see PerpExecuteButton/ExtendedPerpExecuteButton/
+              // SwapExecuteButton/MorphoExecuteButton/MorphoWithdrawButton/
+              // LidoUnstakeButton.
+              const liveVenue = /hyperliquid|extended|uniswap/i.test(leg.protocol || "") || isMorpho || isLidoWithdraw;
               const building = isUnsupported(resolved) && !liveVenue;
               return (
                 <div key={i} style={{ marginTop: i === 0 ? 0 : "var(--space-2)", opacity: building ? 0.55 : 1 }}>
@@ -825,6 +950,8 @@ function PlanCard({ item }: { item: ThreadItem }) {
                   {isUnsupported(resolved) ? (
                     /hyperliquid/i.test(leg.protocol || "") ? (
                       <PerpExecuteButton leg={leg} prices={prices} />
+                    ) : /extended/i.test(leg.protocol || "") ? (
+                      <ExtendedPerpExecuteButton leg={leg} prices={prices} />
                     ) : /uniswap/i.test(leg.protocol || "") ? (
                       <SwapExecuteButton leg={leg} prices={prices} />
                     ) : isMorpho ? (

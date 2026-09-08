@@ -11,6 +11,7 @@ import { TickerBanner } from "@/components/TickerBanner";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { HyperliquidPanel } from "@/components/HyperliquidPanel";
+import { ExtendedConnectPanel } from "@/components/ExtendedConnectPanel";
 import { LidoWithdrawalsPanel } from "@/components/LidoWithdrawalsPanel";
 import { ChainOverview } from "@/components/ChainOverview";
 import { VaultRiskPanel } from "@/components/VaultRiskPanel";
@@ -254,7 +255,7 @@ export default function TerminalApp() {
               <p style={{ fontSize: 12, margin: "6px 0 0" }} className="text-muted">
                 {live.isLoading
                   ? "Reading your wallet balances and Aave position…"
-                  : `No tracked assets or Aave position found across ${CHAIN_NAMES}. Extended, Variational, and Pendle aren't wired up yet.`}
+                  : `No tracked assets or Aave position found across ${CHAIN_NAMES}. Connect an Extended account (left panel) to trade Extended perps — Variational and Pendle aren't wired up yet.`}
               </p>
             )}
           </div>
@@ -262,6 +263,7 @@ export default function TerminalApp() {
           <RiskPanel live={live} isConnected={isConnected} />
                     <VaultRiskPanel />
                     <HyperliquidPanel />
+                    <ExtendedConnectPanel />
                     <LidoWithdrawalsPanel />
                     <HistoryPanel />
                     <ChainOverview />
