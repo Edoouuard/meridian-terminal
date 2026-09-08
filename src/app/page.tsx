@@ -12,6 +12,7 @@ import { WalletConnectButton } from "@/components/WalletConnectButton";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { HyperliquidPanel } from "@/components/HyperliquidPanel";
 import { ExtendedConnectPanel } from "@/components/ExtendedConnectPanel";
+import { LifiPerpsConnectPanel } from "@/components/LifiPerpsConnectPanel";
 import { LidoWithdrawalsPanel } from "@/components/LidoWithdrawalsPanel";
 import { ChainOverview } from "@/components/ChainOverview";
 import { VaultRiskPanel } from "@/components/VaultRiskPanel";
@@ -255,7 +256,7 @@ export default function TerminalApp() {
               <p style={{ fontSize: 12, margin: "6px 0 0" }} className="text-muted">
                 {live.isLoading
                   ? "Reading your wallet balances and Aave position…"
-                  : `No tracked assets or Aave position found across ${CHAIN_NAMES}. Connect an Extended account (left panel) to trade Extended perps — Variational and Pendle aren't wired up yet.`}
+                  : `No tracked assets or Aave position found across ${CHAIN_NAMES}. Connect Extended, Ondo, or Lighter (left panel) to trade their perps — Variational and Pendle aren't wired up yet.`}
               </p>
             )}
           </div>
@@ -264,6 +265,8 @@ export default function TerminalApp() {
                     <VaultRiskPanel />
                     <HyperliquidPanel />
                     <ExtendedConnectPanel />
+                    <LifiPerpsConnectPanel provider="ondo" />
+                    <LifiPerpsConnectPanel provider="lighter" />
                     <LidoWithdrawalsPanel />
                     <HistoryPanel />
                     <ChainOverview />
@@ -344,7 +347,7 @@ export default function TerminalApp() {
             <div style={{ maxWidth: "80%" }}>
               <p style={{ margin: 0, fontSize: 14, color: "color-mix(in srgb, var(--color-text) 70%, transparent)" }}>
                 Describe a thesis. I will translate it into an executable order across Aave, Morpho, Lido, Pendle, Hyperliquid, Extended,
-                Variational, or Uniswap.
+                Ondo, Lighter, Variational, or Uniswap.
               </p>
             </div>
 

@@ -254,6 +254,8 @@ const PROTOCOL_PATTERNS: Array<[RegExp, string]> = [
   [/\buniswap\b/i, "Uniswap"],
   [/\bextended\b/i, "Extended"],
   [/\bvariational\b|\boptions\b/i, "Variational"],
+  [/\bondo\b/i, "Ondo"],
+  [/\blighter\b/i, "Lighter"],
   [/\bperp\b|\bperpetual\b|\bhl\b/i, "Hyperliquid"],
   // Expanded DeFi protocol vocabulary (routing breadth; live execution still opt-in).
   [/\bcompound\b|\bcomp\b/i, "Compound"],
