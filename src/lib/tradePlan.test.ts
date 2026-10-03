@@ -92,6 +92,18 @@ describe("tradePlan — borrowing / supply / repay intents", () => {
     expect(plan.legs[0]).toMatchObject({ side: "Supply", protocol: "Aave" });
   });
 
+  it("parses 'where i can put my usdc for the best yield?' as a supply intent (no explicit verb, generic 'best yield' phrasing)", () => {
+    const plan = parseThesis("where i can put my usdc for the best yield?");
+    expect(plan.intent).toBe("supply");
+    expect(plan.asset).toBe("USDC");
+    expect(plan.legs[0]).toMatchObject({ side: "Supply", protocol: "Aave" });
+  });
+
+  it("still prefers an explicit 'stake' verb over the generic best-yield fallback", () => {
+    const plan = parseThesis("stake my ETH for the best yield");
+    expect(plan.intent).toBe("stake");
+  });
+
   it("parses a repay intent", () => {
     const plan = parseThesis("repay 2k USDC debt on Aave");
     expect(plan.intent).toBe("repay");
