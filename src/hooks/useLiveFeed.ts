@@ -12,6 +12,8 @@ export interface LiveFeedState {
   loading: boolean;
   /** Set when the feed request fails. Never thrown into render. */
   error: unknown;
+  /** Epoch ms of the last successful fetch, or 0 before the first one — lets the UI show real "updated Xs ago" freshness instead of asking the user to trust that it's live. */
+  dataUpdatedAt: number;
 }
 
 /**
@@ -34,5 +36,6 @@ export function useLiveFeed(): LiveFeedState {
     data: (query.data ?? null) as LiveFeedData | null,
     loading: query.isLoading,
     error: query.error ?? null,
+    dataUpdatedAt: query.dataUpdatedAt,
   };
 }

@@ -88,6 +88,10 @@ export default function TerminalApp() {
     routeThesis(EXAMPLE_THESIS_FOR_TYPE.betaneutral),
   ]);
   const [promptText, setPromptText] = useState("");
+  // Everything below Positions used to stack 9 panels in one long scroll
+  // (Risk, Vault risk, 4 venue connect panels, History, Chains, Solana) --
+  // grouped into tabs so the left column stays scannable instead of dense.
+  const [leftTab, setLeftTab] = useState<"risk" | "venues" | "activity" | "markets">("risk");
 
   const { isConnected } = useAccount();
   const live = useLivePortfolio();
@@ -273,17 +277,49 @@ export default function TerminalApp() {
             )}
           </div>
 
-          <RiskPanel live={live} isConnected={isConnected} />
-                    <VaultRiskPanel />
-                    <HyperliquidPanel />
-                    <ExtendedConnectPanel />
-                    <LifiPerpsConnectPanel provider="ondo" />
-                    <LifiPerpsConnectPanel provider="lighter" />
-                    <LidoWithdrawalsPanel />
-                    <HistoryPanel />
-                    <ChainOverview />
-                    <SolanaPanel />
-                  </div>
+          <div className="hr" style={{ margin: "var(--space-3) 0" }} />
+          <div className="seg" style={{ marginBottom: "var(--space-2)" }}>
+            <label className="seg-opt">
+              <input type="radio" name="left-tab" checked={leftTab === "risk"} onChange={() => setLeftTab("risk")} />
+              <span>Risk</span>
+            </label>
+            <label className="seg-opt">
+              <input type="radio" name="left-tab" checked={leftTab === "venues"} onChange={() => setLeftTab("venues")} />
+              <span>Venues</span>
+            </label>
+            <label className="seg-opt">
+              <input type="radio" name="left-tab" checked={leftTab === "activity"} onChange={() => setLeftTab("activity")} />
+              <span>Activity</span>
+            </label>
+            <label className="seg-opt">
+              <input type="radio" name="left-tab" checked={leftTab === "markets"} onChange={() => setLeftTab("markets")} />
+              <span>Markets</span>
+            </label>
+          </div>
+
+          {leftTab === "risk" && (
+            <>
+              <RiskPanel live={live} isConnected={isConnected} />
+              <VaultRiskPanel />
+            </>
+          )}
+          {leftTab === "venues" && (
+            <>
+              <HyperliquidPanel />
+              <ExtendedConnectPanel />
+              <LifiPerpsConnectPanel provider="ondo" />
+              <LifiPerpsConnectPanel provider="lighter" />
+              <LidoWithdrawalsPanel />
+            </>
+          )}
+          {leftTab === "activity" && <HistoryPanel />}
+          {leftTab === "markets" && (
+            <>
+              <ChainOverview />
+              <SolanaPanel />
+            </>
+          )}
+        </div>
 
         {/* Trade column */}
         <div style={{ display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, padding: "var(--space-4)" }}>

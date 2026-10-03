@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { ThreadType } from "@/lib/data";
 import type { LiveFeedState } from "@/hooks/useLiveFeed";
@@ -32,6 +32,29 @@ function fmtPct(n: number): string {
   return `${sign}${n.toFixed(1)}%`;
 }
 
+/**
+ * Ticks every 5s so a "live · updated Xs ago" line stays truthful between
+ * refetches instead of freezing at whatever it read on mount — the fastest
+ * way for someone staring at the tab to tell "genuinely live, just quiet"
+ * apart from "actually stuck", without having to trust the label alone.
+ */
+function useNowTick(intervalMs = 5000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
+
+function fmtAge(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "just now";
+  const s = Math.round(ms / 1000);
+  if (s < 5) return "just now";
+  if (s < 60) return `${s}s ago`;
+  return `${Math.round(s / 60)}m ago`;
+}
+
 function useAlpha() {
   return useQuery<AlphaEntry[]>({
     queryKey: ["alpha"],
@@ -59,6 +82,7 @@ function useAlpha() {
  */
 export function NewsFeed({ feed, onAddThread }: { feed: LiveFeedState; onAddThread: (type: ThreadType, text?: string) => void }) {
   const [tab, setTab] = useState<"news" | "alpha">("news");
+  const now = useNowTick();
 
   const isLive = !feed.loading && !!feed.data && feed.data.funding.length > 0;
 
@@ -106,7 +130,7 @@ export function NewsFeed({ feed, onAddThread }: { feed: LiveFeedState; onAddThre
                 ))}
               </div>
               <p style={{ margin: "4px 0 0", fontSize: 10 }} className="text-muted">
-                live · refreshes every 60s
+                live · updated {fmtAge(now - feed.dataUpdatedAt)} · refreshes every 60s
               </p>
             </div>
           )}
@@ -151,6 +175,7 @@ export function NewsFeed({ feed, onAddThread }: { feed: LiveFeedState; onAddThre
           )}
           <p className="text-muted" style={{ fontSize: 10, margin: "var(--space-2) 0 0" }}>
             New listings and 7-day TVL momentum from DefiLlama&apos;s free API — not editorial calls.
+            {alphaEntries.length > 0 && ` · live · updated ${fmtAge(now - alpha.dataUpdatedAt)}`}
           </p>
         </div>
       )}

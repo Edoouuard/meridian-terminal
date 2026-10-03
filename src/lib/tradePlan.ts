@@ -527,6 +527,20 @@ const BETA_NEUTRAL_VENUE_NOTE: Record<string, string> = {
   Ondo: "Perp venue routed through LI.FI — needs the Ondo panel connected and funded (a sandbox is available for testing).",
 };
 
+/**
+ * Protocols that can take a plain supply/lend leg, both already wired for
+ * live execution (see ThreadCard's ExecuteButton / MorphoExecuteButton).
+ * Reliability here isn't a number we'd have to invent: Morpho's leg already
+ * renders Philidor's live risk score (LegRiskBadge) once it's the active
+ * variant, so the honest "protocol reliability" signal the user asked for
+ * comes from real, already-fetched data instead of a made-up score.
+ */
+const SUPPLY_PROTOCOLS = ["Aave", "Morpho"] as const;
+const SUPPLY_PROTOCOL_NOTE: Record<string, string> = {
+  Aave: "Established money market, deepest liquidity — pooled risk across all listed assets.",
+  Morpho: "Curated ERC-4626 vaults — safety varies by vault; its live Philidor risk score (Prime/Core/Edge) shows once selected.",
+};
+
 /** Leverage tiers offered for a directional perp when the thesis didn't pin an exact leverage itself. */
 const DIRECTIONAL_LEVERAGE_TIERS: { label: string; lev: number; note: string }[] = [
   { label: "Conservative", lev: 2, note: "Lower leverage: smaller gains and losses, and a larger adverse price move is needed before liquidation." },
@@ -584,6 +598,26 @@ export function parseThesisVariants(rawText: string): TradePlan[] {
           : `Open a ${dir} ${list[0]} position on ${venue} for ~${fmtUsd(size)} notional at ${lev}x leverage.`,
       variantLabel: `${label} · ${lev}x`,
       variantNote: note,
+    }));
+  }
+
+  // Only offer the Aave/Morpho choice when the thesis didn't itself name a
+  // *different* protocol (base.protocol is the raw parsed mention, before
+  // parseThesis defaulted an unset one to Aave) — naming e.g. Compound must
+  // still route there untouched, not get silently overridden by this picker.
+  if (base.intent === "supply" && (base.protocol === undefined || (SUPPLY_PROTOCOLS as readonly string[]).includes(base.protocol))) {
+    const leg = base.legs[0];
+    const named = (SUPPLY_PROTOCOLS as readonly string[]).includes(leg.protocol) ? leg.protocol : undefined;
+    const ordered = named ? [named, ...SUPPLY_PROTOCOLS.filter((p) => p !== named)] : [...SUPPLY_PROTOCOLS];
+    const asset = base.asset ?? "USDC";
+    const size = base.sizeUsd ?? 0;
+    return ordered.map((p) => ({
+      ...base,
+      protocol: p,
+      legs: [{ ...leg, protocol: p }],
+      summary: `Supply ~${fmtUsd(size)} ${asset} as collateral on ${p} to earn yield while keeping it ready to borrow against.`,
+      variantLabel: p,
+      variantNote: SUPPLY_PROTOCOL_NOTE[p],
     }));
   }
 
