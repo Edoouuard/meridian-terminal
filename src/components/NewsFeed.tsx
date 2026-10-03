@@ -2,35 +2,13 @@
 
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { ThreadType } from "@/lib/data";
-import type { LiveFeedState } from "@/hooks/useLiveFeed";
 import type { AlphaEntry, AlphaTag } from "@/app/api/alpha/route";
+import { ChainOverview } from "@/components/ChainOverview";
 
 const ALPHA_TAG_CLASS: Record<AlphaTag, string> = {
   "New protocol": "tag-neutral",
   Momentum: "tag-accent",
 };
-
-interface LiveNewsRow {
-  protocol: string;
-  metric: string;
-  text: string;
-  /** Coin symbol as Hyperliquid reports it, used to build a "Discuss →" thesis for this exact mover. */
-  coin: string;
-}
-
-function fmtUsdCompact(n: number): string {
-  const abs = Math.abs(n);
-  if (abs >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
-  if (abs >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
-  if (abs >= 1e3) return `$${(n / 1e3).toFixed(0)}K`;
-  return `$${n.toFixed(0)}`;
-}
-
-function fmtPct(n: number): string {
-  const sign = n > 0 ? "+" : "";
-  return `${sign}${n.toFixed(1)}%`;
-}
 
 /**
  * Ticks every 5s so a "live · updated Xs ago" line stays truthful between
@@ -68,43 +46,33 @@ function useAlpha() {
 }
 
 /**
- * The "Market / Alpha" column. Both tabs are live or they say so — neither
- * ever silently swaps in static demo content:
- *   - Market: a funding-rate strip plus a top-movers brief, derived from
- *     Hyperliquid's metaAndAssetCtxs (markPx/prevDayPx change, dayNtlVlm as
- *     flow proxy). Named "Market" rather than "News" because that's exactly
- *     what it is — live perp market data, not editorial content.
+ * The "Chains / Alpha" column — Meridian's pitch is being the overlay across
+ * every DeFi protocol/chain it supports, so this slot leads with exactly
+ * that live coverage (ChainOverview) rather than a Hyperliquid-only market
+ * ticker. (This replaced an earlier "Market"/"News" tab that only ever
+ * covered Hyperliquid perps — too narrow for what this column should show.)
+ *   - Chains: live chain x protocol TVL coverage from DefiLlama (see
+ *     ChainOverview / /api/chains).
  *   - Alpha: newly-listed protocols and 7-day TVL momentum, derived from
  *     DefiLlama's free /protocols API (see /api/alpha) — real `listedAt` and
  *     `change_7d` fields, not editorialized "points farm" / "airdrop rumor"
  *     content, since there is no honest free source for that.
- * When a feed is down, the tab says so instead of falling back to stale
- * content that looks live but isn't.
+ * When the Alpha feed is down, the tab says so instead of falling back to
+ * stale content that looks live but isn't.
  */
-export function NewsFeed({ feed, onAddThread }: { feed: LiveFeedState; onAddThread: (type: ThreadType, text?: string) => void }) {
-  const [tab, setTab] = useState<"market" | "alpha">("market");
+export function NewsFeed() {
+  const [tab, setTab] = useState<"chains" | "alpha">("chains");
   const now = useNowTick();
-
-  const isLive = !feed.loading && !!feed.data && feed.data.funding.length > 0;
-
-  const liveNews: LiveNewsRow[] =
-    feed.data?.highlights?.movers.map((m) => ({
-      protocol: m.coin,
-      metric: fmtPct(m.changePct),
-      text: `${m.coin} is ${Math.abs(m.changePct).toFixed(1)}% on the 24h with ${fmtUsdCompact(m.dayNtlVlm)} in traded notional — Hyperliquid perp feed.`,
-      coin: m.coin,
-    })) ?? [];
 
   const alpha = useAlpha();
   const alphaEntries = alpha.data ?? [];
 
   return (
     <>
-      <h6 style={{ color: "var(--color-accent)" }}>{tab === "market" ? "Market" : "Alpha"}</h6>
       <div className="seg" style={{ marginBottom: "var(--space-2)" }}>
         <label className="seg-opt">
-          <input type="radio" name="feed-tab" checked={tab === "market"} onChange={() => setTab("market")} />
-          <span>Market</span>
+          <input type="radio" name="feed-tab" checked={tab === "chains"} onChange={() => setTab("chains")} />
+          <span>Chains</span>
         </label>
         <label className="seg-opt">
           <input type="radio" name="feed-tab" checked={tab === "alpha"} onChange={() => setTab("alpha")} />
@@ -112,38 +80,8 @@ export function NewsFeed({ feed, onAddThread }: { feed: LiveFeedState; onAddThre
         </label>
       </div>
 
-      {tab === "market" ? (
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          {/* Live funding-rate strip (only when the funding feed is up). */}
-          {isLive && feed.data?.funding && feed.data.funding.length > 0 && (
-            <div className="card" style={{ gap: 4, padding: "var(--space-2)", marginBottom: "var(--space-2)" }}>
-              <p style={{ margin: 0, fontSize: 11, fontWeight: 600, fontFamily: "var(--font-heading)" }}>
-                Funding rates (annualized)
-              </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                {feed.data.funding.slice(0, 6).map((f) => (
-                  <div key={f.coin} style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
-                    <span className="text-muted">{f.coin}</span>
-                    <span style={{ fontVariantNumeric: "tabular-nums", color: f.annualizedPct >= 0 ? "var(--color-accent-700)" : "var(--risk-serious)" }}>
-                      {fmtPct(f.annualizedPct)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-              <p style={{ margin: "4px 0 0", fontSize: 10 }} className="text-muted">
-                live · updated {fmtAge(now - feed.dataUpdatedAt)} · refreshes every 60s
-              </p>
-            </div>
-          )}
-
-          {isLive && liveNews.length > 0 ? (
-            liveNews.map((n, i) => <NewsRow key={i} n={n} onDiscuss={onAddThread} />)
-          ) : (
-            <p className="text-muted" style={{ fontSize: 12, margin: "var(--space-2) 0 0" }}>
-              {feed.loading ? "Fetching live market feed…" : "No live market feed right now — Hyperliquid's market data is unreachable."}
-            </p>
-          )}
-        </div>
+      {tab === "chains" ? (
+        <ChainOverview hideDivider />
       ) : (
         <div style={{ display: "flex", flexDirection: "column" }}>
           {alphaEntries.length > 0 ? (
@@ -181,29 +119,5 @@ export function NewsFeed({ feed, onAddThread }: { feed: LiveFeedState; onAddThre
         </div>
       )}
     </>
-  );
-}
-
-function NewsRow({ n, onDiscuss }: { n: LiveNewsRow; onDiscuss: (type: ThreadType, text?: string) => void }) {
-  return (
-    <div style={{ padding: "var(--space-2) 0", borderBottom: "1px solid var(--color-divider)" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <span className="tag tag-accent" style={{ marginBottom: 4 }}>
-          {n.protocol}
-        </span>
-        <span style={{ fontSize: 12, fontVariantNumeric: "tabular-nums", color: "var(--color-accent-700)" }}>{n.metric}</span>
-      </div>
-      <p style={{ margin: "4px 0 0", fontSize: 13, lineHeight: 1.4 }}>{n.text}</p>
-      <a
-        href="#"
-        style={{ textDecoration: "none", fontSize: 12 }}
-        onClick={(e) => {
-          e.preventDefault();
-          onDiscuss("perp", `I think ${n.coin} outperforms this month`);
-        }}
-      >
-        Discuss →
-      </a>
-    </div>
   );
 }
