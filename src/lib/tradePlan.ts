@@ -68,6 +68,8 @@ export interface TradePlan {
   variantLabel?: string;
   /** One honest, factual line distinguishing this variant from its siblings — never a fabricated risk score. */
   variantNote?: string;
+  /** Risk tier from the LLM strategy engine. */
+  riskTier?: "conservative" | "moderate" | "aggressive";
 }
 
 /** Augment ThreadItem with an optional parsed plan (keeps data.ts untouched). */

@@ -99,7 +99,7 @@ function primaryAsset(legs: TradeLeg[]): string {
 }
 
 /** Convert an LLM strategy into a TradePlan compatible with ThreadCard. */
-function strategyToTradePlan(strategy: LLMStrategy): TradePlan {
+function strategyToTradePlan(strategy: LLMStrategy): TradePlan & { riskTier: LLMStrategy["risk"] } {
   const legs: TradeLeg[] = strategy.legs.map((l) => ({
     side: l.side,
     asset: l.asset,
@@ -125,6 +125,7 @@ function strategyToTradePlan(strategy: LLMStrategy): TradePlan {
     summary: strategy.summary,
     variantLabel: strategy.name,
     variantNote: strategy.variantNote,
+    riskTier: strategy.risk,
   };
 }
 

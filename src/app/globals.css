@@ -263,7 +263,7 @@ body {
    only applies below the breakpoint, so desktop rendering is untouched.
    NOTE: if the page.tsx column widths ever change, update the selector to the
    new value (or add a stable class to that container). */
-@media (max-width: 1080px) {
+@media (max-width: 860px) {
   div[style*="290px 1fr 320px"] {
     grid-template-columns: 1fr !important;
     overflow-y: auto !important;

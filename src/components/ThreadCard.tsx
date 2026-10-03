@@ -1249,11 +1249,55 @@ function PlanCard({ item }: { item: ThreadItem }) {
       ? `${formatBaseUnits(order.amount, order.decimals ?? 18)} ${order.symbol ?? ""}`
       : `${String(order.amount)} ${order.symbol ?? ""}`;
 
+  const risk = riskLabel(plan);
+  const riskColor = risk ? RISK_COLORS[risk] : undefined;
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
       <UserBubble>{item.text || "Describe your thesis."}</UserBubble>
-      <div style={{ maxWidth: "90%" }}>
-        <p style={{ margin: "0 0 6px", fontSize: 14 }}>{plan.summary}</p>
+      <div
+        style={{
+          maxWidth: "90%",
+          background: "var(--color-surface)",
+          border: "1px solid var(--color-divider)",
+          borderRadius: "var(--radius-md)",
+          padding: "var(--space-3)",
+          display: "flex",
+          flexDirection: "column",
+          gap: "var(--space-2)",
+        }}
+      >
+        {/* Strategy header with risk badge */}
+        {plan.variantLabel && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+            {riskColor && (
+              <span style={{
+                width: 8, height: 8, borderRadius: "50%",
+                background: riskColor, flexShrink: 0,
+              }} />
+            )}
+            <span style={{
+              fontSize: 13,
+              fontFamily: "var(--font-heading)",
+              fontWeight: 600,
+              color: "var(--color-text)",
+            }}>
+              {plan.variantLabel}
+            </span>
+            {risk && (
+              <span style={{
+                fontSize: 10,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                color: riskColor,
+                fontWeight: 600,
+              }}>
+                {risk}
+              </span>
+            )}
+          </div>
+        )}
+        <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: "color-mix(in srgb, var(--color-text) 80%, transparent)" }}>{plan.summary}</p>
         {plan.intent === "yieldSearch" && <YieldFinderCard asset={plan.asset ?? "USDC"} sizeUsd={plan.sizeUsd ?? 10000} />}
         {plan.legs.length > 0 && (
           <div style={orderStyle}>
@@ -1262,12 +1306,6 @@ function PlanCard({ item }: { item: ThreadItem }) {
               const legSide = (leg.side || "").toLowerCase();
               const isMorpho = /morpho/i.test(leg.protocol || "");
               const isLidoWithdraw = /lido/i.test(leg.protocol || "") && legSide === "withdraw";
-              // These venues resolve their own live execution path (a fresh
-              // on-chain quote, a live vault/position lookup, ...) even when
-              // resolveOrderForLeg's pure/offline pass can't build the order
-              // itself — see PerpExecuteButton/ExtendedPerpExecuteButton/
-              // LifiPerpExecuteButton/SwapExecuteButton/MorphoExecuteButton/
-              // MorphoWithdrawButton/LidoUnstakeButton.
               const liveVenue =
                 /hyperliquid|extended|ondo|lighter|uniswap/i.test(leg.protocol || "") || isMorpho || isLidoWithdraw;
               const building = isUnsupported(resolved) && !liveVenue;
@@ -1327,11 +1365,11 @@ const RISK_COLORS: Record<string, string> = {
 };
 
 function riskLabel(plan: TradePlan): string | null {
+  if (plan.riskTier) return plan.riskTier;
   const note = (plan.variantNote ?? "").toLowerCase();
   if (note.includes("conservative")) return "conservative";
   if (note.includes("moderate")) return "moderate";
   if (note.includes("aggressive")) return "aggressive";
-  // Check variantLabel too
   const label = (plan.variantLabel ?? "").toLowerCase();
   if (label.includes("conservative")) return "conservative";
   if (label.includes("moderate")) return "moderate";
