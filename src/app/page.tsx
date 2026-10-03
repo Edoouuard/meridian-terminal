@@ -91,7 +91,7 @@ export default function TerminalApp() {
   // Everything below Positions used to stack 9 panels in one long scroll
   // (Risk, Vault risk, 4 venue connect panels, History, Chains, Solana) --
   // grouped into tabs so the left column stays scannable instead of dense.
-  const [leftTab, setLeftTab] = useState<"risk" | "venues" | "activity" | "markets">("risk");
+  const [leftTab, setLeftTab] = useState<"risk" | "venues" | "activity" | "chains">("risk");
 
   const { isConnected } = useAccount();
   const live = useLivePortfolio();
@@ -292,8 +292,8 @@ export default function TerminalApp() {
               <span>Activity</span>
             </label>
             <label className="seg-opt">
-              <input type="radio" name="left-tab" checked={leftTab === "markets"} onChange={() => setLeftTab("markets")} />
-              <span>Markets</span>
+              <input type="radio" name="left-tab" checked={leftTab === "chains"} onChange={() => setLeftTab("chains")} />
+              <span>Chains</span>
             </label>
           </div>
 
@@ -313,7 +313,7 @@ export default function TerminalApp() {
             </>
           )}
           {leftTab === "activity" && <HistoryPanel />}
-          {leftTab === "markets" && (
+          {leftTab === "chains" && (
             <>
               <ChainOverview />
               <SolanaPanel />

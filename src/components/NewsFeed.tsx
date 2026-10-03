@@ -68,11 +68,12 @@ function useAlpha() {
 }
 
 /**
- * The "DeFi news / Alpha" column. Both tabs are live or they say so —
- * neither ever silently swaps in static demo content:
- *   - News: a funding-rate strip plus a top-movers brief, derived from
+ * The "Market / Alpha" column. Both tabs are live or they say so — neither
+ * ever silently swaps in static demo content:
+ *   - Market: a funding-rate strip plus a top-movers brief, derived from
  *     Hyperliquid's metaAndAssetCtxs (markPx/prevDayPx change, dayNtlVlm as
- *     flow proxy).
+ *     flow proxy). Named "Market" rather than "News" because that's exactly
+ *     what it is — live perp market data, not editorial content.
  *   - Alpha: newly-listed protocols and 7-day TVL momentum, derived from
  *     DefiLlama's free /protocols API (see /api/alpha) — real `listedAt` and
  *     `change_7d` fields, not editorialized "points farm" / "airdrop rumor"
@@ -81,7 +82,7 @@ function useAlpha() {
  * content that looks live but isn't.
  */
 export function NewsFeed({ feed, onAddThread }: { feed: LiveFeedState; onAddThread: (type: ThreadType, text?: string) => void }) {
-  const [tab, setTab] = useState<"news" | "alpha">("news");
+  const [tab, setTab] = useState<"market" | "alpha">("market");
   const now = useNowTick();
 
   const isLive = !feed.loading && !!feed.data && feed.data.funding.length > 0;
@@ -99,11 +100,11 @@ export function NewsFeed({ feed, onAddThread }: { feed: LiveFeedState; onAddThre
 
   return (
     <>
-      <h6 style={{ color: "var(--color-accent)" }}>{tab === "news" ? "DeFi news" : "Alpha"}</h6>
+      <h6 style={{ color: "var(--color-accent)" }}>{tab === "market" ? "Market" : "Alpha"}</h6>
       <div className="seg" style={{ marginBottom: "var(--space-2)" }}>
         <label className="seg-opt">
-          <input type="radio" name="feed-tab" checked={tab === "news"} onChange={() => setTab("news")} />
-          <span>News</span>
+          <input type="radio" name="feed-tab" checked={tab === "market"} onChange={() => setTab("market")} />
+          <span>Market</span>
         </label>
         <label className="seg-opt">
           <input type="radio" name="feed-tab" checked={tab === "alpha"} onChange={() => setTab("alpha")} />
@@ -111,7 +112,7 @@ export function NewsFeed({ feed, onAddThread }: { feed: LiveFeedState; onAddThre
         </label>
       </div>
 
-      {tab === "news" ? (
+      {tab === "market" ? (
         <div style={{ display: "flex", flexDirection: "column" }}>
           {/* Live funding-rate strip (only when the funding feed is up). */}
           {isLive && feed.data?.funding && feed.data.funding.length > 0 && (
@@ -139,7 +140,7 @@ export function NewsFeed({ feed, onAddThread }: { feed: LiveFeedState; onAddThre
             liveNews.map((n, i) => <NewsRow key={i} n={n} onDiscuss={onAddThread} />)
           ) : (
             <p className="text-muted" style={{ fontSize: 12, margin: "var(--space-2) 0 0" }}>
-              {feed.loading ? "Fetching live market feed…" : "No live news feed right now — Hyperliquid's market data is unreachable."}
+              {feed.loading ? "Fetching live market feed…" : "No live market feed right now — Hyperliquid's market data is unreachable."}
             </p>
           )}
         </div>
