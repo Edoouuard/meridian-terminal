@@ -21,6 +21,7 @@ import { useLiveFeed } from "@/hooks/useLiveFeed";
 import { NewsFeed } from "@/components/NewsFeed";
 import { CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
 import { EXAMPLE_THESIS_FOR_TYPE, routeThesis, type TradePlan } from "@/lib/routeThesis";
+import { routeThesisAsync } from "@/lib/intentEngine";
 import { recordExecution } from "@/lib/history";
 
 // Expose the local order-history API on the page module so real execution
@@ -87,6 +88,8 @@ export default function TerminalApp() {
     routeThesis(EXAMPLE_THESIS_FOR_TYPE.betaneutral),
   ]);
   const [promptText, setPromptText] = useState("");
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [pendingText, setPendingText] = useState("");
   // Everything below Positions used to stack 9 panels in one long scroll
   // (Risk, Vault risk, 4 venue connect panels, History, Chains, Solana) --
   // grouped into tabs so the left column stays scannable instead of dense.
@@ -171,17 +174,23 @@ export default function TerminalApp() {
     });
   }
 
-  function submitPrompt() {
+  async function submitPrompt() {
     const text = promptText.trim();
-    if (!text) return;
-    // Unlike addExample's canned quick-prompt buttons, an explicitly typed
-    // thesis is never deduped by resolved type — the dedup there exists only
-    // to stop the SAME quick-prompt button from stacking duplicate example
-    // cards. A real typed prompt must always produce a visible new card,
-    // even when an earlier prompt already resolved to the same intent type.
-    const routed = routeThesis(text);
-    setThread((cur) => cur.concat([routed]));
+    if (!text || isAnalyzing) return;
     setPromptText("");
+    setPendingText(text);
+    setIsAnalyzing(true);
+
+    try {
+      const routed = await routeThesisAsync(text);
+      setThread((cur) => cur.concat([routed]));
+    } catch {
+      // Fallback to regex parser if async fails entirely
+      setThread((cur) => cur.concat([routeThesis(text)]));
+    } finally {
+      setIsAnalyzing(false);
+      setPendingText("");
+    }
   }
 
   // Switches which already-computed variant (see tradePlan.parseThesisVariants)
@@ -384,14 +393,47 @@ export default function TerminalApp() {
             <h6 style={{ color: "var(--color-accent)", flex: "none" }}>Prompt to trade</h6>
             <div style={{ maxWidth: "80%" }}>
               <p style={{ margin: 0, fontSize: 14, color: "color-mix(in srgb, var(--color-text) 70%, transparent)" }}>
-                Describe a thesis. I will translate it into an executable order across Aave, Morpho, Lido, Pendle, Hyperliquid, Extended,
-                Ondo, Lighter, Variational, or Uniswap.
+                Describe what you want — exposure, yield, airdrops, hedging — in your own words. Meridian will design 3 strategies
+                at different risk levels and let you execute each step.
               </p>
             </div>
 
             {thread.map((item, i) => (
               <ThreadCard key={i} item={item} onSelectVariant={(plan) => selectVariant(i, plan)} />
             ))}
+
+            {isAnalyzing && (
+              <div
+                className="card"
+                style={{
+                  gap: 8,
+                  padding: "var(--space-3)",
+                  borderColor: "var(--color-accent-500)",
+                  borderStyle: "solid",
+                  borderWidth: 1,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span
+                    style={{
+                      display: "inline-block",
+                      width: 12,
+                      height: 12,
+                      borderRadius: "50%",
+                      border: "2px solid var(--color-accent)",
+                      borderTopColor: "transparent",
+                      animation: "spin 0.8s linear infinite",
+                    }}
+                  />
+                  <span style={{ fontSize: 13, fontFamily: "var(--font-heading)", color: "var(--color-accent)" }}>
+                    Analyzing thesis
+                  </span>
+                </div>
+                <p style={{ margin: 0, fontSize: 12 }} className="text-muted">
+                  &ldquo;{pendingText}&rdquo; — designing strategies across protocols...
+                </p>
+              </div>
+            )}
 
             {isConnected && live.isLoading && (
               <p style={{ margin: 0, fontSize: 12 }} className="text-muted">
@@ -461,14 +503,15 @@ export default function TerminalApp() {
           <div style={{ flex: "none", display: "flex", gap: 8 }}>
             <input
               className="input"
-              placeholder="e.g. Lock in a fixed rate on my stETH before it drops"
+              placeholder="e.g. I want yield on my ETH, expose me to SOL, farm airdrops..."
               value={promptText}
+              disabled={isAnalyzing}
               onChange={(e) => setPromptText(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") submitPrompt();
               }}
             />
-            <button className="btn btn-primary btn-icon" aria-label="Send" onClick={submitPrompt}>
+            <button className="btn btn-primary btn-icon" aria-label="Send" onClick={submitPrompt} disabled={isAnalyzing}>
               →
             </button>
           </div>

@@ -220,6 +220,9 @@ a:hover { color: var(--color-accent-700); }
   from { transform: translateX(0); }
   to { transform: translateX(-50%); }
 }
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
 @media (prefers-reduced-motion: reduce) {
   .ticker-track { animation: none; }
   .ticker-viewport { overflow-x: auto; }
