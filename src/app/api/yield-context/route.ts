@@ -3,19 +3,21 @@ import { NextResponse } from "next/server";
 /**
  * GET /api/yield-context
  *
- * Aggregates live yield data from ALL sources in parallel:
- * - DefiLlama yields API → lending APY (Aave, Compound, Morpho, Spark, Fluid, etc.)
- * - DefiLlama yields API → staking APY (Lido, Rocket Pool, ether.fi, etc.)
- * - Hyperliquid info API → perp funding rates (= yield for delta-neutral)
- * - Hyperliquid vaultDetails → HLP vault APR
- * - Lighter publicPoolsMetadata → LLP vault APR
- * - Philidor API → Morpho vault APY + risk scores
+ * Aggregates ALL live yield data from every source, fetched fresh each time.
+ * No hardcoded rates — everything comes from protocol APIs:
  *
- * Returns a compact text summary for injection into the LLM strategy prompt.
- * Cached 10 min (revalidate). Never throws — returns partial data on failures.
+ * 1. DefiLlama yields → ALL lending/LP pools from protocols Meridian supports
+ * 2. DefiLlama yields → ALL ETH liquid staking providers
+ * 3. Hyperliquid API → ALL perp funding rates (every listed coin)
+ * 4. Hyperliquid API → HLP vault APR
+ * 5. Lighter API → ALL public pool APRs
+ * 6. Philidor API → ALL risk-scored DeFi vaults (Morpho, Aave, Compound, etc.)
+ *
+ * Returns a text summary for the LLM + structured JSON.
+ * Never throws — returns partial data on any individual source failure.
  */
 
-export const revalidate = 600;
+export const revalidate = 0; // Always fresh — yields change continuously
 
 const DEFILLAMA_YIELDS = "https://yields.llama.fi/pools";
 const HYPERLIQUID_INFO = "https://api.hyperliquid.xyz/info";
@@ -72,94 +74,122 @@ export interface YieldContext {
   staking: YieldRow[];
   funding: FundingRow[];
   vaults: VaultYield[];
-  morpho: PhilidorVault[];
+  riskScoredVaults: PhilidorVault[];
   fetchedAt: string;
   summary: string;
 }
 
-/* ---------- Fetchers ---------- */
+/* ---------- DefiLlama: dynamic protocol discovery ---------- */
 
-const LENDING_PROJECTS: Record<string, string> = {
-  "aave-v3": "Aave v3",
-  "compound-v3": "Compound III",
-  morpho: "Morpho",
-  "morpho-blue": "Morpho Blue",
-  spark: "Spark",
-  fluid: "Fluid",
-};
+/**
+ * Protocols Meridian has execution wired for (or can route to).
+ * We match DefiLlama project slugs dynamically — any pool from these
+ * protocols on DefiLlama is included, regardless of asset or chain.
+ * New pools/assets/chains appear automatically as DefiLlama indexes them.
+ */
+const MERIDIAN_PROTOCOL_SLUGS = new Set([
+  // Lending
+  "aave-v3", "aave-v2",
+  "compound-v3", "compound-v2",
+  "morpho", "morpho-blue",
+  "spark",
+  "fluid",
+  // Staking (for comparison)
+  "lido",
+  "rocket-pool",
+  "ether.fi-stake",
+  "stakewise",
+  "stakewise-v3",
+  "frax-ether",
+  "mantle-staked-eth",
+  "swell-liquid-staking",
+  "coinbase-wrapped-staked-eth",
+  // DEX LP (yield opportunities)
+  "uniswap-v3",
+  "curve-dex",
+]);
 
-const STAKING_PROJECTS: Record<string, string> = {
-  lido: "Lido",
-  "rocket-pool": "Rocket Pool",
-  "ether.fi-stake": "ether.fi",
-  stakewise: "StakeWise",
-  "frax-ether": "Frax Ether",
-};
-
-const KEY_ASSETS = new Set(["USDC", "USDT", "DAI", "WETH", "ETH", "WBTC", "STETH", "WSTETH", "GHO", "LUSD", "FRAX", "CBBTC"]);
+/** Min TVL to filter noise — pools under this are ignored */
+const MIN_TVL = 100_000;
 
 async function fetchDefiLlama(): Promise<{ lending: YieldRow[]; staking: YieldRow[] }> {
   try {
     const res = await fetch(DEFILLAMA_YIELDS, {
       signal: AbortSignal.timeout(TIMEOUT),
-      next: { revalidate: 600 },
+      cache: "no-store",
     });
     if (!res.ok) return { lending: [], staking: [] };
     const body: { data?: DefiLlamaPool[] } = await res.json();
     const pools = body.data ?? [];
 
-    // Lending yields
     const lendingMap = new Map<string, YieldRow>();
+    const stakingMap = new Map<string, YieldRow>();
+
     for (const p of pools) {
-      if (!p.project || !(p.project in LENDING_PROJECTS)) continue;
-      const sym = (p.symbol ?? "").toUpperCase();
-      if (!KEY_ASSETS.has(sym)) continue;
+      if (!p.project || !MERIDIAN_PROTOCOL_SLUGS.has(p.project)) continue;
       const apy = p.apyBase ?? p.apy;
       if (typeof apy !== "number" || !Number.isFinite(apy) || apy <= 0) continue;
-      if ((p.tvlUsd ?? 0) < 100_000) continue;
-      const key = `${p.project}:${sym}:${p.chain}`;
-      const existing = lendingMap.get(key);
-      if (!existing || (p.tvlUsd ?? 0) > existing.tvlUsd) {
-        lendingMap.set(key, {
-          protocol: LENDING_PROJECTS[p.project],
-          asset: sym,
-          chain: p.chain ?? "?",
-          apy,
-          tvlUsd: p.tvlUsd ?? 0,
-          kind: "lending",
-        });
+      if ((p.tvlUsd ?? 0) < MIN_TVL) continue;
+
+      const sym = (p.symbol ?? "").toUpperCase();
+      const chain = p.chain ?? "?";
+      const displayName = p.project
+        .replace(/-v(\d)/, " v$1")
+        .replace(/-/g, " ")
+        .replace(/\b\w/g, (c) => c.toUpperCase())
+        .replace("Aave V3", "Aave v3")
+        .replace("Compound V3", "Compound III")
+        .replace("Morpho Blue", "Morpho")
+        .replace("Ether.fi Stake", "ether.fi")
+        .replace("Uniswap V3", "Uniswap v3")
+        .replace("Curve Dex", "Curve");
+
+      // Classify: staking vs lending/LP
+      const isStaking = /lido|rocket-pool|ether\.fi|stakewise|frax-ether|mantle-staked|swell|coinbase-wrapped/i.test(p.project);
+
+      if (isStaking) {
+        // Keep best (deepest TVL) per staking protocol
+        const existing = stakingMap.get(p.project);
+        if (!existing || (p.tvlUsd ?? 0) > existing.tvlUsd) {
+          stakingMap.set(p.project, {
+            protocol: displayName,
+            asset: sym,
+            chain,
+            apy,
+            tvlUsd: p.tvlUsd ?? 0,
+            kind: "staking",
+          });
+        }
+      } else {
+        // Keep best (deepest TVL) per protocol+asset+chain
+        const key = `${p.project}:${sym}:${chain}`;
+        const existing = lendingMap.get(key);
+        if (!existing || (p.tvlUsd ?? 0) > existing.tvlUsd) {
+          lendingMap.set(key, {
+            protocol: displayName,
+            asset: sym,
+            chain,
+            apy,
+            tvlUsd: p.tvlUsd ?? 0,
+            kind: /uniswap|curve/i.test(p.project) ? "lp" : "lending",
+          });
+        }
       }
     }
+
     const lending = Array.from(lendingMap.values())
       .sort((a, b) => b.apy - a.apy)
-      .slice(0, 30);
-
-    // Staking yields
-    const stakingMap = new Map<string, YieldRow>();
-    for (const p of pools) {
-      if (!p.project || !(p.project in STAKING_PROJECTS)) continue;
-      if (p.chain !== "Ethereum") continue;
-      const apy = p.apyBase ?? p.apy;
-      if (typeof apy !== "number" || !Number.isFinite(apy)) continue;
-      const existing = stakingMap.get(p.project);
-      if (!existing || (p.tvlUsd ?? 0) > existing.tvlUsd) {
-        stakingMap.set(p.project, {
-          protocol: STAKING_PROJECTS[p.project],
-          asset: p.symbol ?? "ETH",
-          chain: "Ethereum",
-          apy,
-          tvlUsd: p.tvlUsd ?? 0,
-          kind: "staking",
-        });
-      }
-    }
-    const staking = Array.from(stakingMap.values()).sort((a, b) => b.apy - a.apy);
+      .slice(0, 50);
+    const staking = Array.from(stakingMap.values())
+      .sort((a, b) => b.apy - a.apy);
 
     return { lending, staking };
   } catch {
     return { lending: [], staking: [] };
   }
 }
+
+/* ---------- Hyperliquid: ALL funding rates ---------- */
 
 async function fetchFundingRates(): Promise<FundingRow[]> {
   try {
@@ -178,20 +208,21 @@ async function fetchFundingRates(): Promise<FundingRow[]> {
     for (let i = 0; i < universe.length; i++) {
       const name = universe[i]?.name;
       const funding = parseFloat(ctxs[i]?.funding ?? "");
-      if (!name || !Number.isFinite(funding) || funding === 0) continue;
+      if (!name || !Number.isFinite(funding)) continue;
       rates.push({
         coin: name,
         hourlyRate: funding,
         annualizedPct: funding * 24 * 365 * 100,
       });
     }
-    return rates
-      .sort((a, b) => Math.abs(b.annualizedPct) - Math.abs(a.annualizedPct))
-      .slice(0, 15);
+    // Return ALL coins sorted by absolute annualized rate
+    return rates.sort((a, b) => Math.abs(b.annualizedPct) - Math.abs(a.annualizedPct));
   } catch {
     return [];
   }
 }
+
+/* ---------- Protocol vaults ---------- */
 
 async function fetchHlpVault(): Promise<VaultYield | null> {
   try {
@@ -205,32 +236,43 @@ async function fetchHlpVault(): Promise<VaultYield | null> {
     if (!res.ok) return null;
     const data = await res.json();
     if (typeof data.apr !== "number" || !Number.isFinite(data.apr)) return null;
-    return { name: "HLP (Hyperliquid)", apr: data.apr };
+    return { name: "HLP (Hyperliquid Vault)", apr: data.apr };
   } catch {
     return null;
   }
 }
 
-async function fetchLighterVault(): Promise<VaultYield | null> {
+async function fetchLighterVaults(): Promise<VaultYield[]> {
   try {
     const res = await fetch(LIGHTER_POOLS, {
       signal: AbortSignal.timeout(TIMEOUT),
       cache: "no-store",
     });
-    if (!res.ok) return null;
+    if (!res.ok) return [];
     const data = await res.json();
-    const pools = Array.isArray(data) ? data : Array.isArray(data?.pools) ? data.pools : Array.isArray(data?.data) ? data.data : [];
-    const llp = pools.find((p: Record<string, unknown>) => /\bllp\b/i.test(String(p.name ?? "")) || /\bllp\b/i.test(String(p.symbol ?? ""))) ?? pools[0];
-    if (!llp) return null;
-    const raw = llp.apr ?? llp.apy ?? llp.annualized_return ?? llp.annualizedReturn;
-    const n = typeof raw === "number" ? raw : parseFloat(String(raw));
-    if (!Number.isFinite(n)) return null;
-    const pct = n > 0 && n < 1 ? n * 100 : n;
-    return { name: "LLP (Lighter)", apr: pct };
+    const pools = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.pools)
+        ? data.pools
+        : Array.isArray(data?.data)
+          ? data.data
+          : [];
+    const results: VaultYield[] = [];
+    for (const p of pools) {
+      const raw = p.apr ?? p.apy ?? p.annualized_return ?? p.annualizedReturn;
+      const n = typeof raw === "number" ? raw : parseFloat(String(raw ?? ""));
+      if (!Number.isFinite(n)) continue;
+      const pct = n > 0 && n < 1 ? n * 100 : n;
+      const name = p.name ?? p.symbol ?? "Lighter Pool";
+      results.push({ name: `${name} (Lighter)`, apr: pct });
+    }
+    return results;
   } catch {
-    return null;
+    return [];
   }
 }
+
+/* ---------- Philidor: ALL risk-scored vaults ---------- */
 
 interface RawPhilidorVault {
   protocol_name?: unknown;
@@ -245,7 +287,7 @@ interface RawPhilidorVault {
 async function fetchPhilidorVaults(): Promise<PhilidorVault[]> {
   try {
     const res = await fetch(
-      `${PHILIDOR_VAULTS}?limit=20&sortBy=apr_net&sortOrder=desc&minTvl=500000`,
+      `${PHILIDOR_VAULTS}?limit=50&sortBy=apr_net&sortOrder=desc&minTvl=100000`,
       { signal: AbortSignal.timeout(TIMEOUT), cache: "no-store" },
     );
     if (!res.ok) return [];
@@ -261,8 +303,7 @@ async function fetchPhilidorVaults(): Promise<PhilidorVault[]> {
         riskScore: v.total_score as number,
         riskTier: String(v.risk_tier ?? ""),
         tvlUsd: typeof v.tvl_usd === "number" ? v.tvl_usd : 0,
-      }))
-      .slice(0, 15);
+      }));
   } catch {
     return [];
   }
@@ -270,47 +311,56 @@ async function fetchPhilidorVaults(): Promise<PhilidorVault[]> {
 
 /* ---------- Build text summary ---------- */
 
+function fmtTvl(tvl: number): string {
+  if (tvl >= 1e9) return `$${(tvl / 1e9).toFixed(1)}B`;
+  if (tvl >= 1e6) return `$${(tvl / 1e6).toFixed(1)}M`;
+  return `$${(tvl / 1e3).toFixed(0)}K`;
+}
+
 function buildSummary(ctx: Omit<YieldContext, "summary" | "fetchedAt">): string {
-  const lines: string[] = ["## LIVE YIELD DATA (real-time, use these numbers — do NOT guess APY)"];
+  const lines: string[] = [
+    `## LIVE YIELD DATA — fetched ${new Date().toISOString()}`,
+    "Use ONLY these rates. Do NOT guess or recall rates from memory.",
+  ];
 
   if (ctx.lending.length > 0) {
-    lines.push("\n### Lending Yields (DefiLlama)");
+    lines.push("\n### Lending & LP Yields");
     for (const r of ctx.lending) {
-      lines.push(`- ${r.protocol} ${r.asset} on ${r.chain}: ${r.apy.toFixed(2)}% APY ($${(r.tvlUsd / 1e6).toFixed(1)}M TVL)`);
+      lines.push(`- ${r.protocol} | ${r.asset} | ${r.chain} | ${r.apy.toFixed(2)}% APY | ${fmtTvl(r.tvlUsd)} TVL | ${r.kind}`);
     }
   }
 
   if (ctx.staking.length > 0) {
-    lines.push("\n### ETH Staking Yields");
+    lines.push("\n### ETH Liquid Staking");
     for (const r of ctx.staking) {
-      lines.push(`- ${r.protocol}: ${r.apy.toFixed(2)}% APY ($${(r.tvlUsd / 1e9).toFixed(1)}B TVL)`);
+      lines.push(`- ${r.protocol} | ${r.asset} | ${r.apy.toFixed(2)}% APY | ${fmtTvl(r.tvlUsd)} TVL`);
     }
   }
 
   if (ctx.vaults.length > 0) {
-    lines.push("\n### Protocol Vaults");
+    lines.push("\n### Protocol Vaults (market-making / liquidity)");
     for (const v of ctx.vaults) {
-      lines.push(`- ${v.name}: ${v.apr.toFixed(2)}% APR`);
+      lines.push(`- ${v.name} | ${v.apr.toFixed(2)}% APR`);
     }
   }
 
-  if (ctx.morpho.length > 0) {
-    lines.push("\n### Top Morpho/DeFi Vaults (Philidor risk-scored)");
-    for (const v of ctx.morpho) {
-      lines.push(`- ${v.protocol} ${v.asset} on ${v.chain}: ${v.apy.toFixed(2)}% APY (risk ${v.riskScore.toFixed(1)}/10 ${v.riskTier}, $${(v.tvlUsd / 1e6).toFixed(1)}M TVL)`);
+  if (ctx.riskScoredVaults.length > 0) {
+    lines.push("\n### Risk-Scored DeFi Vaults (Philidor)");
+    for (const v of ctx.riskScoredVaults) {
+      lines.push(`- ${v.protocol} | ${v.asset} | ${v.chain} | ${v.apy.toFixed(2)}% APY | risk ${v.riskScore.toFixed(1)}/10 ${v.riskTier} | ${fmtTvl(v.tvlUsd)} TVL`);
     }
   }
 
   if (ctx.funding.length > 0) {
-    lines.push("\n### Perp Funding Rates (Hyperliquid) — yield for delta-neutral strategies");
+    lines.push("\n### Perp Funding Rates (Hyperliquid) — yield for delta-neutral / cost for directional");
     for (const f of ctx.funding) {
       const sign = f.annualizedPct >= 0 ? "+" : "";
-      lines.push(`- ${f.coin}: ${sign}${f.annualizedPct.toFixed(1)}% annualized (${sign}${(f.hourlyRate * 100).toFixed(4)}%/hr)`);
+      lines.push(`- ${f.coin} | ${sign}${f.annualizedPct.toFixed(1)}% annualized | ${sign}${(f.hourlyRate * 100).toFixed(4)}%/hr`);
     }
   }
 
-  if (ctx.lending.length === 0 && ctx.staking.length === 0 && ctx.funding.length === 0) {
-    lines.push("\n(No live yield data available — use your best knowledge of typical rates)");
+  if (ctx.lending.length === 0 && ctx.staking.length === 0 && ctx.funding.length === 0 && ctx.vaults.length === 0) {
+    lines.push("\n(No live yield data available right now — inform the user that rates could not be fetched)");
   }
 
   return lines.join("\n");
@@ -319,22 +369,26 @@ function buildSummary(ctx: Omit<YieldContext, "summary" | "fetchedAt">): string 
 /* ---------- Handler ---------- */
 
 export async function GET() {
-  const [defiLlama, funding, hlp, lighter, morpho] = await Promise.all([
+  // Fetch ALL sources in parallel — each is independently null-safe
+  const [defiLlama, funding, hlp, lighterVaults, philidor] = await Promise.all([
     fetchDefiLlama(),
     fetchFundingRates(),
     fetchHlpVault(),
-    fetchLighterVault(),
+    fetchLighterVaults(),
     fetchPhilidorVaults(),
   ]);
 
-  const vaults: VaultYield[] = [hlp, lighter].filter((v): v is VaultYield => v !== null);
+  const vaults: VaultYield[] = [
+    hlp,
+    ...lighterVaults,
+  ].filter((v): v is VaultYield => v !== null);
 
   const ctx: YieldContext = {
     lending: defiLlama.lending,
     staking: defiLlama.staking,
     funding,
     vaults,
-    morpho,
+    riskScoredVaults: philidor,
     fetchedAt: new Date().toISOString(),
     summary: "",
   };
