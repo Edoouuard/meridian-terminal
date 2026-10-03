@@ -14,7 +14,6 @@ import { HyperliquidPanel } from "@/components/HyperliquidPanel";
 import { ExtendedConnectPanel } from "@/components/ExtendedConnectPanel";
 import { LifiPerpsConnectPanel } from "@/components/LifiPerpsConnectPanel";
 import { LidoWithdrawalsPanel } from "@/components/LidoWithdrawalsPanel";
-import { ChainOverview } from "@/components/ChainOverview";
 import { VaultRiskPanel } from "@/components/VaultRiskPanel";
 import { SolanaPanel } from "@/components/SolanaPanel";
 import { LiveAsset, LivePortfolio, useLivePortfolio } from "@/hooks/useLivePortfolio";
@@ -91,7 +90,7 @@ export default function TerminalApp() {
   // Everything below Positions used to stack 9 panels in one long scroll
   // (Risk, Vault risk, 4 venue connect panels, History, Chains, Solana) --
   // grouped into tabs so the left column stays scannable instead of dense.
-  const [leftTab, setLeftTab] = useState<"risk" | "venues" | "activity" | "chains">("risk");
+  const [leftTab, setLeftTab] = useState<"risk" | "venues" | "activity">("risk");
 
   const { isConnected } = useAccount();
   const live = useLivePortfolio();
@@ -291,10 +290,6 @@ export default function TerminalApp() {
               <input type="radio" name="left-tab" checked={leftTab === "activity"} onChange={() => setLeftTab("activity")} />
               <span>Activity</span>
             </label>
-            <label className="seg-opt">
-              <input type="radio" name="left-tab" checked={leftTab === "chains"} onChange={() => setLeftTab("chains")} />
-              <span>Chains</span>
-            </label>
           </div>
 
           {leftTab === "risk" && (
@@ -310,15 +305,10 @@ export default function TerminalApp() {
               <LifiPerpsConnectPanel provider="ondo" />
               <LifiPerpsConnectPanel provider="lighter" />
               <LidoWithdrawalsPanel />
-            </>
-          )}
-          {leftTab === "activity" && <HistoryPanel />}
-          {leftTab === "chains" && (
-            <>
-              <ChainOverview />
               <SolanaPanel />
             </>
           )}
+          {leftTab === "activity" && <HistoryPanel />}
         </div>
 
         {/* Trade column */}
@@ -467,7 +457,7 @@ export default function TerminalApp() {
 
         {/* News / Alpha column */}
         <div className="col-scroll" style={{ minWidth: 0, borderLeft: "1px solid var(--color-divider)", padding: "var(--space-4)" }}>
-          <NewsFeed feed={feed} onAddThread={addExample} />
+          <NewsFeed />
         </div>
       </div>
     </div>

@@ -18,7 +18,7 @@ function fmtUsd(n?: number): string {
  * free API (via /api/chains). Each chain shows its total TVL and its biggest
  * protocols by TVL. Falls back gracefully if the upstream API is down.
  */
-export function ChainOverview() {
+export function ChainOverview({ hideDivider }: { hideDivider?: boolean } = {}) {
   const { data, isLoading } = useQuery<LiveChainOverview[]>({
     queryKey: ["chains-overview"],
     queryFn: () => fetch("/api/chains", { cache: "no-store" }).then((r) => r.json()),
@@ -30,7 +30,7 @@ export function ChainOverview() {
 
   return (
     <>
-      <div className="hr" style={{ margin: "var(--space-3) 0" }} />
+      {!hideDivider && <div className="hr" style={{ margin: "var(--space-3) 0" }} />}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <h6 style={{ color: "var(--color-accent)", margin: 0 }}>Chains · live coverage</h6>
         <span className="text-muted" style={{ fontSize: 11 }}>
