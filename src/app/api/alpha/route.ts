@@ -70,7 +70,10 @@ const MAX_STALE_MS = 30 * 60_000;
  */
 export async function GET() {
   try {
-    const res = await fetch("https://api.llama.fi/protocols", { next: { revalidate: 900 } });
+    const res = await fetch("https://api.llama.fi/protocols", {
+      next: { revalidate: 900 },
+      signal: AbortSignal.timeout(8000),
+    });
     if (!res.ok) throw new Error(`DefiLlama responded ${res.status}`);
     const data: RawProtocol[] = await res.json();
 
@@ -117,8 +120,14 @@ export async function GET() {
     const entries = [...newProtocols, ...momentum];
     lastGood = { entries, fetchedAt: Date.now() };
     return NextResponse.json<AlphaEntry[]>(entries);
-  } catch {
+  } catch (err) {
     const usable = lastGood && Date.now() - lastGood.fetchedAt <= MAX_STALE_MS;
+    console.error(
+      `[api/alpha] DefiLlama fetch failed: ${err instanceof Error ? err.message : String(err)}` +
+        (usable
+          ? ` — serving cached snapshot from ${Math.round((Date.now() - lastGood!.fetchedAt) / 1000)}s ago`
+          : " — no usable cached snapshot, returning empty array"),
+    );
     return NextResponse.json<AlphaEntry[]>(usable ? lastGood!.entries : []);
   }
 }
