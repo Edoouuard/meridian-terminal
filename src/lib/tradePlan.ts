@@ -528,17 +528,27 @@ const BETA_NEUTRAL_VENUE_NOTE: Record<string, string> = {
 };
 
 /**
- * Protocols that can take a plain supply/lend leg, both already wired for
- * live execution (see ThreadCard's ExecuteButton / MorphoExecuteButton).
- * Reliability here isn't a number we'd have to invent: Morpho's leg already
- * renders Philidor's live risk score (LegRiskBadge) once it's the active
- * variant, so the honest "protocol reliability" signal the user asked for
- * comes from real, already-fetched data instead of a made-up score.
+ * Protocols that can take a plain supply/lend leg, all already wired for
+ * live execution (ExecuteButton / MorphoExecuteButton / Compound's resolver
+ * in assetMap.ts). Reliability here isn't a number we'd have to invent:
+ * Morpho's leg already renders Philidor's live risk score (LegRiskBadge)
+ * once it's the active variant, so the honest "protocol reliability"
+ * signal the user asked for comes from real, already-fetched data instead
+ * of a made-up score. Compound is USDC-only (see
+ * COMPOUND_V3_USDC_COMET_BY_CHAIN) — filtered out below for any other asset.
  */
-const SUPPLY_PROTOCOLS = ["Aave", "Morpho"] as const;
+const SUPPLY_PROTOCOLS = ["Aave", "Morpho", "Compound"] as const;
 const SUPPLY_PROTOCOL_NOTE: Record<string, string> = {
   Aave: "Established money market, deepest liquidity — pooled risk across all listed assets.",
   Morpho: "Curated ERC-4626 vaults — safety varies by vault; its live Philidor risk score (Prime/Core/Edge) shows once selected.",
+  Compound: "Isolated per-market design (each base asset is its own market) — separate risk from Aave's shared pool.",
+};
+
+/** Protocols that can take a plain borrow leg with real live execution. Compound is USDC-only, same constraint as the supply picker. */
+const BORROW_PROTOCOLS = ["Aave", "Compound"] as const;
+const BORROW_PROTOCOL_NOTE: Record<string, string> = {
+  Aave: "Established money market, deepest liquidity — pooled risk across all listed assets.",
+  Compound: "Isolated per-market design (each base asset is its own market) — separate risk from Aave's shared pool.",
 };
 
 /** Leverage tiers offered for a directional perp when the thesis didn't pin an exact leverage itself. */
@@ -601,24 +611,50 @@ export function parseThesisVariants(rawText: string): TradePlan[] {
     }));
   }
 
-  // Only offer the Aave/Morpho choice when the thesis didn't itself name a
-  // *different* protocol (base.protocol is the raw parsed mention, before
-  // parseThesis defaulted an unset one to Aave) — naming e.g. Compound must
-  // still route there untouched, not get silently overridden by this picker.
-  if (base.intent === "supply" && (base.protocol === undefined || (SUPPLY_PROTOCOLS as readonly string[]).includes(base.protocol))) {
+  // Only offer the picker when the thesis didn't itself name a protocol
+  // outside what's actually eligible for this asset (base.protocol is the
+  // raw parsed mention, before parseThesis defaulted an unset one to Aave)
+  // — naming e.g. Curve, or Compound for a non-USDC asset, must still route
+  // there untouched, not get silently overridden by this picker.
+  if (base.intent === "supply") {
     const leg = base.legs[0];
-    const named = (SUPPLY_PROTOCOLS as readonly string[]).includes(leg.protocol) ? leg.protocol : undefined;
-    const ordered = named ? [named, ...SUPPLY_PROTOCOLS.filter((p) => p !== named)] : [...SUPPLY_PROTOCOLS];
     const asset = base.asset ?? "USDC";
-    const size = base.sizeUsd ?? 0;
-    return ordered.map((p) => ({
-      ...base,
-      protocol: p,
-      legs: [{ ...leg, protocol: p }],
-      summary: `Supply ~${fmtUsd(size)} ${asset} as collateral on ${p} to earn yield while keeping it ready to borrow against.`,
-      variantLabel: p,
-      variantNote: SUPPLY_PROTOCOL_NOTE[p],
-    }));
+    const eligible: readonly string[] = asset === "USDC" ? SUPPLY_PROTOCOLS : SUPPLY_PROTOCOLS.filter((p) => p !== "Compound");
+    if (base.protocol === undefined || eligible.includes(base.protocol)) {
+      const named = eligible.includes(leg.protocol) ? leg.protocol : undefined;
+      const ordered = named ? [named, ...eligible.filter((p) => p !== named)] : [...eligible];
+      const size = base.sizeUsd ?? 0;
+      return ordered.map((p) => ({
+        ...base,
+        protocol: p,
+        legs: [{ ...leg, protocol: p }],
+        summary: `Supply ~${fmtUsd(size)} ${asset} as collateral on ${p} to earn yield while keeping it ready to borrow against.`,
+        variantLabel: p,
+        variantNote: SUPPLY_PROTOCOL_NOTE[p],
+      }));
+    }
+  }
+
+  // Same pattern for borrow: only Aave and Compound (USDC only) have real
+  // borrow execution wired — Morpho isn't offered here since this harness
+  // only has a withdraw-your-own-position flow for it, not opening new debt.
+  if (base.intent === "borrow") {
+    const leg = base.legs[0];
+    const asset = base.asset ?? "USDC";
+    const eligible: readonly string[] = asset === "USDC" ? BORROW_PROTOCOLS : BORROW_PROTOCOLS.filter((p) => p !== "Compound");
+    if (eligible.length > 1 && (base.protocol === undefined || eligible.includes(base.protocol))) {
+      const named = eligible.includes(leg.protocol) ? leg.protocol : undefined;
+      const ordered = named ? [named, ...eligible.filter((p) => p !== named)] : [...eligible];
+      const size = base.sizeUsd ?? 0;
+      return ordered.map((p) => ({
+        ...base,
+        protocol: p,
+        legs: [{ ...leg, protocol: p }],
+        summary: `Borrow ~${fmtUsd(size)} ${asset} against your collateral on ${p} (variable rate).`,
+        variantLabel: p,
+        variantNote: BORROW_PROTOCOL_NOTE[p],
+      }));
+    }
   }
 
   return [base];

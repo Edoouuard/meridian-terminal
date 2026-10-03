@@ -41,6 +41,10 @@ export const EXECUTABLE_VENUES: { venue: string; side: string; orderType: Order[
   { venue: "Aave", side: "Repay", orderType: "repay", protocol: "aave" },
   { venue: "Aave", side: "Borrow", orderType: "borrow", protocol: "aave" },
   { venue: "Aave", side: "Withdraw", orderType: "withdraw", protocol: "aave" },
+  { venue: "Compound", side: "Supply", orderType: "supply", protocol: "compound" },
+  { venue: "Compound", side: "Repay", orderType: "repay", protocol: "compound" },
+  { venue: "Compound", side: "Borrow", orderType: "borrow", protocol: "compound" },
+  { venue: "Compound", side: "Withdraw", orderType: "withdraw", protocol: "compound" },
   { venue: "L1", side: "Transfer", orderType: "transfer", protocol: "eth" },
 ];
 
@@ -215,6 +219,54 @@ export function resolveOrderForLeg(
     };
   }
 
+  // --- Compound III supply / repay / borrow / withdraw (executable, USDC
+  // market only) -------------------------------------------------------------
+  // Compound has no single cross-asset pool like Aave — the USDC Comet market
+  // is the only one wired (see COMPOUND_V3_USDC_COMET_BY_CHAIN's comment), so
+  // this only resolves for a USDC leg. A non-USDC "supply to Compound" thesis
+  // honestly falls through to the unsupported case below rather than silently
+  // mis-targeting a market that doesn't exist for that asset.
+  if (protocol === "compound") {
+    const orderType: Order["type"] | undefined =
+      side === "repay"
+        ? "repay"
+        : side === "supply"
+          ? "supply"
+          : side === "borrow"
+            ? "borrow"
+            : side === "withdraw"
+              ? "withdraw"
+              : side === "approve"
+                ? "approve"
+                : undefined;
+    if (!orderType) {
+      return { unsupported: `Compound ${leg.side} is not wired for live execution yet` };
+    }
+    const symbol = bareSymbol(leg.asset);
+    if (symbol !== "USDC") {
+      return { unsupported: `Only Compound's USDC market is wired — "${symbol}" isn't.` };
+    }
+    const token = findToken(symbol, resolveChainId);
+    if (!token) {
+      return {
+        unsupported: `Compound ${orderType} of USDC is not wired yet: no tracked USDC address on ${resolveChainId === 1 ? "mainnet" : "chain " + resolveChainId}.`,
+      };
+    }
+    const quote = quoteFor(token.symbol, token.decimals);
+    if (!quote) {
+      return { unsupported: "No live price for USDC — cannot size this order safely. Price feeds down?" };
+    }
+    return {
+      type: orderType,
+      protocol: "compound",
+      symbol: token.symbol,
+      token: token.address,
+      amount: quote.amountBase,
+      chainId: resolveChainId,
+      decimals: token.decimals,
+    };
+  }
+
   // --- Lido staking (executable, ETH only, mainnet only) --------------------
   if (protocol === "lido" && side === "stake") {
     const symbol = bareSymbol(leg.asset);
@@ -283,6 +335,17 @@ export function approveOrderFor(order: Order): Order | null {
     return {
       type: "approve",
       protocol: "aave",
+      token: order.token,
+      symbol: order.symbol,
+      amount: order.amount,
+      chainId: order.chainId,
+      decimals: order.decimals,
+    };
+  }
+  if (order.protocol === "compound" && order.type === "supply" && order.token) {
+    return {
+      type: "approve",
+      protocol: "compound",
       token: order.token,
       symbol: order.symbol,
       amount: order.amount,

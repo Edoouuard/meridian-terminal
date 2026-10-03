@@ -87,6 +87,27 @@ export const AAVE_V3_POOL_BY_CHAIN: Record<number, Address> = {
 
 export const STETH_ADDRESS: Address = "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84";
 
+/**
+ * Compound III (Comet) USDC-market proxy addresses. Compound has no single
+ * pool like Aave — each Comet is its own base-asset market (USDC, WETH,
+ * USDT, ...) with other assets usable only as collateral against it. The
+ * USDC market is the most liquid and the only one wired here (same scoping
+ * choice as Lido being ETH-only). Verified 2026-10-03 against
+ * compound-finance/comet's own deployments/<network>/usdc/roots.json
+ * (the "comet" field — this is Compound's own deployment registry, the
+ * same one their tooling/frontend reads), cross-checked against a second
+ * independent source for the mainnet address. Arbitrum has both a native-
+ * USDC market ("usdc") and a bridged-USDC.e one ("usdc.e") — this is the
+ * native one, matching TRACKED_TOKENS_BY_CHAIN's native USDC elsewhere in
+ * this file. Wrong addresses here would silently misreport or misdirect
+ * real money — double-check any change against a second source.
+ */
+export const COMPOUND_V3_USDC_COMET_BY_CHAIN: Record<number, Address> = {
+  [mainnet.id]: "0xc3d688B66703497DAA19211EEdff47f25384cdc3",
+  [base.id]: "0xb125E6687d4313864e53df431d5425969c15Eb2F",
+  [arbitrum.id]: "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf",
+};
+
 export interface TrackedToken {
   symbol: string;
   address: Address;

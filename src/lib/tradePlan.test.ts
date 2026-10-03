@@ -168,32 +168,66 @@ describe("tradePlan — parseThesisVariants (risk-tiered alternatives)", () => {
     expect(variants[0].leverage).toBe(6);
   });
 
-  it("offers Aave vs Morpho for a generic supply thesis, with the live Philidor score deferred to LegRiskBadge rather than an invented number", () => {
+  it("offers Aave vs Morpho vs Compound for a generic USDC supply thesis, with the live Philidor score deferred to LegRiskBadge rather than an invented number", () => {
     const variants = parseThesisVariants("supply 5k USDC for yield");
-    expect(variants).toHaveLength(2);
-    expect(variants.map((v) => v.variantLabel)).toEqual(["Aave", "Morpho"]);
+    expect(variants).toHaveLength(3);
+    expect(variants.map((v) => v.variantLabel)).toEqual(["Aave", "Morpho", "Compound"]);
     for (const v of variants) {
       expect(v.legs[0]).toMatchObject({ side: "Supply", protocol: v.variantLabel });
       expect(v.variantNote).toBeTruthy();
     }
   });
 
-  it("names Morpho first when the thesis asked for it, still offering Aave as the alternative", () => {
-    const variants = parseThesisVariants("supply 5k USDC to Morpho");
-    expect(variants.map((v) => v.variantLabel)).toEqual(["Morpho", "Aave"]);
+  it("excludes Compound from the supply picker for a non-USDC asset -- it only has a USDC market wired", () => {
+    const variants = parseThesisVariants("supply 5k ETH for yield");
+    expect(variants.map((v) => v.variantLabel)).toEqual(["Aave", "Morpho"]);
   });
 
-  it("does not offer the Aave/Morpho picker when the thesis named a different protocol", () => {
+  it("names Morpho first when the thesis asked for it, still offering Aave and Compound as alternatives", () => {
+    const variants = parseThesisVariants("supply 5k USDC to Morpho");
+    expect(variants.map((v) => v.variantLabel)).toEqual(["Morpho", "Aave", "Compound"]);
+  });
+
+  it("names Compound first when the thesis asked for it, for a USDC supply", () => {
     const variants = parseThesisVariants("supply 5k USDC to Compound");
+    expect(variants.map((v) => v.variantLabel)).toEqual(["Compound", "Aave", "Morpho"]);
+    expect(variants[0].legs[0].protocol).toBe("Compound");
+  });
+
+  it("does not offer the supply picker when the thesis named a protocol with no real alternative here", () => {
+    const variants = parseThesisVariants("supply 5k USDC to Curve");
+    expect(variants).toHaveLength(1);
+    expect(variants[0].variantLabel).toBeUndefined();
+    expect(variants[0].legs[0].protocol).toBe("Curve");
+  });
+
+  it("does not offer Compound as a supply alternative for a non-USDC asset even when named explicitly for a different asset", () => {
+    // Compound is only a real option for USDC -- naming it for ETH must route there untouched, not get swapped for Aave/Morpho.
+    const variants = parseThesisVariants("supply 5k ETH to Compound");
     expect(variants).toHaveLength(1);
     expect(variants[0].variantLabel).toBeUndefined();
     expect(variants[0].legs[0].protocol).toBe("Compound");
   });
 
-  it("returns a single, unlabeled variant for intents with no honest alternative to offer", () => {
+  it("offers Aave vs Compound for a USDC borrow thesis", () => {
     const variants = parseThesisVariants("borrow 10k USDC on Aave");
+    expect(variants).toHaveLength(2);
+    expect(variants.map((v) => v.variantLabel)).toEqual(["Aave", "Compound"]);
+    for (const v of variants) {
+      expect(v.legs[0]).toMatchObject({ side: "Borrow", protocol: v.variantLabel });
+    }
+  });
+
+  it("does not offer a borrow picker for a non-USDC asset -- Compound has no other market wired", () => {
+    const variants = parseThesisVariants("borrow 10k ETH on Aave");
     expect(variants).toHaveLength(1);
-    expect(variants[0]).toEqual(parseThesis("borrow 10k USDC on Aave"));
+    expect(variants[0].variantLabel).toBeUndefined();
+  });
+
+  it("returns a single, unlabeled variant for intents with no honest alternative to offer", () => {
+    const variants = parseThesisVariants("repay 2k USDC debt on Aave");
+    expect(variants).toHaveLength(1);
+    expect(variants[0]).toEqual(parseThesis("repay 2k USDC debt on Aave"));
   });
 });
 

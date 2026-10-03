@@ -120,6 +120,72 @@ describe("execution — buildExecution aave plans", () => {
   });
 });
 
+describe("execution — buildExecution compound (Comet) plans", () => {
+  const COMET_MAINNET = "0xc3d688B66703497DAA19211EEdff47f25384cdc3";
+  const compoundOrder = (overrides: Partial<Order> = {}) => baseOrder({ protocol: "compound", ...overrides });
+
+  it("builds a supply plan with no sender patching -- Comet always acts on msg.sender", () => {
+    const plan = buildExecution(compoundOrder()) as ExecutionPlan;
+    expect(plan.address).toBe(COMET_MAINNET);
+    expect(plan.functionName).toBe("supply");
+    expect(plan.args).toEqual([USDC_MAINNET, 1_000_000_000n]);
+    expect(plan.senderIndex).toBeUndefined();
+  });
+
+  it("repay reuses the same supply() call as a plain supply -- Comet has no separate repay function", () => {
+    const supply = buildExecution(compoundOrder()) as ExecutionPlan;
+    const repay = buildExecution(compoundOrder({ type: "repay" })) as ExecutionPlan;
+    expect(repay.functionName).toBe(supply.functionName);
+    expect(repay.address).toBe(supply.address);
+    expect(repay.args).toEqual(supply.args);
+    expect(repay.description).toContain("Repay");
+  });
+
+  it("builds a borrow plan via withdraw() -- Comet has no separate borrow function", () => {
+    const plan = buildExecution(compoundOrder({ type: "borrow" })) as ExecutionPlan;
+    expect(plan.functionName).toBe("withdraw");
+    expect(plan.args).toEqual([USDC_MAINNET, 1_000_000_000n]);
+    expect(plan.senderIndex).toBeUndefined();
+  });
+
+  it("withdraw reuses the same withdraw() call as borrow", () => {
+    const borrow = buildExecution(compoundOrder({ type: "borrow" })) as ExecutionPlan;
+    const withdraw = buildExecution(compoundOrder({ type: "withdraw" })) as ExecutionPlan;
+    expect(withdraw.functionName).toBe(borrow.functionName);
+    expect(withdraw.args).toEqual(borrow.args);
+    expect(withdraw.description).toContain("Withdraw");
+  });
+
+  it("builds an approve plan against the Comet market by default", () => {
+    const plan = buildExecution(compoundOrder({ type: "approve" })) as ExecutionPlan;
+    expect(plan.functionName).toBe("approve");
+    expect(plan.address).toBe(USDC_MAINNET);
+    expect(plan.args?.[0]).toBe(COMET_MAINNET);
+  });
+
+  it("resolves the right Comet per chain (Base differs from mainnet)", () => {
+    const plan = buildExecution(compoundOrder({ chainId: 8453 })) as ExecutionPlan;
+    expect(plan.address).toBe("0xb125E6687d4313864e53df431d5425969c15Eb2F");
+    expect(plan.chainId).toBe(8453);
+  });
+
+  it("rejects a compound order on a chain with no wired USDC market", () => {
+    const res = buildExecution(compoundOrder({ chainId: 137 })); // Polygon -- not wired
+    expect("error" in res).toBe(true);
+    expect((res as { error: string }).error).toContain("not supported");
+  });
+
+  it("requires a token address for compound", () => {
+    const res = buildExecution(compoundOrder({ token: undefined }));
+    expect((res as { error: string }).error).toContain("requires a token address");
+  });
+
+  it("rejects an unsupported compound order type", () => {
+    const res = buildExecution(compoundOrder({ type: "transfer" as Order["type"] }));
+    expect((res as { error: string }).error).toContain("does not yet support order type");
+  });
+});
+
 describe("execution — eth native transfer + applySender", () => {
   it("builds a native transfer with a value", () => {
     const plan = buildExecution({
