@@ -31,6 +31,8 @@ Before generating strategies, you MUST internally analyze:
 
 Only AFTER this analysis, compose 3 strategies that are genuinely different approaches — not just the same idea at different leverage levels.
 
+IMPORTANT: The user message will contain LIVE YIELD DATA (real-time APYs, funding rates, vault yields) injected before the user's thesis. You MUST use these real numbers in your strategies — never guess or use outdated rates. Reference the actual live APY/APR in your leg notes and summaries.
+
 ## Available Protocols (NO preference order — choose based on user's goals)
 
 ### Lending / Yield
@@ -122,6 +124,21 @@ Return ONLY valid JSON (no markdown fences, no explanation before or after):
   ]
 }`;
 
+/** Fetch live yield context from our own aggregator route (server-side internal call). */
+async function fetchYieldContext(baseUrl: string): Promise<string> {
+  try {
+    const res = await fetch(`${baseUrl}/api/yield-context`, {
+      signal: AbortSignal.timeout(10000),
+      cache: "no-store",
+    });
+    if (!res.ok) return "";
+    const data = await res.json();
+    return data.summary ?? "";
+  } catch {
+    return "";
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const { thesis } = await req.json();
@@ -139,6 +156,17 @@ export async function POST(req: NextRequest) {
 
     const model = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
 
+    // Fetch live yield data in parallel with nothing else — it's the only async dep
+    const proto = req.headers.get("x-forwarded-proto") ?? "https";
+    const host = req.headers.get("host") ?? "localhost:3000";
+    const baseUrl = `${proto}://${host}`;
+    const yieldContext = await fetchYieldContext(baseUrl);
+
+    // Build the user message with live yield data injected
+    const userMessage = yieldContext
+      ? `${yieldContext}\n\n---\n\nUser thesis: ${thesis.trim()}`
+      : thesis.trim();
+
     const response = await fetch(OPENROUTER_URL, {
       method: "POST",
       headers: {
@@ -153,7 +181,7 @@ export async function POST(req: NextRequest) {
         temperature: 0.4,
         messages: [
           { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: thesis.trim() },
+          { role: "user", content: userMessage },
         ],
       }),
     });
