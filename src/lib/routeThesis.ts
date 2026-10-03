@@ -1,16 +1,24 @@
 import { ThreadItem, ThreadType } from "@/lib/data";
-import { parseThesis, planToThreadType } from "@/lib/tradePlan";
+import { parseThesisVariants, planToThreadType, type TradePlan } from "@/lib/tradePlan";
 
 /**
  * Route a raw thesis string to a ThreadItem. The heavyweight parsing lives in
- * tradePlan.parseThesis(); here we just run it and stamp the resulting plan
- * (plus a backward-compatible ThreadType) onto the ThreadItem so the card
- * renderer can build dynamic order rows from it.
+ * tradePlan.parseThesisVariants(); here we pick which candidate is active by
+ * default and stamp it (plus every alternative, plus a backward-compatible
+ * ThreadType) onto the ThreadItem so the card renderer can build dynamic
+ * order rows from it.
+ *
+ * The active `plan` is always the variant matching parseThesis()'s own
+ * pre-existing default (the "Balanced" leverage tier for a directional perp,
+ * or variants[0] otherwise, which parseThesisVariants() already orders to
+ * match the old single-plan default) — so a thesis that now has alternatives
+ * still renders exactly as it did before anyone picks a different one.
  */
 export function routeThesis(rawText: string): ThreadItem {
   const text = (rawText ?? "").trim();
-  const plan = parseThesis(text);
-  return { type: planToThreadType(plan), text, plan };
+  const variants = parseThesisVariants(text);
+  const plan: TradePlan = variants.find((v) => v.variantLabel?.startsWith("Balanced")) ?? variants[0];
+  return { type: planToThreadType(plan), text, plan, variants: variants.length > 1 ? variants : undefined };
 }
 
 /**

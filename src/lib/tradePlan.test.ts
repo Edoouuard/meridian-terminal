@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseThesis, planToThreadType } from "@/lib/tradePlan";
+import { parseThesis, parseThesisVariants, planToThreadType } from "@/lib/tradePlan";
 
 describe("tradePlan — parseThesis directional", () => {
   it("parses 'long HYPE 6k leverage 6' into a directional HYPE plan at 6x", () => {
@@ -131,6 +131,47 @@ describe("tradePlan — borrowing / supply / repay intents", () => {
   it("does not confuse 'unstake' with the unrelated 'stake' intent", () => {
     // \bstake\b must not match inside "unstake".
     expect(parseThesis("unstake my ETH from Lido").intent).toBe("withdraw");
+  });
+});
+
+describe("tradePlan — parseThesisVariants (risk-tiered alternatives)", () => {
+  it("offers all 3 perp venues for a beta-neutral farm, naming the mentioned one first", () => {
+    const variants = parseThesisVariants("Farm points on Lighter without directional risk");
+    expect(variants).toHaveLength(3);
+    expect(variants.map((v) => v.variantLabel)).toEqual(["Lighter", "Extended", "Ondo"]);
+    // Every variant is still a full, independently executable plan.
+    for (const v of variants) {
+      expect(v.legs.map((l) => l.protocol)).toEqual(["Hyperliquid", v.variantLabel]);
+      expect(v.variantNote).toBeTruthy();
+    }
+  });
+
+  it("defaults the beta-neutral venue order to Extended first when none is named", () => {
+    const variants = parseThesisVariants("Farm HYPE points without directional risk");
+    expect(variants.map((v) => v.variantLabel)).toEqual(["Extended", "Lighter", "Ondo"]);
+  });
+
+  it("offers 3 leverage tiers for a directional perp with no explicit leverage", () => {
+    const variants = parseThesisVariants("I think SOL outperforms this month");
+    expect(variants).toHaveLength(3);
+    expect(variants.map((v) => v.variantLabel)).toEqual(["Conservative · 2x", "Balanced · 4x", "Aggressive · 8x"]);
+    for (const v of variants) {
+      expect(v.legs[0].side).toBe("Long");
+      expect(v.legs[0].protocol).toBe("Hyperliquid");
+    }
+  });
+
+  it("does not offer leverage variants when the thesis already pins an exact leverage", () => {
+    const variants = parseThesisVariants("long HYPE 6k leverage 6");
+    expect(variants).toHaveLength(1);
+    expect(variants[0].variantLabel).toBeUndefined();
+    expect(variants[0].leverage).toBe(6);
+  });
+
+  it("returns a single, unlabeled variant for intents with no honest alternative to offer", () => {
+    const variants = parseThesisVariants("supply 5k ETH to Aave");
+    expect(variants).toHaveLength(1);
+    expect(variants[0]).toEqual(parseThesis("supply 5k ETH to Aave"));
   });
 });
 

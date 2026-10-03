@@ -8,7 +8,7 @@ import { ThreadItem, fmtUsd } from "@/lib/data";
 import { resolveOrderForLeg, protocolLabel, approveOrderFor, findToken, DEFAULT_CHAIN_ID } from "@/lib/assetMap";
 import { CHAIN_LABEL, STETH_ADDRESS } from "@/lib/onchain";
 import type { Order } from "@/lib/execution";
-import type { TradeLeg } from "@/lib/tradePlan";
+import type { TradeLeg, TradePlan } from "@/lib/tradePlan";
 import { useExecute, explorerUrlFor } from "@/hooks/useExecute";
 import { useHyperliquid } from "@/hooks/useHyperliquid";
 import { useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
@@ -1153,7 +1153,40 @@ function PlanCard({ item }: { item: ThreadItem }) {
   );
 }
 
-export function ThreadCard({ item }: { item: ThreadItem }) {
+/**
+ * Alternative plans for the same thesis (see tradePlan.parseThesisVariants) —
+ * e.g. which perp venue takes a beta-neutral short leg, or a directional
+ * perp's leverage tier. Switching never re-parses the thesis; it just swaps
+ * which already-computed TradePlan is active, so the risk-relevant fields
+ * (leverage, venue) always match what variantNote described.
+ */
+function VariantSwitcher({ variants, active, onSelect }: { variants: TradePlan[]; active: TradePlan; onSelect?: (plan: TradePlan) => void }) {
+  return (
+    <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+      <p className="text-muted" style={{ margin: 0, fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+        Alternatives
+      </p>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {variants.map((v, i) => {
+          const isActive = v === active;
+          return (
+            <button
+              key={i}
+              onClick={() => !isActive && onSelect?.(v)}
+              title={v.variantNote}
+              className={`tag ${isActive ? "tag-accent" : "tag-outline"}`}
+              style={{ background: isActive ? undefined : "none", cursor: isActive ? "default" : "pointer", font: "inherit" }}
+            >
+              {v.variantLabel}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+export function ThreadCard({ item, onSelectVariant }: { item: ThreadItem; onSelectVariant?: (plan: TradePlan) => void }) {
   // Every ThreadItem reaching this component is built by routeThesis() (typed
   // prompts, quick-prompt buttons, and news/alpha "discuss" links all go
   // through it now), which always attaches a `.plan` — so this always
@@ -1162,7 +1195,14 @@ export function ThreadCard({ item }: { item: ThreadItem }) {
   // case of a plan-less ThreadItem — `plan` is optional in the type, so
   // something could construct one without it.
   if (item.plan) {
-    return <PlanCard item={item} />;
+    return (
+      <>
+        <PlanCard item={item} />
+        {item.variants && item.variants.length > 1 && (
+          <VariantSwitcher variants={item.variants} active={item.plan} onSelect={onSelectVariant} />
+        )}
+      </>
+    );
   }
 
   return (

@@ -32,3 +32,22 @@ describe("routeThesis — EXAMPLE_THESIS_FOR_TYPE round-trips", () => {
     expect(routeThesis(EXAMPLE_THESIS_FOR_TYPE.hedge).plan!.legs[0].protocol).toBe("Hyperliquid");
   });
 });
+
+describe("routeThesis — variant alternatives surface without changing the default plan", () => {
+  it("the betaneutral example carries all 3 venue variants, defaulting to the one it already resolved to", () => {
+    const routed = routeThesis(EXAMPLE_THESIS_FOR_TYPE.betaneutral);
+    expect(routed.variants).toHaveLength(3);
+    expect(routed.plan).toBe(routed.variants![0]); // Extended, same as the single-plan default above.
+  });
+
+  it("the perp example carries 3 leverage-tier variants, defaulting to Balanced (the old fixed 4x default)", () => {
+    const routed = routeThesis(EXAMPLE_THESIS_FOR_TYPE.perp);
+    expect(routed.variants).toHaveLength(3);
+    expect(routed.plan!.variantLabel).toBe("Balanced · 4x");
+    expect(routed.plan!.leverage).toBe(4);
+  });
+
+  it("an intent with no honest alternative carries no variants", () => {
+    expect(routeThesis(EXAMPLE_THESIS_FOR_TYPE.pendle).variants).toBeUndefined();
+  });
+});
