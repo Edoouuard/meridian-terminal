@@ -21,7 +21,7 @@ import { LiveAsset, LivePortfolio, useLivePortfolio } from "@/hooks/useLivePortf
 import { useLiveFeed } from "@/hooks/useLiveFeed";
 import { NewsFeed } from "@/components/NewsFeed";
 import { CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
-import { EXAMPLE_THESIS_FOR_TYPE, routeThesis } from "@/lib/routeThesis";
+import { EXAMPLE_THESIS_FOR_TYPE, routeThesis, type TradePlan } from "@/lib/routeThesis";
 import { recordExecution } from "@/lib/history";
 
 // Expose the local order-history API on the page module so real execution
@@ -179,6 +179,13 @@ export default function TerminalApp() {
     const routed = routeThesis(text);
     setThread((cur) => cur.concat([routed]));
     setPromptText("");
+  }
+
+  // Switches which already-computed variant (see tradePlan.parseThesisVariants)
+  // is the active plan for one thread card — never re-parses the thesis, just
+  // swaps the pointer, so leverage/venue stay exactly what the user picked.
+  function selectVariant(index: number, plan: TradePlan) {
+    setThread((cur) => cur.map((item, i) => (i === index ? { ...item, plan } : item)));
   }
 
   return (
@@ -357,7 +364,7 @@ export default function TerminalApp() {
             </div>
 
             {thread.map((item, i) => (
-              <ThreadCard key={i} item={item} />
+              <ThreadCard key={i} item={item} onSelectVariant={(plan) => selectVariant(i, plan)} />
             ))}
 
             {isConnected && live.isLoading && (

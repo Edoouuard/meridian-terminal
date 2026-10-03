@@ -63,12 +63,18 @@ export interface TradePlan {
   protocol?: string;
   legs: TradeLeg[];
   summary: string;
+  /** Short label identifying this plan among sibling variants (e.g. "Extended", "Aggressive · 8x"). Unset for a thesis with only one possible plan. */
+  variantLabel?: string;
+  /** One honest, factual line distinguishing this variant from its siblings — never a fabricated risk score. */
+  variantNote?: string;
 }
 
 /** Augment ThreadItem with an optional parsed plan (keeps data.ts untouched). */
 declare module "@/lib/data" {
   interface ThreadItem {
     plan?: TradePlan;
+    /** Alternative plans for the same thesis, when the intent has more than one honest way to run it. Present only when length > 1. */
+    variants?: TradePlan[];
   }
 }
 
@@ -509,4 +515,77 @@ export function parseThesis(rawText: string): TradePlan {
   }
 
   return { intent, asset: base, direction, sizeUsd: size, leverage, protocol, legs, summary };
+}
+
+/** Perp venues that can take the short leg of a beta-neutral points farm. */
+const BETA_NEUTRAL_VENUES = ["Extended", "Lighter", "Ondo"] as const;
+
+/** Honest, factual one-liner per venue — never a fabricated risk score. */
+const BETA_NEUTRAL_VENUE_NOTE: Record<string, string> = {
+  Extended: "StarkEx L2 perp venue — needs an Extended API key + Stark key connected in the Extended panel.",
+  Lighter: "zk-rollup perp venue, routed through LI.FI — needs the Lighter panel connected and funded.",
+  Ondo: "Perp venue routed through LI.FI — needs the Ondo panel connected and funded (a sandbox is available for testing).",
+};
+
+/** Leverage tiers offered for a directional perp when the thesis didn't pin an exact leverage itself. */
+const DIRECTIONAL_LEVERAGE_TIERS: { label: string; lev: number; note: string }[] = [
+  { label: "Conservative", lev: 2, note: "Lower leverage: smaller gains and losses, and a larger adverse price move is needed before liquidation." },
+  { label: "Balanced", lev: 4, note: "Meridian's default leverage for a directional perp." },
+  { label: "Aggressive", lev: 8, note: "Higher leverage: amplifies gains and losses, and a smaller adverse price move can trigger liquidation." },
+];
+
+/**
+ * Parse a thesis into one or more candidate TradePlans. Most intents have
+ * exactly one honest way to run them, so this returns a single-element
+ * array identical to parseThesis()'s result — routeThesis() relies on that
+ * to stay a no-op for every intent below. Only the two intents with a real,
+ * non-fabricated choice to offer get more than one:
+ *   - betaNeutral: which perp venue takes the short leg (Extended/Lighter/
+ *     Ondo) — the thesis-named venue (if any) first, so it stays the
+ *     default when a user already said which one they meant.
+ *   - directional, when the thesis didn't itself pin a leverage number:
+ *     a Conservative/Balanced/Aggressive leverage tier, since leverage is
+ *     the one objective, already-modelled risk lever for a perp (not an
+ *     invented score) — "Balanced" matches parseThesis()'s own default (4x)
+ *     so picking no variant behaves exactly as before.
+ * Every variant is tagged with variantLabel/variantNote; the single-variant
+ * case leaves both unset, same as parseThesis() today.
+ */
+export function parseThesisVariants(rawText: string): TradePlan[] {
+  const base = parseThesis(rawText);
+
+  if (base.intent === "betaNeutral") {
+    const shortLeg = base.legs[1];
+    const namedVenue =
+      shortLeg && (BETA_NEUTRAL_VENUES as readonly string[]).includes(shortLeg.protocol) ? shortLeg.protocol : undefined;
+    const ordered = namedVenue ? [namedVenue, ...BETA_NEUTRAL_VENUES.filter((v) => v !== namedVenue)] : [...BETA_NEUTRAL_VENUES];
+    const asset = base.asset ?? "ETH";
+    return ordered.map((venue) => ({
+      ...base,
+      legs: [base.legs[0], { ...shortLeg!, protocol: venue }],
+      summary: `Farm ${asset} points with a long on Hyperliquid paired against an offsetting short on ${venue} — net delta near zero while keeping the volume eligible for points.`,
+      variantLabel: venue,
+      variantNote: BETA_NEUTRAL_VENUE_NOTE[venue],
+    }));
+  }
+
+  if (base.intent === "directional" && base.leverage === undefined) {
+    const dir = base.direction ?? "long";
+    const venue = base.legs[0]?.protocol ?? "Hyperliquid";
+    const list = base.legs.map((l) => l.asset.replace(/\s*PERP$/i, ""));
+    const size = base.sizeUsd ?? 0;
+    return DIRECTIONAL_LEVERAGE_TIERS.map(({ label, lev, note }) => ({
+      ...base,
+      leverage: lev,
+      legs: base.legs.map((leg) => ({ ...leg, leverage: lev })),
+      summary:
+        list.length > 1
+          ? `Open a ${dir} ${list.join(" and ")} position on ${venue}, ~${fmtUsd(size)} notional per leg at ${lev}x leverage (${list.length} legs).`
+          : `Open a ${dir} ${list[0]} position on ${venue} for ~${fmtUsd(size)} notional at ${lev}x leverage.`,
+      variantLabel: `${label} · ${lev}x`,
+      variantNote: note,
+    }));
+  }
+
+  return [base];
 }
