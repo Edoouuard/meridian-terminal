@@ -85,6 +85,13 @@ describe("tradePlan — borrowing / supply / repay intents", () => {
     expect(plan.legs[0].side).toBe("Supply");
   });
 
+  it("parses 'park my USDT at the best yield' as a supply intent", () => {
+    const plan = parseThesis("park my USDT at the best yield");
+    expect(plan.intent).toBe("supply");
+    expect(plan.asset).toBe("USDT");
+    expect(plan.legs[0]).toMatchObject({ side: "Supply", protocol: "Aave" });
+  });
+
   it("parses a repay intent", () => {
     const plan = parseThesis("repay 2k USDC debt on Aave");
     expect(plan.intent).toBe("repay");

@@ -45,30 +45,63 @@ export interface LivePrice {
   change24h: number;
 }
 
+/**
+ * Last successful snapshot, kept in module scope. A warm serverless instance
+ * reuses this across requests, so one CoinGecko rate-limit/outage doesn't
+ * blank every price-dependent surface at once (the ticker, portfolio
+ * valuation, every perp venue's order sizing) — it serves slightly-stale
+ * real data instead of an empty list. Resets on a cold start, same as any
+ * in-memory state; that's an acceptable gap, not a correctness problem,
+ * since the first successful fetch repopulates it.
+ */
+let lastGood: { prices: LivePrice[]; fetchedAt: number } | null = null;
+
+/**
+ * How stale `lastGood` may be before we refuse to serve it. This price feeds
+ * real order sizing across every perp venue — matching the app's existing
+ * "HARD-FAIL pricing, never approximate" rule elsewhere (see quote.ts),
+ * serving a multi-minute-old price to size a live order is its own safety
+ * problem, not just a UX one. 3 minutes is generous for a feed that
+ * revalidates every 30s under normal conditions.
+ */
+const MAX_STALE_MS = 3 * 60_000;
+
+async function fetchFromCoinGecko(ids: string): Promise<LivePrice[]> {
+  const res = await fetch(
+    `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`,
+    { next: { revalidate: 30 }, signal: AbortSignal.timeout(8000) },
+  );
+  if (!res.ok) throw new Error(`CoinGecko responded ${res.status}`);
+
+  const data: Record<string, { usd?: number; usd_24h_change?: number }> = await res.json();
+
+  return Object.entries(COINGECKO_IDS)
+    .map(([symbol, id]) => {
+      const entry = data[id];
+      if (!entry || typeof entry.usd !== "number") return null;
+      return { symbol, price: entry.usd, change24h: entry.usd_24h_change ?? 0 };
+    })
+    .filter((v): v is LivePrice => v !== null);
+}
+
 export async function GET() {
   const ids = Object.values(COINGECKO_IDS).join(",");
 
   try {
-    const res = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${ids}&vs_currencies=usd&include_24hr_change=true`,
-      { next: { revalidate: 30 } },
-    );
-    if (!res.ok) throw new Error(`CoinGecko responded ${res.status}`);
-
-    const data: Record<string, { usd?: number; usd_24h_change?: number }> = await res.json();
-
-    const prices: LivePrice[] = Object.entries(COINGECKO_IDS)
-      .map(([symbol, id]) => {
-        const entry = data[id];
-        if (!entry || typeof entry.usd !== "number") return null;
-        return { symbol, price: entry.usd, change24h: entry.usd_24h_change ?? 0 };
-      })
-      .filter((v): v is LivePrice => v !== null);
-
+    const prices = await fetchFromCoinGecko(ids);
+    if (prices.length === 0) throw new Error("CoinGecko returned no usable prices");
+    lastGood = { prices, fetchedAt: Date.now() };
     return NextResponse.json(prices);
   } catch {
-    // Keyless CoinGecko access can rate-limit or hit a transient error — callers fall
-    // back to the static illustrative ticker data when this returns an empty list.
-    return NextResponse.json<LivePrice[]>([], { status: 502 });
+    // Keyless CoinGecko access can rate-limit or hit a transient error (this is
+    // common for anonymous requests from datacenter/serverless IP ranges). Serve
+    // the last real snapshot this instance fetched rather than an empty list —
+    // every caller (ticker, portfolio valuation, every venue's order sizing)
+    // would otherwise go blank/hard-fail on a single upstream hiccup. Past
+    // MAX_STALE_MS we'd rather hard-fail than size a real order off an old
+    // price, so we fall back to empty — which callers already treat as "no
+    // live price yet" — same as when this instance has never fetched at all.
+    const usable = lastGood && Date.now() - lastGood.fetchedAt <= MAX_STALE_MS;
+    return NextResponse.json<LivePrice[]>(usable ? lastGood!.prices : [], { status: usable ? 200 : 502 });
   }
 }

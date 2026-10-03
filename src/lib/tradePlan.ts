@@ -318,7 +318,7 @@ function resolveIntent(
   if (/repay|rembourser|remboursement|reduce.*debt|pay back/i.test(t)) return "repay";
   if (/\bwithdraw\b|\bunstake\b|\bredeem\b|retirer|retrait/i.test(t)) return "withdraw";
   if (/\bborrow\b|emprunt|emprunter|leverage (up|against)|pull (liquidity|margin)/i.test(t)) return "borrow";
-  if (/\bsupply\b|\blend\b|\bdeposit\b|pr[eè]ter|\bmargin\b/i.test(t)) return "supply";
+  if (/\bsupply\b|\blend\b|\bdeposit\b|\bpark(ed|ing)?\b|\ballocate\b|pr[eè]ter|placer|d[eé]poser|\bmargin\b/i.test(t)) return "supply";
   if (/\bstake\b|staked|stake (to|in)|yield (farm|vault)|lido/i.test(t)) return "stake";
   if (/bridge|cross[- ]chain|move .* (to|onto) (arbitrum|base|optimism|polygon|avalanche|solana)/i.test(t)) return "bridge";
   if (direction || /\b(long|short|buy|sell|bullish|bearish|outperform\w*|underperform\w*)\b/i.test(t)) return "directional";
