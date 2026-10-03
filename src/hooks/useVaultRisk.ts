@@ -19,7 +19,7 @@ export function useVaultRisk(
       if (asset) qs.set("asset", asset);
       if (chain) qs.set("chain", chain);
       if (limit) qs.set("limit", String(limit));
-      const res = await fetch(`/api/vault-risk?${qs.toString()}`);
+      const res = await fetch(`/api/vault-risk?${qs.toString()}`, { cache: "no-store" });
       if (!res.ok) throw new Error("vault-risk fetch failed");
       return res.json();
     },

@@ -5,7 +5,7 @@ export function useLivePrices() {
   return useQuery<LivePrice[]>({
     queryKey: ["live-prices"],
     queryFn: async () => {
-      const res = await fetch("/api/prices");
+      const res = await fetch("/api/prices", { cache: "no-store" });
       if (!res.ok) throw new Error("prices fetch failed");
       return res.json();
     },

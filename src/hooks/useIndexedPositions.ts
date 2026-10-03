@@ -34,7 +34,7 @@ export function useIndexedPositions(address?: string, enabled = false): IndexerP
     const id = setTimeout(() => {
       setLoading(true);
       setError(null);
-      fetch(`/api/positions?address=${encodeURIComponent(address)}`)
+      fetch(`/api/positions?address=${encodeURIComponent(address)}`, { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error("positions request failed"))))
         .then((data) => {
           if (cancelled) return;

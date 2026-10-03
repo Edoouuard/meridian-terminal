@@ -36,7 +36,7 @@ function useAlpha() {
   return useQuery<AlphaEntry[]>({
     queryKey: ["alpha"],
     queryFn: async () => {
-      const res = await fetch("/api/alpha");
+      const res = await fetch("/api/alpha", { cache: "no-store" });
       if (!res.ok) throw new Error("alpha fetch failed");
       return res.json();
     },

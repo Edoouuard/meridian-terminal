@@ -21,7 +21,7 @@ function fmtUsd(n?: number): string {
 export function ChainOverview() {
   const { data, isLoading } = useQuery<LiveChainOverview[]>({
     queryKey: ["chains-overview"],
-    queryFn: () => fetch("/api/chains").then((r) => r.json()),
+    queryFn: () => fetch("/api/chains", { cache: "no-store" }).then((r) => r.json()),
     staleTime: 5 * 60_000,
   });
 
