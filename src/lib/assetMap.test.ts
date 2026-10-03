@@ -65,6 +65,49 @@ describe("assetMap — resolveOrderForLeg (Aave supply on Base)", () => {
   });
 });
 
+describe("assetMap — resolveOrderForLeg (Compound III, USDC market only)", () => {
+  const compoundLeg = (partial: Partial<TradeLeg> = {}) => leg({ protocol: "Compound", ...partial });
+
+  it("routes a USDC supply to Compound's order on Base", () => {
+    const order = resolveOrderForLeg(compoundLeg(), undefined, USDC_PRICE, BASE_CHAIN_ID) as Order;
+    expect(order.type).toBe("supply");
+    expect(order.protocol).toBe("compound");
+    expect(order.token).toBe(BASE_AARCHING);
+    expect(order.amount).toBe(1_000_000_000n);
+  });
+
+  it("maps every side to its order type (supply/repay/borrow/withdraw/approve)", () => {
+    for (const [side, type] of [
+      ["Supply", "supply"],
+      ["Repay", "repay"],
+      ["Borrow", "borrow"],
+      ["Withdraw", "withdraw"],
+      ["Approve", "approve"],
+    ] as const) {
+      const order = resolveOrderForLeg(compoundLeg({ side }), undefined, USDC_PRICE, BASE_CHAIN_ID) as Order;
+      expect(order.type).toBe(type);
+    }
+  });
+
+  it("rejects a non-USDC asset -- only Compound's USDC market is wired", () => {
+    const res = resolveOrderForLeg(compoundLeg({ asset: "ETH" }), undefined, ETH_PRICE, BASE_CHAIN_ID);
+    expect("unsupported" in res).toBe(true);
+    expect(res.unsupported).toContain("Only Compound's USDC market is wired");
+  });
+
+  it("hard-fails with no live price, same as Aave", () => {
+    const res = resolveOrderForLeg(compoundLeg(), undefined, undefined, BASE_CHAIN_ID);
+    expect("unsupported" in res).toBe(true);
+    expect(res.unsupported).toContain("No live price for USDC");
+  });
+
+  it("returns unsupported for an unwired Compound side", () => {
+    const res = resolveOrderForLeg(compoundLeg({ side: "Stake" }), undefined, USDC_PRICE, BASE_CHAIN_ID);
+    expect("unsupported" in res).toBe(true);
+    expect(res.unsupported).toContain("not wired");
+  });
+});
+
 const ETH_PRICE: PriceEntry[] = [{ symbol: "ETH", price: 4000 }];
 
 describe("assetMap — resolveOrderForLeg (Lido stake)", () => {
@@ -190,6 +233,14 @@ describe("assetMap — approveOrderFor", () => {
   it("returns null for non-supply or non-token orders", () => {
     expect(approveOrderFor({ ...supply, type: "repay" })).toBeNull();
     expect(approveOrderFor({ ...supply, token: undefined })).toBeNull();
+  });
+
+  it("derives an approve order from a Compound supply order", () => {
+    const approve = approveOrderFor({ ...supply, protocol: "compound" });
+    expect(approve).not.toBeNull();
+    expect(approve!.type).toBe("approve");
+    expect(approve!.protocol).toBe("compound");
+    expect(approve!.token).toBe(BASE_AARCHING);
   });
 
   it("derives an approve order from a Uniswap swap order", () => {

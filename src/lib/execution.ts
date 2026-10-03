@@ -1,6 +1,6 @@
 import type { Abi, Address } from "viem";
 import { parseUnits, zeroAddress } from "viem";
-import { AAVE_V3_POOL_BY_CHAIN, CHAIN_LABEL, STETH_ADDRESS } from "./onchain";
+import { AAVE_V3_POOL_BY_CHAIN, CHAIN_LABEL, COMPOUND_V3_USDC_COMET_BY_CHAIN, STETH_ADDRESS } from "./onchain";
 import { SWAP_ROUTER02_EXACT_INPUT_SINGLE_ABI, UNISWAP_SWAP_ROUTER02_BY_CHAIN } from "./integrations/uniswap";
 import { ERC4626_DEPOSIT_ABI, ERC4626_WITHDRAW_ABI } from "./integrations/morpho";
 import {
@@ -27,7 +27,7 @@ import {
  */
 
 export type OrderType = "supply" | "repay" | "borrow" | "withdraw" | "transfer" | "approve" | "stake" | "swap" | "unstake" | "claim";
-export type OrderProtocol = "aave" | "eth" | "lido" | "uniswap" | "morpho";
+export type OrderProtocol = "aave" | "eth" | "lido" | "uniswap" | "morpho" | "compound";
 
 /**
  * Protocol-agnostic order produced by the trade engine. Carries enough to build a
@@ -196,6 +196,42 @@ export const LIDO_STETH_SUBMIT_ABI = [
   },
 ] as const;
 
+/**
+ * Compound III (Comet) `supply`/`withdraw` — verified against
+ * compound-finance/comet's CometMainInterface.sol. Comet collapses what
+ * Aave splits into 4 functions into just these 2: `supply(asset, amount)`
+ * pays down debt first if any exists, otherwise adds to your supplied
+ * balance (so it serves both Meridian's "supply" and "repay" order types);
+ * `withdraw(asset, amount)` withdraws your supplied balance, or borrows
+ * if it exceeds it (so it serves both "withdraw" and "borrow"). Neither
+ * takes an onBehalfOf/to param — Comet always acts on/for msg.sender.
+ */
+export const COMET_SUPPLY_ABI = [
+  {
+    type: "function",
+    name: "supply",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "asset", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [],
+  },
+] as const;
+
+export const COMET_WITHDRAW_ABI = [
+  {
+    type: "function",
+    name: "withdraw",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "asset", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [],
+  },
+] as const;
+
 /** ERC20 approve(spender, amount) — required before Aave can pull supply/repay assets. */
 export const ERC20_APPROVE_ABI = [
   {
@@ -342,6 +378,69 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         };
       }
       return fail(`Aave v3 does not yet support order type '${order.type}'`);
+    }
+
+    case "compound": {
+      const comet = COMPOUND_V3_USDC_COMET_BY_CHAIN[chainId];
+      if (!comet) return fail(`Compound III's USDC market is not supported on ${chainLabel}`);
+      const token = order.token;
+      if (!token) return fail("compound order requires a token address");
+      const amount = normalizeAmount(order.amount, decimals);
+      if ("error" in amount) return amount;
+
+      // Comet collapses supply/repay into one call and withdraw/borrow into
+      // another (see COMET_SUPPLY_ABI's comment) — acts on msg.sender
+      // directly, no onBehalfOf/to param to patch.
+      if (order.type === "supply" || order.type === "repay") {
+        return {
+          chainId,
+          address: comet,
+          abi: COMET_SUPPLY_ABI,
+          functionName: "supply",
+          args: [token, amount.value],
+          description:
+            order.type === "repay"
+              ? `Repay ${order.amount} ${assetLabel} of Compound III debt on ${chainLabel}`
+              : `Supply ${order.amount} ${assetLabel} to Compound III on ${chainLabel}`,
+          riskNote:
+            order.type === "repay"
+              ? `Moves real funds on ${chainLabel} — confirm the amount before signing. This reduces your open Compound III debt.`
+              : `Moves real funds on ${chainLabel} — confirm the amount before signing. Your supply earns yield and can be borrowed against (subject to liquidation).`,
+        };
+      }
+      if (order.type === "withdraw" || order.type === "borrow") {
+        return {
+          chainId,
+          address: comet,
+          abi: COMET_WITHDRAW_ABI,
+          functionName: "withdraw",
+          args: [token, amount.value],
+          description:
+            order.type === "borrow"
+              ? `Borrow ${order.amount} ${assetLabel} against Compound III collateral on ${chainLabel}`
+              : `Withdraw ${order.amount} ${assetLabel} from Compound III on ${chainLabel}`,
+          riskNote:
+            order.type === "borrow"
+              ? `Borrowing creates Compound III debt on ${chainLabel} and lowers your borrowing capacity. Confirm before signing.`
+              : `Withdraws ${assetLabel} from Compound III on ${chainLabel}. Watch your collateralization — confirm before signing.`,
+        };
+      }
+      if (order.type === "approve") {
+        const spender = (order.spender as Address | undefined) ?? comet;
+        return {
+          chainId,
+          address: token,
+          abi: ERC20_APPROVE_ABI,
+          functionName: "approve",
+          args: [spender, amount.value],
+          description:
+            spender === comet
+              ? `Approve Compound III to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`
+              : `Approve ${spender.slice(0, 10)}… to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`,
+          riskNote: `Approval lets the spender transfer up to this amount of ${assetLabel}. Confirm the spender before signing.`,
+        };
+      }
+      return fail(`Compound III does not yet support order type '${order.type}'`);
     }
 
     case "eth": {
