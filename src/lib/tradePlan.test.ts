@@ -168,10 +168,32 @@ describe("tradePlan — parseThesisVariants (risk-tiered alternatives)", () => {
     expect(variants[0].leverage).toBe(6);
   });
 
-  it("returns a single, unlabeled variant for intents with no honest alternative to offer", () => {
-    const variants = parseThesisVariants("supply 5k ETH to Aave");
+  it("offers Aave vs Morpho for a generic supply thesis, with the live Philidor score deferred to LegRiskBadge rather than an invented number", () => {
+    const variants = parseThesisVariants("supply 5k USDC for yield");
+    expect(variants).toHaveLength(2);
+    expect(variants.map((v) => v.variantLabel)).toEqual(["Aave", "Morpho"]);
+    for (const v of variants) {
+      expect(v.legs[0]).toMatchObject({ side: "Supply", protocol: v.variantLabel });
+      expect(v.variantNote).toBeTruthy();
+    }
+  });
+
+  it("names Morpho first when the thesis asked for it, still offering Aave as the alternative", () => {
+    const variants = parseThesisVariants("supply 5k USDC to Morpho");
+    expect(variants.map((v) => v.variantLabel)).toEqual(["Morpho", "Aave"]);
+  });
+
+  it("does not offer the Aave/Morpho picker when the thesis named a different protocol", () => {
+    const variants = parseThesisVariants("supply 5k USDC to Compound");
     expect(variants).toHaveLength(1);
-    expect(variants[0]).toEqual(parseThesis("supply 5k ETH to Aave"));
+    expect(variants[0].variantLabel).toBeUndefined();
+    expect(variants[0].legs[0].protocol).toBe("Compound");
+  });
+
+  it("returns a single, unlabeled variant for intents with no honest alternative to offer", () => {
+    const variants = parseThesisVariants("borrow 10k USDC on Aave");
+    expect(variants).toHaveLength(1);
+    expect(variants[0]).toEqual(parseThesis("borrow 10k USDC on Aave"));
   });
 });
 

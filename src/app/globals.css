@@ -152,6 +152,28 @@ a:hover { color: var(--color-accent-700); }
 .input:hover { border-color: color-mix(in srgb, var(--color-text) 45%, transparent); }
 .input:focus-visible { border-color: var(--color-accent); outline-offset: 0; }
 
+/* — segmented control (News/Alpha tabs, left-column tabs): a row of radio
+   options styled as pill buttons. Was unstyled (raw radio inputs) until now —
+   .seg/.seg-opt had no rules at all. */
+.seg {
+  display: inline-flex; gap: 2px; padding: 2px; width: fit-content;
+  border: 1px solid var(--color-divider); border-radius: var(--radius-md);
+}
+.seg-opt { position: relative; display: block; cursor: pointer; }
+.seg-opt input {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+  margin: 0; opacity: 0; cursor: pointer;
+}
+.seg-opt span {
+  display: inline-block; padding: 4px 10px; font-size: 12px;
+  border-radius: calc(var(--radius-md) * 0.7); color: var(--color-text);
+  white-space: nowrap;
+}
+.seg-opt:hover span { background: color-mix(in srgb, var(--color-text) 8%, transparent); }
+.seg-opt input:checked + span { background: var(--color-accent); color: var(--color-bg); }
+.seg-opt input:checked:hover + span { background: var(--color-accent); }
+.seg-opt input:focus-visible + span { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+
 /* — cards — */
 .card {
   display: flex; flex-direction: column; gap: var(--space-2);
