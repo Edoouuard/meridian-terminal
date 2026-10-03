@@ -238,8 +238,18 @@ export function resolveOrderForLeg(
     };
   }
 
-  // --- Directional / hedge / beta-neutral / options perps (NOT wired) -------
+  // --- Directional / hedge / beta-neutral / options perps (NOT wired here) --
+  // Extended is a special case: it IS live, just not through this pure/offline
+  // path (StarkEx signing needs the connected Extended account's Stark key,
+  // not a wallet signature) — ThreadCard's ExtendedPerpExecuteButton handles
+  // it directly. See extended-live.ts.
   if (side === "long" || side === "short" || side === "open" || /perp|option|call|put/i.test(leg.asset)) {
+    if (protocol === "variational") {
+      return {
+        unsupported:
+          "Variational has an active points program but hasn't published a public trading API yet — nothing to sign against.",
+      };
+    }
     return { unsupported: `${venue} perps not wired for live execution yet` };
   }
 

@@ -18,9 +18,13 @@ export {
   HYPERLIQUID_ORDER_TYPE,
   HYPERLIQUID_ORDER_TYPES,
 } from "./hyperliquid";
-export { extendedAdapter, buildTypedData as buildExtendedTypedData } from "./extended";
-export { variationalAdapter, buildTypedData as buildVariationalTypedData } from "./variational";
+export { extendedAdapter, ExtendedSigningSchemeError } from "./extended";
+export { variationalAdapter, buildTypedData as buildVariationalTypedData, VariationalApiUnavailableError } from "./variational";
 export { perplAdapter, PerpLSpecUnavailableError } from "./perpl";
+// The REAL, live Extended implementation (StarkEx signing via the connected
+// account's Stark key) — see extended.ts's doc comment for why it isn't the
+// generic `extendedAdapter` above.
+export { executeExtendedPerp, toExtendedMarket } from "./extended-live";
 
 import type { PerpAdapter, PerpOrder } from "./types";
 import { getVenue } from "./registry";

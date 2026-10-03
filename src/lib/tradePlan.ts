@@ -254,6 +254,8 @@ const PROTOCOL_PATTERNS: Array<[RegExp, string]> = [
   [/\buniswap\b/i, "Uniswap"],
   [/\bextended\b/i, "Extended"],
   [/\bvariational\b|\boptions\b/i, "Variational"],
+  [/\bondo\b/i, "Ondo"],
+  [/\blighter\b/i, "Lighter"],
   [/\bperp\b|\bperpetual\b|\bhl\b/i, "Hyperliquid"],
   // Expanded DeFi protocol vocabulary (routing breadth; live execution still opt-in).
   [/\bcompound\b|\bcomp\b/i, "Compound"],
@@ -388,11 +390,18 @@ export function parseThesis(rawText: string): TradePlan {
     }
     case "betaNeutral": {
       const lev = leverage ?? 3;
+      // The long leg always farms Hyperliquid points; the short leg's venue is
+      // whichever OTHER points-farmable perp venue the thesis names (Extended,
+      // Ondo, Lighter, ...), defaulting to Extended when none is named. A
+      // mention of "Hyperliquid" itself (as in the long leg's own wording)
+      // isn't a short-venue override — that would collapse both legs onto one
+      // venue and defeat the point of a cross-venue beta-neutral pair.
+      const shortVenue = protocol && protocol !== "Hyperliquid" ? protocol : "Extended";
       legs = [
         { side: "Long", asset: `${base} PERP`, protocol: "Hyperliquid", sizeUsd: size, leverage: lev, note: "Collect points" },
-        { side: "Short", asset: `${base} PERP`, protocol: "Extended", sizeUsd: size, leverage: lev },
+        { side: "Short", asset: `${base} PERP`, protocol: shortVenue, sizeUsd: size, leverage: lev },
       ];
-      summary = `Farm ${base} points with a long on Hyperliquid paired against an offsetting short on Extended — net delta near zero while keeping the volume eligible for points.`;
+      summary = `Farm ${base} points with a long on Hyperliquid paired against an offsetting short on ${shortVenue} — net delta near zero while keeping the volume eligible for points.`;
       break;
     }
     case "directional": {

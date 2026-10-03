@@ -1,84 +1,50 @@
 /**
- * extended.ts — Extended perp venue adapter.
+ * extended.ts — Extended (ex-X10) perp venue metadata.
  *
- * Extended is the Hyperliquid-adjacent L1 (some venues refer to it as the EVM
- * L1). It uses the same off-chain signed-order family as Hyperliquid: the order
- * is signed with the user's wallet via EIP-712 typed data and later submitted
- * to Extended's matching engine. This adapter builds the typed payload and
- * signing path only — it performs no network calls and never auto-submits.
+ * Extended is a perp DEX on Starknet/StarkEx. Earlier versions of this
+ * adapter modeled Extended's order signing as plain EIP-712 (the same shape
+ * as Hyperliquid's `PerpAdapter`) — that was wrong: Extended settles orders
+ * with a StarkEx Pedersen/Poseidon-hash signature over a separate Stark L2
+ * keypair, which a connected EVM wallet cannot produce on its own (no
+ * `signTypedData` call reproduces it). Rather than keep a plausible-looking
+ * but fabricated EIP-712 scheme around, this module now only advertises
+ * market/leverage metadata; `signOrder`/`buildSubmission` refuse rather than
+ * pretend the generic `PerpAdapter` shape applies here.
  *
- * Pure and side-effect free.
+ * The REAL, live implementation is `extended-live.ts`, built on
+ * `@blackcube/extended-sdk` — a StarkEx SNIP-12 signer whose README documents
+ * it as validated bit-for-bit against Extended's own Rust reference
+ * implementation and accepted by Extended's real testnet order engine. Use
+ * that (via `useExtendedAccount` / `useExtendedPerp` / ThreadCard's
+ * `ExtendedPerpExecuteButton`) for actual execution.
  */
 
 import type { Address } from "viem";
-import { assembleTypedData } from "./types";
-import type {
-  PerpAdapter,
-  PerpOrder,
-  PerpSignFunction,
-  SignedPerpOrder,
-  TypedData,
-} from "./types";
-
-/** EIP-712 primary type for an Extended order. */
-export const EXTENDED_ORDER_TYPE = "ExtendedOrder";
-
-/** Extended order fields (structurally aligned with the Hyperliquid family). */
-export const EXTENDED_ORDER_TYPES: Record<
-  string,
-  ReadonlyArray<{ name: string; type: string }>
-> = {
-  ExtendedOrder: [
-    { name: "asset", type: "string" },
-    { name: "isBuy", type: "bool" },
-    { name: "size", type: "uint64" },
-    { name: "price", type: "uint64" },
-    { name: "reduceOnly", type: "bool" },
-    { name: "orderType", type: "string" },
-    { name: "cloid", type: "string" },
-  ],
-};
+import type { PerpAdapter, PerpOrder, PerpSignFunction, SignedPerpOrder } from "./types";
 
 const EXTENDED_MARKETS = new Set([
+  "BTC",
   "BTC-PERP",
+  "ETH",
   "ETH-PERP",
+  "SOL",
   "SOL-PERP",
+  "HYPE",
   "HYPE-PERP",
+  "XRP",
   "XRP-PERP",
+  "DOGE",
   "DOGE-PERP",
 ]);
 
 /** Extended's conservative default max leverage. */
 const EXTENDED_MAX_LEVERAGE = 20;
 
-/**
- * Build the EIP-712 typed payload for an Extended order. Pure — nothing is
- * signed or transmitted here.
- */
-export function buildTypedData(order: PerpOrder): TypedData {
-  const asset = (order.symbol ?? order.market).toUpperCase();
-  const size = order.sizePerp !== undefined && order.sizePerp > BigInt(0)
-    ? order.sizePerp
-    : BigInt(Math.round(order.sizeUsd));
-  const message = {
-    asset,
-    isBuy: order.isBuy,
-    size,
-    price: order.price ?? BigInt(0),
-    reduceOnly: order.reduceOnly ?? false,
-    orderType: order.price ? "limit" : "market",
-    cloid: `ex-${asset.toLowerCase()}-${order.isBuy ? "b" : "s"}-${(order.signer || "").toLowerCase().slice(0, 6)}`,
-  };
-  return assembleTypedData({
-    primaryType: EXTENDED_ORDER_TYPE,
-    domain: {
-      name: "Extended",
-      version: "1",
-      chainId: order.chainId ?? 1,
-    },
-    types: EXTENDED_ORDER_TYPES,
-    message,
-  });
+export class ExtendedSigningSchemeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ExtendedSigningSchemeError";
+  }
 }
 
 export const extendedAdapter: PerpAdapter = {
@@ -93,36 +59,21 @@ export const extendedAdapter: PerpAdapter = {
   },
 
   async signOrder(
-    order: PerpOrder,
-    signer: Address,
-    sign: PerpSignFunction,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _order: PerpOrder,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _signer: Address,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _sign: PerpSignFunction,
   ): Promise<SignedPerpOrder> {
-    if ((order.sizeUsd <= 0 && (order.sizePerp === undefined || order.sizePerp <= BigInt(0)))) {
-      throw new Error("order size must be positive");
-    }
-    const typed = buildTypedData(order);
-    const signature = await sign(typed);
-    return {
-      order,
-      signature,
-      expiresAt: Date.now() + 60_000,
-    };
+    throw new ExtendedSigningSchemeError(
+      "Extended does not sign orders via plain EIP-712 (this generic PerpAdapter shape doesn't apply) — use executeExtendedPerp() from extended-live.ts, which signs with the connected account's Stark key instead.",
+    );
   },
 
-  buildSubmission(signed: SignedPerpOrder): object {
-    const t = buildTypedData(signed.order);
-    return {
-      exchange: "extended",
-      chainId: signed.order.chainId ?? 1,
-      clientOrderId: t.message.cloid as string,
-      asset: t.message.asset,
-      isBuy: t.message.isBuy,
-      size: t.message.size,
-      price: t.message.price,
-      reduceOnly: t.message.reduceOnly,
-      orderType: t.message.orderType,
-      signature: signed.signature,
-      expiresAt: signed.expiresAt,
-    };
+  buildSubmission(): object {
+    throw new ExtendedSigningSchemeError(
+      "Extended's wire format isn't built here — see extended-live.ts / executeExtendedPerp().",
+    );
   },
 };
