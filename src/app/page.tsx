@@ -171,8 +171,13 @@ export default function TerminalApp() {
   function submitPrompt() {
     const text = promptText.trim();
     if (!text) return;
+    // Unlike addExample's canned quick-prompt buttons, an explicitly typed
+    // thesis is never deduped by resolved type — the dedup there exists only
+    // to stop the SAME quick-prompt button from stacking duplicate example
+    // cards. A real typed prompt must always produce a visible new card,
+    // even when an earlier prompt already resolved to the same intent type.
     const routed = routeThesis(text);
-    setThread((cur) => (cur.some((t) => t.type === routed.type) && routed.type !== "custom" ? cur : cur.concat([routed])));
+    setThread((cur) => cur.concat([routed]));
     setPromptText("");
   }
 
