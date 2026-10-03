@@ -46,20 +46,32 @@ function fmtUsdCompact(n: number): string {
 }
 
 /**
+ * Last successful entries, kept in module scope — see the matching comment
+ * in /api/prices/route.ts. A warm instance serves its last real snapshot on
+ * a transient DefiLlama failure instead of going straight to "no live alpha
+ * right now", capped at MAX_STALE_MS since this is editorial-ish content
+ * (not a priced order) where a somewhat-stale snapshot is an acceptable
+ * tradeoff, unlike price data.
+ */
+let lastGood: { entries: AlphaEntry[]; fetchedAt: number } | null = null;
+const MAX_STALE_MS = 30 * 60_000;
+
+/**
  * Server route backed entirely by DefiLlama's free `/protocols` API (no key):
  * derives two honest "alpha" signals from real fields rather than editorial
  * content — `listedAt` (when DefiLlama first tracked the protocol) for
  * genuinely new listings, and `change_7d` (7-day TVL % change) for real
  * momentum. No "points farm" / "airdrop rumor" categories: there is no free,
  * factual API for rumors, so this deliberately doesn't fabricate that
- * content. Always 200s with an array (empty on any upstream failure) so the
- * UI never has to special-case a route error — callers show an honest
- * "no live alpha right now" rather than falling back to stale demo content.
+ * content. Always 200s with an array (empty on any upstream failure AND no
+ * usable last-good snapshot) so the UI never has to special-case a route
+ * error — callers show an honest "no live alpha right now" rather than
+ * falling back to stale demo content.
  */
 export async function GET() {
   try {
     const res = await fetch("https://api.llama.fi/protocols", { next: { revalidate: 900 } });
-    if (!res.ok) return NextResponse.json<AlphaEntry[]>([]);
+    if (!res.ok) throw new Error(`DefiLlama responded ${res.status}`);
     const data: RawProtocol[] = await res.json();
 
     const clean = data.filter(
@@ -102,8 +114,11 @@ export async function GET() {
         url: p.url,
       }));
 
-    return NextResponse.json<AlphaEntry[]>([...newProtocols, ...momentum]);
+    const entries = [...newProtocols, ...momentum];
+    lastGood = { entries, fetchedAt: Date.now() };
+    return NextResponse.json<AlphaEntry[]>(entries);
   } catch {
-    return NextResponse.json<AlphaEntry[]>([]);
+    const usable = lastGood && Date.now() - lastGood.fetchedAt <= MAX_STALE_MS;
+    return NextResponse.json<AlphaEntry[]>(usable ? lastGood!.entries : []);
   }
 }

@@ -327,6 +327,12 @@ function resolveIntent(
   if (protocol === "Aave") return direction ? "directional" : "supply";
   if (protocol === "Lido") return "stake";
   if (protocol) return direction ? "directional" : "betaNeutral";
+  // Generic "where/how can I put X for the best yield" phrasing names no verb
+  // the checks above recognize (put/stick/leave/earn/grow/...) — rather than
+  // enumerate every synonym, treat the "best/top/highest yield|apy|rate"
+  // phrase itself as the supply signal. Checked last so an explicit verb
+  // (stake, borrow, ...) or named protocol above always takes priority.
+  if (/\b(best|top|highest|better|good|great)\b[^.?!]*\b(yield|apy|rate|return)\b/i.test(t)) return "supply";
   return "unknown";
 }
 
