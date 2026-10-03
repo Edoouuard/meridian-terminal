@@ -1320,24 +1320,75 @@ function PlanCard({ item }: { item: ThreadItem }) {
  * which already-computed TradePlan is active, so the risk-relevant fields
  * (leverage, venue) always match what variantNote described.
  */
+const RISK_COLORS: Record<string, string> = {
+  conservative: "var(--risk-good)",
+  moderate: "var(--risk-warning)",
+  aggressive: "var(--risk-serious)",
+};
+
+function riskLabel(plan: TradePlan): string | null {
+  const note = (plan.variantNote ?? "").toLowerCase();
+  if (note.includes("conservative")) return "conservative";
+  if (note.includes("moderate")) return "moderate";
+  if (note.includes("aggressive")) return "aggressive";
+  // Check variantLabel too
+  const label = (plan.variantLabel ?? "").toLowerCase();
+  if (label.includes("conservative")) return "conservative";
+  if (label.includes("moderate")) return "moderate";
+  if (label.includes("aggressive")) return "aggressive";
+  return null;
+}
+
 function VariantSwitcher({ variants, active, onSelect }: { variants: TradePlan[]; active: TradePlan; onSelect?: (plan: TradePlan) => void }) {
   return (
-    <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+    <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
       <p className="text-muted" style={{ margin: 0, fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>
-        Alternatives
+        Strategy alternatives
       </p>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
         {variants.map((v, i) => {
           const isActive = v === active;
+          const risk = riskLabel(v);
+          const riskColor = risk ? RISK_COLORS[risk] : undefined;
           return (
             <button
               key={i}
               onClick={() => !isActive && onSelect?.(v)}
-              title={v.variantNote}
-              className={`tag ${isActive ? "tag-accent" : "tag-outline"}`}
-              style={{ background: isActive ? undefined : "none", cursor: isActive ? "default" : "pointer", font: "inherit" }}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 2,
+                padding: "8px 10px",
+                borderRadius: "var(--radius-md)",
+                border: isActive ? "1px solid var(--color-accent)" : "1px solid var(--color-divider)",
+                background: isActive ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent",
+                cursor: isActive ? "default" : "pointer",
+                textAlign: "left",
+                font: "inherit",
+                width: "100%",
+              }}
             >
-              {v.variantLabel}
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                {riskColor && (
+                  <span style={{
+                    width: 6, height: 6, borderRadius: "50%",
+                    background: riskColor, flexShrink: 0,
+                  }} />
+                )}
+                <span style={{
+                  fontSize: 12,
+                  fontFamily: "var(--font-heading)",
+                  fontWeight: 600,
+                  color: isActive ? "var(--color-accent)" : "var(--color-text)",
+                }}>
+                  {v.variantLabel || `Strategy ${i + 1}`}
+                </span>
+              </div>
+              {v.variantNote && (
+                <span style={{ fontSize: 11, color: "color-mix(in srgb, var(--color-text) 55%, transparent)" }}>
+                  {v.variantNote}
+                </span>
+              )}
             </button>
           );
         })}

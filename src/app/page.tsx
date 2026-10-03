@@ -1,10 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useAccount } from "wagmi";
-import { useQuery } from "@tanstack/react-query";
-import type { YieldSnapshot } from "@/app/api/yield/route";
 import { ThreadCard } from "@/components/ThreadCard";
 import { RiskPanel } from "@/components/RiskPanel";
 import { TickerBanner } from "@/components/TickerBanner";
@@ -17,10 +15,9 @@ import { LidoWithdrawalsPanel } from "@/components/LidoWithdrawalsPanel";
 import { VaultRiskPanel } from "@/components/VaultRiskPanel";
 import { SolanaPanel } from "@/components/SolanaPanel";
 import { LiveAsset, LivePortfolio, useLivePortfolio } from "@/hooks/useLivePortfolio";
-import { useLiveFeed } from "@/hooks/useLiveFeed";
 import { NewsFeed } from "@/components/NewsFeed";
 import { CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
-import { EXAMPLE_THESIS_FOR_TYPE, routeThesis, type TradePlan } from "@/lib/routeThesis";
+import { routeThesis, type TradePlan } from "@/lib/routeThesis";
 import { routeThesisAsync } from "@/lib/intentEngine";
 import { recordExecution } from "@/lib/history";
 
@@ -32,12 +29,9 @@ export { recordExecution };
 const CHAIN_NAMES = SUPPORTED_CHAINS.map((c) => CHAIN_LABEL[c.id]).join(", ");
 import {
   ALLOCATION,
-  HIGHLIGHT,
   PORTFOLIO_VALUE,
   POSITIONS,
-  ROTATION_BARS,
   ThreadItem,
-  ThreadType,
   fmtUsd,
 } from "@/lib/data";
 
@@ -48,14 +42,6 @@ const ALLOCATION_COLORS = [
   "var(--color-neutral-500)",
   "var(--color-neutral-300)",
 ];
-
-function fmtUsdCompact(n: number): string {
-  const abs = Math.abs(n);
-  if (abs >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
-  if (abs >= 1e6) return `$${(n / 1e6).toFixed(1)}M`;
-  if (abs >= 1e3) return `$${(n / 1e3).toFixed(0)}K`;
-  return `$${n.toFixed(0)}`;
-}
 
 function formatAssetAmount(asset: LiveAsset): string {
   if (asset.usd > 0) return fmtUsd(asset.usd);
@@ -83,13 +69,12 @@ function buildLiveAllocation(live: LivePortfolio): { label: string; pct: number;
 }
 
 export default function TerminalApp() {
-  const [thread, setThread] = useState<ThreadItem[]>([
-    routeThesis(EXAMPLE_THESIS_FOR_TYPE.pendle),
-    routeThesis(EXAMPLE_THESIS_FOR_TYPE.betaneutral),
-  ]);
+  const [thread, setThread] = useState<ThreadItem[]>([]);
   const [promptText, setPromptText] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [pendingText, setPendingText] = useState("");
+  const threadEndRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
   // Everything below Positions used to stack 9 panels in one long scroll
   // (Risk, Vault risk, 4 venue connect panels, History, Chains, Solana) --
   // grouped into tabs so the left column stays scannable instead of dense.
@@ -97,50 +82,6 @@ export default function TerminalApp() {
 
   const { isConnected } = useAccount();
   const live = useLivePortfolio();
-  const feed = useLiveFeed();
-  const { data: yieldSnapshot, isLoading: yieldLoading } = useQuery<YieldSnapshot | null>({
-    queryKey: ["yield-snapshot"],
-    queryFn: async () => {
-      const res = await fetch("/api/yield", { cache: "no-store" });
-      if (!res.ok) throw new Error("yield fetch failed");
-      return res.json();
-    },
-    staleTime: 5 * 60_000,
-  });
-
-  const isLiveFeed = !feed.loading && !!feed.data;
-
-  // Live top-movers / flow list — built from Hyperliquid metaAndAssetCtxs.
-  // Use 24h notional (dayNtlVlm) as the flow proxy, normalised into bar widths.
-  const liveBars =
-    isLiveFeed && feed.data?.highlights && feed.data.highlights.movers.length > 0
-      ? feed.data.highlights.movers.map((m) => ({
-          name: m.coin,
-          width: "0%",
-          color: m.changePct >= 0 ? "var(--color-accent-700)" : "var(--color-neutral-600)",
-          value: `${m.changePct >= 0 ? "+" : ""}${m.changePct.toFixed(1)}%`,
-          flow: m.dayNtlVlm,
-        }))
-      : null;
-
-  // Compute relative bar widths from the largest flow.
-  let displayBars = ROTATION_BARS;
-  if (liveBars && liveBars.length > 0) {
-    const maxFlow = Math.max(...liveBars.map((b) => b.flow), 1);
-    displayBars = liveBars.map((b) => ({ ...b, width: `${Math.max(4, Math.round((b.flow / maxFlow) * 100))}%` }));
-  }
-
-  // Live "fastest growing" card from the same metadata.
-  const fastestLive = isLiveFeed ? feed.data?.highlights?.fastest : null;
-  const displayHighlight = fastestLive
-    ? {
-        protocol: fastestLive.coin,
-        chg: `${fastestLive.changePct >= 0 ? "+" : ""}${fastestLive.changePct.toFixed(1)}%`,
-        tvlStart: "24h vol",
-        tvlEnd: fmtUsdCompact(fastestLive.dayNtlVlm) || "$—",
-        points: HIGHLIGHT.points,
-      }
-    : HIGHLIGHT;
 
   const displayPortfolioValue = isConnected ? live.netUsd : PORTFOLIO_VALUE;
 
@@ -154,51 +95,41 @@ export default function TerminalApp() {
   const displayPositions = isConnected ? livePositions : POSITIONS;
   const displayAllocation = isConnected ? buildLiveAllocation(live) : ALLOCATION;
 
-  const usedTypes = new Set(thread.map((t) => t.type));
+  // Auto-scroll to bottom when thread changes or analysis starts
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [thread, isAnalyzing, pendingText]);
 
-  // Quick-prompt buttons and news/alpha "discuss" links both land here. Routes
-  // through the real engine (routeThesis) rather than pushing static demo
-  // content, so what's shown always reflects actual live-execution status —
-  // no separate hardcoded card that can silently go stale once a venue gets
-  // wired up for real.
-  function addExample(type: ThreadType, text?: string) {
-    const thesis = text ?? (type !== "custom" ? EXAMPLE_THESIS_FOR_TYPE[type] : undefined);
-    const routed = thesis ? routeThesis(thesis) : { type, text };
-    setThread((cur) => {
-      // Dedup-by-type only applies to the canned quick-prompt buttons (no
-      // explicit text). A "Discuss ->" click from a live news mover always
-      // carries its own distinct text (a specific coin) and should always be
-      // added, even when another thread of the same resolved type exists.
-      if (!text && cur.some((t) => t.type === routed.type)) return cur;
-      return cur.concat([routed]);
-    });
-  }
-
-  async function submitPrompt() {
-    const text = promptText.trim();
-    if (!text || isAnalyzing) return;
+  // Submit a thesis to the LLM engine (used by both input and quick prompts)
+  async function submitThesis(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed || isAnalyzing) return;
     setPromptText("");
-    setPendingText(text);
+    setPendingText(trimmed);
     setIsAnalyzing(true);
 
     try {
-      const routed = await routeThesisAsync(text);
+      const routed = await routeThesisAsync(trimmed);
       setThread((cur) => cur.concat([routed]));
     } catch {
-      // Fallback to regex parser if async fails entirely
-      setThread((cur) => cur.concat([routeThesis(text)]));
+      setThread((cur) => cur.concat([routeThesis(trimmed)]));
     } finally {
       setIsAnalyzing(false);
       setPendingText("");
     }
   }
 
-  // Switches which already-computed variant (see tradePlan.parseThesisVariants)
-  // is the active plan for one thread card — never re-parses the thesis, just
-  // swaps the pointer, so leverage/venue stay exactly what the user picked.
   function selectVariant(index: number, plan: TradePlan) {
     setThread((cur) => cur.map((item, i) => (i === index ? { ...item, plan } : item)));
   }
+
+  const QUICK_PROMPTS = [
+    { label: "Yield on stables", thesis: "I want the best yield on my USDC across all protocols" },
+    { label: "ETH exposure", thesis: "I want exposure to ETH with different risk levels" },
+    { label: "Farm airdrops", thesis: "I want to farm airdrops and points with a delta-neutral strategy" },
+    { label: "Hedge portfolio", thesis: "I need to hedge my ETH exposure, I think the market is going down" },
+    { label: "Stake ETH", thesis: "I want to stake my ETH for yield, what are the best options?" },
+  ];
 
   return (
     <div style={{ background: "var(--color-bg)", color: "var(--color-text)", height: "100vh", display: "flex", flexDirection: "column" }}>
@@ -320,83 +251,73 @@ export default function TerminalApp() {
           {leftTab === "activity" && <HistoryPanel />}
         </div>
 
-        {/* Trade column */}
-        <div style={{ display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0, padding: "var(--space-4)" }}>
+        {/* Trade column — chat-first layout */}
+        <div style={{ display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0 }}>
+          {/* Scrollable thread area */}
           <div
+            ref={scrollContainerRef}
             className="col-scroll"
-            style={{ flex: 1, minHeight: 0, minWidth: 0, display: "flex", flexDirection: "column", gap: "var(--space-3)", paddingRight: 4 }}
+            style={{
+              flex: 1,
+              minHeight: 0,
+              minWidth: 0,
+              display: "flex",
+              flexDirection: "column",
+              gap: "var(--space-3)",
+              padding: "var(--space-4)",
+              paddingBottom: "var(--space-2)",
+            }}
           >
-            <p className="card-kicker" style={{ margin: 0 }}>
-              This week in DeFi
-            </p>
-            <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: "var(--space-3)", minWidth: 0 }}>
-              <div className="card" style={{ gap: 6, padding: "var(--space-2)", minWidth: 0 }}>
-                <p style={{ margin: 0, fontSize: 12, fontWeight: 600, fontFamily: "var(--font-heading)" }}>
-                  Net TVL flows, 7 days{liveBars && liveBars.length > 0 ? "" : " (example)"}
+            {thread.length === 0 && !isAnalyzing && (
+              <div style={{
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "var(--space-4)",
+                padding: "var(--space-8) var(--space-4)",
+                textAlign: "center",
+              }}>
+                <h3 style={{
+                  fontFamily: "var(--font-heading)",
+                  color: "var(--color-text)",
+                  margin: 0,
+                  fontSize: 26,
+                  letterSpacing: "-0.02em",
+                }}>
+                  What do you want to do?
+                </h3>
+                <p style={{
+                  margin: 0,
+                  fontSize: 14,
+                  color: "color-mix(in srgb, var(--color-text) 55%, transparent)",
+                  maxWidth: 420,
+                  lineHeight: 1.6,
+                }}>
+                  Describe your goal in your own words. Meridian fetches live rates from every protocol and designs 3 strategies at different risk levels.
                 </p>
-                <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 2, minWidth: 0 }}>
-                  {displayBars.map((rb) => (
-                    <div key={rb.name} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, minWidth: 0 }}>
-                      <span style={{ width: 64, flex: "none", height: 15, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
-                        {rb.name}
-                      </span>
-                      <div style={{ flex: 1, minWidth: 0, height: 8, background: "var(--color-neutral-200)", borderRadius: 2, overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: rb.width, background: rb.color, borderRadius: 2 }} />
-                      </div>
-                      <span style={{ width: 36, flex: "none", textAlign: "right", fontVariantNumeric: "tabular-nums", color: rb.color }}>
-                        {rb.value}
-                      </span>
-                    </div>
+                <div style={{
+                  display: "flex",
+                  gap: 8,
+                  flexWrap: "wrap",
+                  justifyContent: "center",
+                  marginTop: "var(--space-2)",
+                }}>
+                  {QUICK_PROMPTS.map((qp) => (
+                    <button
+                      key={qp.label}
+                      className="btn btn-secondary"
+                      style={{ fontSize: 12 }}
+                      disabled={isAnalyzing}
+                      onClick={() => submitThesis(qp.thesis)}
+                    >
+                      {qp.label}
+                    </button>
                   ))}
                 </div>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-                <div className="card" style={{ gap: 4, padding: "var(--space-3)" }}>
-                  <p style={{ margin: 0, fontSize: 12, fontWeight: 600, fontFamily: "var(--font-heading)" }}>
-                    Fastest growing: {displayHighlight.protocol}
-                    {fastestLive ? "" : " (example)"}
-                  </p>
-                  <p style={{ margin: 0, fontSize: 11 }} className="text-muted">
-                    {displayHighlight.tvlStart} → <strong style={{ color: "var(--color-text)" }}>{displayHighlight.tvlEnd}</strong>{" "}
-                    <span style={{ color: "var(--color-accent-700)" }}>({displayHighlight.chg})</span>
-                  </p>
-                  <svg width="100%" height="24" viewBox="0 0 36 24" preserveAspectRatio="none">
-                    <polyline points={displayHighlight.points} fill="none" stroke="var(--color-accent)" strokeWidth={1.6} />
-                  </svg>
-                </div>
-                <div className="card" style={{ gap: 4, padding: "var(--space-3)" }}>
-                  <p style={{ margin: 0, fontSize: 12, fontWeight: 600, fontFamily: "var(--font-heading)" }}>Aave USDC variable APY, live</p>
-                  {yieldSnapshot ? (
-                    <>
-                      <p style={{ margin: 0, fontSize: 22, fontFamily: "var(--font-heading)", fontVariantNumeric: "tabular-nums" }}>
-                        {yieldSnapshot.apy.toFixed(2)}%
-                      </p>
-                      <p style={{ margin: 0, fontSize: 11 }} className="text-muted">
-                        {yieldSnapshot.apyPct7D !== null
-                          ? `${yieldSnapshot.apyPct7D >= 0 ? "+" : ""}${yieldSnapshot.apyPct7D.toFixed(2)}pp over 7 days`
-                          : "7-day trend unavailable"}
-                        {yieldSnapshot.apyPct30D !== null &&
-                          ` · ${yieldSnapshot.apyPct30D >= 0 ? "+" : ""}${yieldSnapshot.apyPct30D.toFixed(2)}pp over 30 days`}
-                      </p>
-                    </>
-                  ) : (
-                    <p style={{ margin: 0, fontSize: 11 }} className="text-muted">
-                      {yieldLoading ? "Fetching live yield data…" : "No live yield data right now."}
-                    </p>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="hr" style={{ margin: 0 }} />
-
-            <h6 style={{ color: "var(--color-accent)", flex: "none" }}>Prompt to trade</h6>
-            <div style={{ maxWidth: "80%" }}>
-              <p style={{ margin: 0, fontSize: 14, color: "color-mix(in srgb, var(--color-text) 70%, transparent)" }}>
-                Describe what you want — exposure, yield, airdrops, hedging — in your own words. Meridian will design 3 strategies
-                at different risk levels and let you execute each step.
-              </p>
-            </div>
+            )}
 
             {thread.map((item, i) => (
               <ThreadCard key={i} item={item} onSelectVariant={(plan) => selectVariant(i, plan)} />
@@ -408,7 +329,7 @@ export default function TerminalApp() {
                 style={{
                   gap: 8,
                   padding: "var(--space-3)",
-                  borderColor: "var(--color-accent-500)",
+                  borderColor: "var(--color-accent-300)",
                   borderStyle: "solid",
                   borderWidth: 1,
                 }}
@@ -417,8 +338,8 @@ export default function TerminalApp() {
                   <span
                     style={{
                       display: "inline-block",
-                      width: 12,
-                      height: 12,
+                      width: 14,
+                      height: 14,
                       borderRadius: "50%",
                       border: "2px solid var(--color-accent)",
                       borderTopColor: "transparent",
@@ -426,94 +347,61 @@ export default function TerminalApp() {
                     }}
                   />
                   <span style={{ fontSize: 13, fontFamily: "var(--font-heading)", color: "var(--color-accent)" }}>
-                    Analyzing thesis
+                    Fetching live rates & designing strategies
                   </span>
                 </div>
                 <p style={{ margin: 0, fontSize: 12 }} className="text-muted">
-                  &ldquo;{pendingText}&rdquo; — designing strategies across protocols...
+                  &ldquo;{pendingText}&rdquo;
                 </p>
               </div>
             )}
 
-            {isConnected && live.isLoading && (
-              <p style={{ margin: 0, fontSize: 12 }} className="text-muted">
-                Loading your live positions…
-              </p>
-            )}
+            <div ref={threadEndRef} />
+          </div>
 
-            {thread.length === 0 && (
-              <div className="card" style={{ gap: 6, padding: "var(--space-3)" }}>
-                <p style={{ margin: 0, fontSize: 12, fontWeight: 600, fontFamily: "var(--font-heading)" }}>
-                  No positions yet
-                </p>
-                <p style={{ margin: 0, fontSize: 12 }} className="text-muted">
-                  Describe a thesis above or add an example to draft your first order.
-                </p>
+          {/* Sticky input bar */}
+          <div style={{
+            flex: "none",
+            padding: "var(--space-2) var(--space-4) var(--space-3)",
+            borderTop: "1px solid var(--color-divider)",
+            background: "var(--color-bg)",
+          }}>
+            {thread.length > 0 && !isAnalyzing && (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: "var(--space-2)" }}>
+                {QUICK_PROMPTS.map((qp) => (
+                  <button
+                    key={qp.label}
+                    className="btn btn-secondary"
+                    style={{ fontSize: 11, padding: "2px 8px" }}
+                    disabled={isAnalyzing}
+                    onClick={() => submitThesis(qp.thesis)}
+                  >
+                    {qp.label}
+                  </button>
+                ))}
               </div>
             )}
-          </div>
-
-          <div style={{ flex: "none", display: "flex", gap: 6, flexWrap: "wrap", margin: "var(--space-3) 0 var(--space-2)" }}>
-            <button
-              className="btn btn-secondary"
-              style={{ fontSize: 12, opacity: 0.6, borderStyle: "dashed" }}
-              disabled={usedTypes.has("pendle")}
-              onClick={() => addExample("pendle")}
-              title="Pendle isn't wired for live execution yet"
-            >
-              Lock a fixed yield · Building
-            </button>
-            <button
-              className="btn btn-secondary"
-              style={{ fontSize: 12 }}
-              disabled={usedTypes.has("betaneutral")}
-              onClick={() => addExample("betaneutral")}
-              title={usedTypes.has("betaneutral") ? "Already added below — type a new thesis in the prompt box for another one" : undefined}
-            >
-              Beta neutral ETH
-            </button>
-            <button
-              className="btn btn-secondary"
-              style={{ fontSize: 12 }}
-              disabled={usedTypes.has("perp")}
-              onClick={() => addExample("perp")}
-              title={usedTypes.has("perp") ? "Already added below — type a new thesis in the prompt box for another one" : undefined}
-            >
-              Directional perp
-            </button>
-            <button
-              className="btn btn-secondary"
-              style={{ fontSize: 12 }}
-              disabled={usedTypes.has("swap")}
-              onClick={() => addExample("swap")}
-              title={usedTypes.has("swap") ? "Already added below — type a new thesis in the prompt box for another one" : undefined}
-            >
-              Swap
-            </button>
-            <button
-              className="btn btn-secondary"
-              style={{ fontSize: 12 }}
-              disabled={usedTypes.has("hedge")}
-              onClick={() => addExample("hedge")}
-              title={usedTypes.has("hedge") ? "Already added below — type a new thesis in the prompt box for another one" : undefined}
-            >
-              Hedge my portfolio
-            </button>
-          </div>
-          <div style={{ flex: "none", display: "flex", gap: 8 }}>
-            <input
-              className="input"
-              placeholder="e.g. I want yield on my ETH, expose me to SOL, farm airdrops..."
-              value={promptText}
-              disabled={isAnalyzing}
-              onChange={(e) => setPromptText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") submitPrompt();
-              }}
-            />
-            <button className="btn btn-primary btn-icon" aria-label="Send" onClick={submitPrompt} disabled={isAnalyzing}>
-              →
-            </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input
+                className="input"
+                placeholder="Describe what you want: yield, exposure, hedge, airdrops..."
+                value={promptText}
+                disabled={isAnalyzing}
+                onChange={(e) => setPromptText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") submitThesis(promptText);
+                }}
+                style={{ fontSize: 14 }}
+              />
+              <button
+                className="btn btn-primary btn-icon"
+                aria-label="Send"
+                onClick={() => submitThesis(promptText)}
+                disabled={isAnalyzing || !promptText.trim()}
+              >
+                →
+              </button>
+            </div>
           </div>
         </div>
 
