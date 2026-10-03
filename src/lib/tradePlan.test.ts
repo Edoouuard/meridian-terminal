@@ -231,6 +231,30 @@ describe("tradePlan — parseThesisVariants (risk-tiered alternatives)", () => {
   });
 });
 
+describe("tradePlan — yieldSearch intent (cross-protocol best-yield search)", () => {
+  it("parses 'find best yield on USDT' as a yieldSearch, not a single supply", () => {
+    const plan = parseThesis("find best yield on USDT");
+    expect(plan.intent).toBe("yieldSearch");
+    expect(plan.asset).toBe("USDT");
+    expect(plan.legs).toHaveLength(0);
+  });
+
+  it("also recognizes 'search'/'scan'/'compare' as the search verb", () => {
+    expect(parseThesis("search for the best yield on USDC").intent).toBe("yieldSearch");
+    expect(parseThesis("scan the top apy for ETH").intent).toBe("yieldSearch");
+    expect(parseThesis("compare the best rate for DAI").intent).toBe("yieldSearch");
+  });
+
+  it("still prefers an explicit protocol/verb thesis over a search phrasing", () => {
+    // "stake" wins even though "best yield" also appears, same priority as the existing supply fallback.
+    expect(parseThesis("stake my ETH for the best yield").intent).toBe("stake");
+  });
+
+  it("falls back to the plain supply intent without an explicit search verb", () => {
+    expect(parseThesis("where i can put my usdc for the best yield?").intent).toBe("supply");
+  });
+});
+
 describe("tradePlan — other intents + robustness", () => {
   it("parses a staking thesis", () => {
     const plan = parseThesis("stake 2 ETH for Lido yield");

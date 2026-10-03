@@ -361,3 +361,35 @@ export async function fetchOpenOrders(
     oid: o.oid ?? 0,
   }));
 }
+
+/**
+ * HLP ("Hyperliquidity Provider") — Hyperliquid's own protocol-owned vault:
+ * depositors share in its market-making/liquidation PnL. Verified
+ * 2026-10-03 against hypurrscan.io's own label for this address ("HLP
+ * Vault") plus independent coverage describing the same address as HLP.
+ * Same chain (mainnet vs testnet) as every other HYPERLIQUID_* constant in
+ * this module — HLP itself only exists on mainnet.
+ */
+export const HLP_VAULT_ADDRESS = "0xdfc24b077bc1425ad1dea75bcb6f8158e10df303";
+
+/**
+ * Live HLP APR via Hyperliquid's public `vaultDetails` info endpoint —
+ * read-only, no signing. Returns `null` on any failure or missing/invalid
+ * `apr` field rather than guessing; the vault's rate floats with its
+ * trailing-window PnL, so there is no honest static fallback for it.
+ */
+export async function fetchVaultApr(vaultAddress: string, env: HyperliquidEnv): Promise<number | null> {
+  try {
+    const res = await fetch(env.infoUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "vaultDetails", vaultAddress }),
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { apr?: number };
+    return typeof data.apr === "number" && Number.isFinite(data.apr) ? data.apr : null;
+  } catch {
+    return null;
+  }
+}

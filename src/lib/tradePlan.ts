@@ -32,6 +32,7 @@ export type TradeIntent =
   | "bridge"
   | "transfer"
   | "withdraw"
+  | "yieldSearch"
   | "unknown";
 
 export interface TradeLeg {
@@ -94,6 +95,7 @@ export const DEFAULT_SIZES: Record<TradeIntent, number> = {
   bridge: 10000,
   transfer: 1000,
   withdraw: 5000,
+  yieldSearch: 10000,
   unknown: 0,
 };
 
@@ -333,6 +335,15 @@ function resolveIntent(
   if (protocol === "Aave") return direction ? "directional" : "supply";
   if (protocol === "Lido") return "stake";
   if (protocol) return direction ? "directional" : "betaNeutral";
+  // An explicit search ("find/search/scan/look for/check the best yield on
+  // X") is a distinct ask from "put X somewhere for yield" (-> supply
+  // above): the user wants a live-ranked comparison across every protocol
+  // Meridian can see, not a single resolved deposit. Checked before the
+  // generic best-yield fallback below so it wins when both would match.
+  if (
+    /\b(find|search|scan|look for|check|compare)\b[^.?!]*\b(best|top|highest)\b[^.?!]*\b(yield|apy|rate|return)\b/i.test(t)
+  )
+    return "yieldSearch";
   // Generic "where/how can I put X for the best yield" phrasing names no verb
   // the checks above recognize (put/stick/leave/earn/grow/...) — rather than
   // enumerate every synonym, treat the "best/top/highest yield|apy|rate"
@@ -488,6 +499,14 @@ export function parseThesis(rawText: string): TradePlan {
     case "bridge": {
       legs = [{ side: "Bridge", asset: base, protocol: protocol ?? "Cross-chain", sizeUsd: size }];
       summary = `Bridge ~${fmtUsd(size ?? 0)} ${base}${protocol ? ` via ${protocol}` : " to another chain"}.`;
+      break;
+    }
+    case "yieldSearch": {
+      // No legs: this isn't one resolved order, it's a live-ranked search
+      // across every protocol Meridian can see real yield data for —
+      // rendered by YieldFinderCard, not the usual per-leg execute rows.
+      legs = [];
+      summary = `Scanning live yields for ${base} across lending markets and vaults.`;
       break;
     }
     case "transfer": {
