@@ -111,6 +111,27 @@ const MERIDIAN_PROTOCOL_SLUGS = new Set([
 
 /** Min TVL to filter noise — pools under this are ignored */
 const MIN_TVL = 100_000;
+/** Min TVL for LP pools — higher bar to exclude memecoin pairs */
+const MIN_TVL_LP = 1_000_000;
+/** Max credible APY — anything above is likely a memecoin or exploit */
+const MAX_APY = 200;
+
+/** Blue-chip tokens that are legitimate LP pair components */
+const BLUECHIP_TOKENS = new Set([
+  "ETH", "WETH", "STETH", "WSTETH", "CBETH", "RETH",
+  "USDC", "USDT", "DAI", "FRAX", "LUSD", "GUSD", "PYUSD", "CRVUSD", "GHO", "USDS",
+  "WBTC", "BTC", "TBTC",
+  "ARB", "OP", "MATIC", "AVAX", "BNB", "SOL", "LINK", "UNI", "AAVE", "MKR", "CRV",
+  "LDO", "RPL", "COMP", "SNX", "SUSHI", "BAL", "FXS", "CVX", "PENDLE",
+  "WEETH", "EZETH", "RSETH", "METH", "SWETH",
+]);
+
+/** Check if an LP symbol contains only blue-chip tokens */
+function isLegitLpPair(symbol: string): boolean {
+  // LP symbols look like "USDC-ETH", "WBTC-USDC", etc.
+  const tokens = symbol.split(/[-\/]/);
+  return tokens.length >= 2 && tokens.every((t) => BLUECHIP_TOKENS.has(t.trim().toUpperCase()));
+}
 
 async function fetchDefiLlama(): Promise<{ lending: YieldRow[]; staking: YieldRow[] }> {
   try {
@@ -129,10 +150,18 @@ async function fetchDefiLlama(): Promise<{ lending: YieldRow[]; staking: YieldRo
       if (!p.project || !MERIDIAN_PROTOCOL_SLUGS.has(p.project)) continue;
       const apy = p.apyBase ?? p.apy;
       if (typeof apy !== "number" || !Number.isFinite(apy) || apy <= 0) continue;
+      if (apy > MAX_APY) continue; // Filter unrealistic yields
       if ((p.tvlUsd ?? 0) < MIN_TVL) continue;
 
       const sym = (p.symbol ?? "").toUpperCase();
       const chain = p.chain ?? "?";
+      const isLp = /uniswap|curve/i.test(p.project);
+
+      // For LP pools: require blue-chip pairs and higher TVL
+      if (isLp) {
+        if ((p.tvlUsd ?? 0) < MIN_TVL_LP) continue;
+        if (!isLegitLpPair(sym)) continue;
+      }
       const displayName = p.project
         .replace(/-v(\d)/, " v$1")
         .replace(/-/g, " ")
@@ -171,7 +200,7 @@ async function fetchDefiLlama(): Promise<{ lending: YieldRow[]; staking: YieldRo
             chain,
             apy,
             tvlUsd: p.tvlUsd ?? 0,
-            kind: /uniswap|curve/i.test(p.project) ? "lp" : "lending",
+            kind: isLp ? "lp" : "lending",
           });
         }
       }
