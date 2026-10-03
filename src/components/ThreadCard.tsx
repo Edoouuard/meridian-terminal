@@ -1035,7 +1035,7 @@ function StakeYieldBadge({ leg }: { leg: TradeLeg }) {
   const { data } = useQuery<StakeYieldEntry[]>({
     queryKey: ["stake-yield"],
     queryFn: async () => {
-      const res = await fetch("/api/stake-yield");
+      const res = await fetch("/api/stake-yield", { cache: "no-store" });
       if (!res.ok) throw new Error("stake-yield fetch failed");
       return res.json();
     },

@@ -95,7 +95,7 @@ export default function TerminalApp() {
   const { data: yieldSnapshot, isLoading: yieldLoading } = useQuery<YieldSnapshot | null>({
     queryKey: ["yield-snapshot"],
     queryFn: async () => {
-      const res = await fetch("/api/yield");
+      const res = await fetch("/api/yield", { cache: "no-store" });
       if (!res.ok) throw new Error("yield fetch failed");
       return res.json();
     },
