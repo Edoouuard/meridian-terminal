@@ -331,6 +331,15 @@ function resolveIntent(
   if (/bridge|cross[- ]chain|move .* (to|onto) (arbitrum|base|optimism|polygon|avalanche|solana)/i.test(t)) return "bridge";
   if (direction || /\b(long|short|buy|sell|bullish|bearish|outperform\w*|underperform\w*)\b/i.test(t)) return "directional";
   if (/swap|convert|bridge/i.test(t)) return "swap";
+  // A plain question about a vault's or protocol's rate ("what is HLP's
+  // APY", "quel est l'APY du vault de Hyperliquid") must never fall into
+  // the protocol-name fallback below, which defaults to betaNeutral/
+  // directional — that default assumes the thesis wants a position built,
+  // which is the wrong read for what's just an informational ask. Checked
+  // before that fallback so naming a protocol alongside "vault"/"APY"/
+  // "APR"/"HLP"/"LLP" always reads as a yield question first, regardless
+  // of which other protocol name happens to appear in the same sentence.
+  if (/\bhlp\b|\bllp\b|\bvault\b|\bapy\b|\bapr\b/i.test(t)) return "yieldSearch";
   if (protocol === "Pendle") return "lockYield";
   if (protocol === "Aave") return direction ? "directional" : "supply";
   if (protocol === "Lido") return "stake";
@@ -391,6 +400,10 @@ export function parseThesis(rawText: string): TradePlan {
 
   const assets = parseAssets(text);
   const base = assets[0] ?? "ETH";
+  // Overridable per-case: a bare "HLP/LLP/vault APY?" question names no
+  // asset, and ETH (the generic fallback above) would be wrong here since
+  // both vaults are USDC-denominated — see the yieldSearch case below.
+  let resolvedAsset = base;
   const amount = parseAmount(text);
   const protocol = parseProtocol(text);
   const direction = parseDirection(t);
@@ -506,7 +519,12 @@ export function parseThesis(rawText: string): TradePlan {
       // across every protocol Meridian can see real yield data for —
       // rendered by YieldFinderCard, not the usual per-leg execute rows.
       legs = [];
-      summary = `Scanning live yields for ${base} across lending markets and vaults.`;
+      // A bare "HLP/LLP/vault APY" question with no asset named ("what's
+      // Hyperliquid's vault APY?") defaults to USDC, not the generic ETH
+      // fallback -- both vaults are USDC-denominated, so ETH would search
+      // for something neither vault actually offers.
+      if (assets.length === 0 && /\bhlp\b|\bllp\b|\bvault\b/i.test(t)) resolvedAsset = "USDC";
+      summary = `Scanning live yields for ${resolvedAsset} across lending markets and vaults.`;
       break;
     }
     case "transfer": {
@@ -533,7 +551,7 @@ export function parseThesis(rawText: string): TradePlan {
     }
   }
 
-  return { intent, asset: base, direction, sizeUsd: size, leverage, protocol, legs, summary };
+  return { intent, asset: resolvedAsset, direction, sizeUsd: size, leverage, protocol, legs, summary };
 }
 
 /** Perp venues that can take the short leg of a beta-neutral points farm. */

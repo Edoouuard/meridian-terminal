@@ -253,6 +253,28 @@ describe("tradePlan — yieldSearch intent (cross-protocol best-yield search)", 
   it("falls back to the plain supply intent without an explicit search verb", () => {
     expect(parseThesis("where i can put my usdc for the best yield?").intent).toBe("supply");
   });
+
+  it("routes a plain vault/APY question to yieldSearch instead of the protocol-name betaNeutral fallback", () => {
+    // Regression: naming "Hyperliquid" with no other matched verb used to
+    // fall through resolveIntent's generic protocol check straight to
+    // betaNeutral -- turning an informational "what's the APY?" question
+    // into a whole beta-neutral trade proposal.
+    const plan = parseThesis("what is the APY of Hyperliquid's vault?");
+    expect(plan.intent).toBe("yieldSearch");
+    expect(plan.intent).not.toBe("betaNeutral");
+  });
+
+  it("defaults a bare HLP/LLP/vault question with no named asset to USDC, not the generic ETH fallback", () => {
+    expect(parseThesis("what is the APY of Hyperliquid's vault?").asset).toBe("USDC");
+    expect(parseThesis("what's HLP's APR right now").asset).toBe("USDC");
+    expect(parseThesis("quel est l'APY du vault de Hyperliquid?").asset).toBe("USDC");
+  });
+
+  it("still honors an explicitly named asset alongside a vault/APY question", () => {
+    const plan = parseThesis("what is the vault APY for ETH on Lighter?");
+    expect(plan.intent).toBe("yieldSearch");
+    expect(plan.asset).toBe("ETH");
+  });
 });
 
 describe("tradePlan — other intents + robustness", () => {
