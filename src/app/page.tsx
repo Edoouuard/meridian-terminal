@@ -426,16 +426,35 @@ export default function TerminalApp() {
               style={{ fontSize: 12 }}
               disabled={usedTypes.has("betaneutral")}
               onClick={() => addExample("betaneutral")}
+              title={usedTypes.has("betaneutral") ? "Already added below — type a new thesis in the prompt box for another one" : undefined}
             >
               Beta neutral ETH
             </button>
-            <button className="btn btn-secondary" style={{ fontSize: 12 }} disabled={usedTypes.has("perp")} onClick={() => addExample("perp")}>
+            <button
+              className="btn btn-secondary"
+              style={{ fontSize: 12 }}
+              disabled={usedTypes.has("perp")}
+              onClick={() => addExample("perp")}
+              title={usedTypes.has("perp") ? "Already added below — type a new thesis in the prompt box for another one" : undefined}
+            >
               Directional perp
             </button>
-            <button className="btn btn-secondary" style={{ fontSize: 12 }} disabled={usedTypes.has("swap")} onClick={() => addExample("swap")}>
+            <button
+              className="btn btn-secondary"
+              style={{ fontSize: 12 }}
+              disabled={usedTypes.has("swap")}
+              onClick={() => addExample("swap")}
+              title={usedTypes.has("swap") ? "Already added below — type a new thesis in the prompt box for another one" : undefined}
+            >
               Swap
             </button>
-            <button className="btn btn-secondary" style={{ fontSize: 12 }} disabled={usedTypes.has("hedge")} onClick={() => addExample("hedge")}>
+            <button
+              className="btn btn-secondary"
+              style={{ fontSize: 12 }}
+              disabled={usedTypes.has("hedge")}
+              onClick={() => addExample("hedge")}
+              title={usedTypes.has("hedge") ? "Already added below — type a new thesis in the prompt box for another one" : undefined}
+            >
               Hedge my portfolio
             </button>
           </div>
