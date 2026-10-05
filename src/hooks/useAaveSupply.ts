@@ -225,7 +225,6 @@ export function useAaveSupply(onConfirmed?: () => void): AaveSupplyFlow {
               abi: approveBuilt.abi!,
               functionName: approveBuilt.functionName!,
               args: approveBuilt.args!,
-              chainId: newPlan.chainId,
             });
           } catch (err) {
             fail(newPlan, "SIMULATION_FAILED", `Approval would fail: ${err instanceof Error ? err.message : String(err)}`);
@@ -249,7 +248,6 @@ export function useAaveSupply(onConfirmed?: () => void): AaveSupplyFlow {
               abi: patched.abi!,
               functionName: patched.functionName!,
               args: patched.args!,
-              chainId: newPlan.chainId,
             });
           } catch (err) {
             fail(newPlan, "SIMULATION_FAILED", `Supply would fail: ${err instanceof Error ? err.message : String(err)}`);
@@ -377,7 +375,6 @@ export function useAaveSupply(onConfirmed?: () => void): AaveSupplyFlow {
             abi: patchedForSim.abi!,
             functionName: patchedForSim.functionName!,
             args: patchedForSim.args!,
-            chainId: plan.chainId,
           });
         } catch (err) {
           fail(plan, "SIMULATION_FAILED", `Supply would fail after approval: ${err instanceof Error ? err.message : String(err)}`);
