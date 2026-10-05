@@ -1,5 +1,5 @@
 import type { Address } from "viem";
-import { mainnet, base, arbitrum, optimism, polygon, avalanche } from "wagmi/chains";
+import { mainnet, base, arbitrum, optimism, polygon, avalanche, bsc, celo, scroll, linea, mantle, zkSync } from "wagmi/chains";
 
 /**
  * uniswap.ts — Uniswap v3 SwapRouter02 + QuoterV2 integration.
@@ -25,7 +25,11 @@ import { mainnet, base, arbitrum, optimism, polygon, avalanche } from "wagmi/cha
  * with a wagmi client, not from this pure module.
  */
 
-/** SwapRouter02, same address on every chain except Base and Avalanche (separate deployments). */
+/**
+ * SwapRouter02 addresses per chain. Verified 2026-10 against Uniswap docs.
+ * Shared CREATE2 address on most chains; separate deployments on Base,
+ * Avalanche, BNB, Celo, and zkSync.
+ */
 export const UNISWAP_SWAP_ROUTER02_BY_CHAIN: Record<number, Address> = {
   [mainnet.id]: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
   [base.id]: "0x2626664c2603336E57B271c5C0b26F421741e481",
@@ -33,9 +37,17 @@ export const UNISWAP_SWAP_ROUTER02_BY_CHAIN: Record<number, Address> = {
   [optimism.id]: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
   [polygon.id]: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
   [avalanche.id]: "0xbb00FF08d01D300023C629E8fFfFcb65A5a578cE",
+  [bsc.id]: "0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2",
+  [celo.id]: "0x5615CDAb10dc425a742d643d949a7F474C01abc4",
+  [scroll.id]: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
+  [linea.id]: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
+  [mantle.id]: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
+  [zkSync.id]: "0x99c56385dB8a3515b31fABDc48B7b4b2E4f3b01F",
 };
 
-/** QuoterV2, same address on every chain except Base and Avalanche (separate deployments). */
+/**
+ * QuoterV2 addresses per chain. Same deployment pattern as SwapRouter02.
+ */
 export const UNISWAP_QUOTER_V2_BY_CHAIN: Record<number, Address> = {
   [mainnet.id]: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
   [base.id]: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
@@ -43,6 +55,12 @@ export const UNISWAP_QUOTER_V2_BY_CHAIN: Record<number, Address> = {
   [optimism.id]: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
   [polygon.id]: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
   [avalanche.id]: "0xbe0F5544EC67e9B3b2D979aaA43f18Fd87E6257F",
+  [bsc.id]: "0x78D78E420Da98ad378D7799bE8f4AF69033EB077",
+  [celo.id]: "0x82825d0554fA07f7FC52Ab63c961F330fdEFa8E8",
+  [scroll.id]: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
+  [linea.id]: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
+  [mantle.id]: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
+  [zkSync.id]: "0x8Cb537fc92E26d8EBF4d51ac5BC4f0e0b58993e9",
 };
 
 /**

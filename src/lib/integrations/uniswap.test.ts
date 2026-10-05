@@ -70,8 +70,8 @@ describe("uniswap — parseSwapAsset", () => {
 });
 
 describe("uniswap — address tables", () => {
-  it("covers every chain Meridian tracks for Aave (mainnet, base, arbitrum, optimism, polygon, avalanche)", () => {
-    const chains = [1, 8453, 42161, 10, 137, 43114];
+  it("covers all chains where Uniswap v3 is deployed", () => {
+    const chains = [1, 8453, 42161, 10, 137, 43114, 56, 42220, 534352, 59144, 5000, 324];
     for (const id of chains) {
       expect(UNISWAP_SWAP_ROUTER02_BY_CHAIN[id]).toBeDefined();
       expect(UNISWAP_QUOTER_V2_BY_CHAIN[id]).toBeDefined();

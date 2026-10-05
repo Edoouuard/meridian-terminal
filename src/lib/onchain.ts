@@ -106,6 +106,9 @@ export const COMPOUND_V3_USDC_COMET_BY_CHAIN: Record<number, Address> = {
   [mainnet.id]: "0xc3d688B66703497DAA19211EEdff47f25384cdc3",
   [base.id]: "0xb125E6687d4313864e53df431d5425969c15Eb2F",
   [arbitrum.id]: "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf",
+  [optimism.id]: "0x2e44e174f7D53F0212823acC11C01A11d58c5bCB",
+  [polygon.id]: "0xF25212E676D1F7F89Cd72fFEe66158f541246445",
+  [scroll.id]: "0xB2f97c1Bd3bf02f5e74d13f02E3e26F93D77CE44",
 };
 
 export interface TrackedToken {
@@ -202,6 +205,37 @@ export const TRACKED_TOKENS_BY_CHAIN: Record<number, TrackedToken[]> = {
     // canonical Aave v3 Avalanche markets and work directly via pool.supply.
     { symbol: "WETH", address: "0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
     { symbol: "WBTC", address: "0x50b7545627a5162F82A992c33b87aDc75187B218", decimals: 8, priceSymbol: "WBTC", venue: "Wallet" },
+  ],
+  // ─── Chains that were missing tracked tokens ────────────────────────
+  // Verified 2026-10 against each chain's block explorer + Aave v3 market list.
+  [mantle.id]: [
+    { symbol: "USDC", address: "0x09Bc4E0D10E52d373fa6186b9a2f9AAD4bd9bF3e", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
+    { symbol: "USDT", address: "0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
+    { symbol: "WETH", address: "0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
+    { symbol: "WMNT", address: "0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8", decimals: 18, priceSymbol: "MNT", venue: "Wallet" },
+  ],
+  [metis.id]: [
+    { symbol: "USDC", address: "0xEA32A96608495e54156Ae48931A7c20f0dcc1a21", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
+    { symbol: "USDT", address: "0xbB06DCA3AE6887fAbF931640f67cab3e3a16F4dC", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
+    { symbol: "WETH", address: "0x420000000000000000000000000000000000000A", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
+    { symbol: "METIS", address: "0xDeadDeAddeAddEAddeadDEaDDEAdDeaDDeAD0000", decimals: 18, priceSymbol: "METIS", venue: "Wallet" },
+  ],
+  [fantom.id]: [
+    { symbol: "USDC", address: "0x04068DA6C83AFCFA0e13ba15A6696662335D5B75", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
+    { symbol: "WETH", address: "0x74b23882a30290451A17c44f4F05243b6b58C76d", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
+    { symbol: "WBTC", address: "0x321162Cd933E2Be498Cd2267a90534A804051b11", decimals: 8, priceSymbol: "WBTC", venue: "Wallet" },
+    { symbol: "WFTM", address: "0x21be370D5312f44cB42ce377BC9b8a0cEF1A4C83", decimals: 18, priceSymbol: "FTM", venue: "Wallet" },
+  ],
+  [sonic.id]: [
+    { symbol: "USDC", address: "0x29219dd400f2Bf60E5a23d13Be72B486D4038894", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
+    { symbol: "WETH", address: "0x50c42dEAcD8Fc9773493ED674b675bE577f2634b", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
+    { symbol: "WS", address: "0x039e2fB66102314Ce7b64Ce5Ce3E5183bc94aD38", decimals: 18, priceSymbol: "S", venue: "Wallet" },
+  ],
+  [celo.id]: [
+    { symbol: "USDC", address: "0xcebA9300f2b948710d2653dD7B07f33A8B32118C", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
+    { symbol: "USDT", address: "0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
+    { symbol: "WETH", address: "0x66803FB87aBd4aaC3cbB3fAd7C3aa01f6F3FB207", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
+    { symbol: "CELO", address: "0x471EcE3750Da237f93B8E339c536989b8978a438", decimals: 18, priceSymbol: "CELO", venue: "Wallet" },
   ],
 };
 

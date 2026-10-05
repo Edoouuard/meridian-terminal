@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useAccount, useSendTransaction, useWriteContract, usePublicClient } from "wagmi";
 import { applySender, buildExecution, type ExecutionPlan, type Order } from "@/lib/execution";
-import { mainnet, base, arbitrum, optimism, polygon, avalanche } from "wagmi/chains";
+import { mainnet, base, arbitrum, optimism, polygon, avalanche, bsc, gnosis, scroll, zkSync, linea, mantle, metis, fantom, sonic, celo } from "wagmi/chains";
 import { CHAIN_LABEL } from "@/lib/onchain";
 import { needsAllowanceReset } from "@/lib/integrations/usdt";
 
@@ -11,8 +11,7 @@ export type ExecuteStatus = "idle" | "confirming" | "confirmed" | "error";
 
 /**
  * Build a block-explorer tx URL for a chain id + tx hash, for surfacing a
- * confirmed transaction in the UI. Additive helper — `useExecute` itself is
- * unchanged in signature.
+ * confirmed transaction in the UI. Covers all 16 supported chains.
  */
 export function explorerUrlFor(chainId: number, hash: `0x${string}`): string {
   const baseUrl: Record<number, string> = {
@@ -22,6 +21,16 @@ export function explorerUrlFor(chainId: number, hash: `0x${string}`): string {
     [optimism.id]: "https://optimistic.etherscan.io/tx/",
     [polygon.id]: "https://polygonscan.com/tx/",
     [avalanche.id]: "https://snowtrace.io/tx/",
+    [bsc.id]: "https://bscscan.com/tx/",
+    [gnosis.id]: "https://gnosisscan.io/tx/",
+    [scroll.id]: "https://scrollscan.com/tx/",
+    [zkSync.id]: "https://era.zksync.network/tx/",
+    [linea.id]: "https://lineascan.build/tx/",
+    [mantle.id]: "https://mantlescan.xyz/tx/",
+    [metis.id]: "https://andromeda-explorer.metis.io/tx/",
+    [fantom.id]: "https://ftmscan.com/tx/",
+    [sonic.id]: "https://sonicscan.org/tx/",
+    [celo.id]: "https://celoscan.io/tx/",
   };
   return `${baseUrl[chainId] ?? `https://etherscan.io/tx/`}${hash}`;
 }

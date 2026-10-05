@@ -133,7 +133,7 @@ export function resolveOrderForLeg(
   const quoteFor = (symbol: string, decimals: number) =>
     usdToTokenAmount(symbol, leg.sizeUsd, resolvePriceFromList(prices, symbol), decimals);
 
-  // --- Native ETH transfer (executable, mainnet only) -----------------------
+  // --- Native ETH/gas transfer (executable, all chains) ---------------------
   // The recipient comes from the thesis itself (leg.to, parsed by tradePlan's
   // "transfer" intent) — falling back to the `address` param only for a
   // caller that already knows the recipient some other way.
@@ -144,10 +144,7 @@ export function resolveOrderForLeg(
     }
     const symbol = bareSymbol(leg.asset) || "ETH";
     if (symbol !== "ETH") {
-      return { unsupported: `Only native ETH sends are wired — "${symbol}" transfers aren't yet.` };
-    }
-    if (resolveChainId !== 1) {
-      return { unsupported: "Native ETH sends are only wired on Ethereum mainnet — switch networks to send." };
+      return { unsupported: `Only native gas token sends are wired — "${symbol}" transfers aren't yet.` };
     }
     // A literal quantity ("send 0.5 ETH") is already exact — no live price
     // needed or used. execution.ts's normalizeAmount parses this decimal
@@ -290,11 +287,97 @@ export function resolveOrderForLeg(
     };
   }
 
-  // --- Directional / hedge / beta-neutral / options perps (NOT wired here) --
-  // Extended is a special case: it IS live, just not through this pure/offline
-  // path (StarkEx signing needs the connected Extended account's Stark key,
-  // not a wallet signature) — ThreadCard's ExtendedPerpExecuteButton handles
-  // it directly. See extended-live.ts.
+  // --- Lido unstake / claim (executable, mainnet only) ----------------------
+  if (protocol === "lido" && (side === "unstake" || side === "withdraw")) {
+    if (resolveChainId !== 1) {
+      return { unsupported: "Lido unstaking is only available on Ethereum mainnet." };
+    }
+    const quote = quoteFor("ETH", 18);
+    if (!quote) {
+      return { unsupported: "No live price for ETH — cannot size this order safely." };
+    }
+    return {
+      type: "unstake",
+      protocol: "lido",
+      symbol: "stETH",
+      token: "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84" as Address,
+      amount: quote.amountBase,
+      chainId: resolveChainId,
+      decimals: 18,
+    };
+  }
+  if (protocol === "lido" && side === "claim") {
+    if (resolveChainId !== 1) {
+      return { unsupported: "Lido claims are only available on Ethereum mainnet." };
+    }
+    return {
+      type: "claim",
+      protocol: "lido",
+      symbol: "stETH",
+      amount: BigInt(0),
+      chainId: resolveChainId,
+      decimals: 18,
+    };
+  }
+
+  // --- Morpho vault supply / withdraw (executable via Philidor) ------------
+  // Note: the actual vault is resolved dynamically at execute-time by
+  // MorphoExecuteButton using Philidor risk data — this order carries the
+  // token info but the vault address gets patched by the execute button.
+  if (protocol === "morpho") {
+    if (side !== "supply" && side !== "withdraw" && side !== "approve") {
+      return { unsupported: `Morpho ${leg.side || "action"} is not wired yet.` };
+    }
+    const symbol = bareSymbol(leg.asset);
+    const token = findToken(symbol, resolveChainId);
+    if (!token) {
+      return { unsupported: `Morpho: "${symbol}" has no tracked address on this chain.` };
+    }
+    const quote = quoteFor(token.symbol, token.decimals);
+    if (!quote) {
+      return { unsupported: `No live price for ${token.symbol} — cannot size this order safely.` };
+    }
+    return {
+      type: side === "withdraw" ? "withdraw" : "supply",
+      protocol: "morpho",
+      symbol: token.symbol,
+      token: token.address,
+      amount: quote.amountBase,
+      chainId: resolveChainId,
+      decimals: token.decimals,
+    };
+  }
+
+  // --- Uniswap v3 swap (executable via live on-chain quote) ----------------
+  // The amountOutMinimum is resolved by SwapExecuteButton at sign-time from a
+  // live QuoterV2 quote — this order carries the input token + amount only.
+  if (protocol === "uniswap") {
+    if (side !== "swap" && side !== "buy" && side !== "approve") {
+      return { unsupported: `Uniswap ${leg.side || "action"} is not wired yet.` };
+    }
+    const symbol = bareSymbol(leg.asset);
+    const token = findToken(symbol, resolveChainId);
+    if (!token) {
+      return { unsupported: `Uniswap: "${symbol}" has no tracked address on this chain.` };
+    }
+    const quote = quoteFor(token.symbol, token.decimals);
+    if (!quote) {
+      return { unsupported: `No live price for ${token.symbol} — cannot size this order safely.` };
+    }
+    return {
+      type: "swap",
+      protocol: "uniswap",
+      symbol: token.symbol,
+      token: token.address,
+      amount: quote.amountBase,
+      chainId: resolveChainId,
+      decimals: token.decimals,
+    };
+  }
+
+  // --- Directional / hedge / beta-neutral / options perps ------------------
+  // Perp venues have dedicated execute buttons in ThreadCard that bypass
+  // resolveOrderForLeg entirely (EIP-712/StarkEx/LiFi signing flows).
   if (side === "long" || side === "short" || side === "open" || /perp|option|call|put/i.test(leg.asset)) {
     if (protocol === "variational") {
       return {
@@ -302,19 +385,28 @@ export function resolveOrderForLeg(
           "Variational has an active points program but hasn't published a public trading API yet — nothing to sign against.",
       };
     }
+    // Return a shell order for perp venues — ThreadCard dispatches these
+    // to the correct dedicated execute button (Hyperliquid/Extended/LiFi).
+    if (protocol === "hyperliquid" || protocol === "extended" || protocol === "ondo" || protocol === "lighter") {
+      const symbol = bareSymbol(leg.asset);
+      return {
+        type: side === "short" ? "swap" : "swap",
+        protocol: protocol as Order["protocol"],
+        symbol,
+        amount: String(leg.sizeUsd ?? 10000),
+        chainId: resolveChainId,
+        decimals: 18,
+      } as Order;
+    }
     return { unsupported: `${venue} perps not wired for live execution yet` };
   }
 
-  // --- Every other known venue is deliberately not wired --------------------
+  // --- Remaining protocols -------------------------------------------------
   switch (protocol) {
     case "pendle":
       return { unsupported: "Pendle fixed-yield (PT) not wired for live execution yet" };
     case "lido":
       return { unsupported: `Lido ${leg.side || "action"} not wired for live execution yet` };
-    case "morpho":
-      return { unsupported: `Morpho ${leg.side || "action"} not wired for live execution yet` };
-    case "uniswap":
-      return { unsupported: "Uniswap swaps not wired for live execution yet" };
     case "eigenlayer":
       return { unsupported: "EigenLayer restaking not wired for live execution yet" };
     case "bridge":

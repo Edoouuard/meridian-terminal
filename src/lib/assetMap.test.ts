@@ -47,15 +47,16 @@ describe("assetMap — resolveOrderForLeg (Aave supply on Base)", () => {
     expect(res.unsupported).toContain('"DOGE" has no tracked');
   });
 
-  it("returns unsupported for non-wired venues (Hyperliquid long)", () => {
+  it("returns a shell order for perp venues (Hyperliquid long) — dispatched by ThreadCard", () => {
     const res = resolveOrderForLeg(
       { side: "Long", asset: "HYPE PERP", protocol: "Hyperliquid", sizeUsd: 6000 },
       undefined,
       USDC_PRICE,
       BASE_CHAIN_ID,
-    );
-    expect("unsupported" in res).toBe(true);
-    expect(res.unsupported).toContain("perps not wired");
+    ) as Order;
+    // Perp venues return a shell order; the actual signing is handled by dedicated execute buttons.
+    expect("unsupported" in res).toBe(false);
+    expect(res.symbol).toBe("HYPE");
   });
 
   it("returns unsupported for an unwired Aave side", () => {
@@ -149,10 +150,11 @@ describe("assetMap — resolveOrderForLeg (Lido stake)", () => {
     expect(res.unsupported).toContain("No live price for ETH");
   });
 
-  it("leaves other Lido actions (e.g. unstake) unsupported", () => {
-    const res = resolveOrderForLeg(stakeLeg({ side: "Unstake" }), undefined, ETH_PRICE, 1);
-    expect("unsupported" in res).toBe(true);
-    expect(res.unsupported).toContain("not wired");
+  it("routes Lido unstake to a real order on mainnet", () => {
+    const res = resolveOrderForLeg(stakeLeg({ side: "Unstake" }), undefined, ETH_PRICE, 1) as Order;
+    expect(res.type).toBe("unstake");
+    expect(res.protocol).toBe("lido");
+    expect(res.chainId).toBe(1);
   });
 });
 
@@ -186,13 +188,14 @@ describe("assetMap — resolveOrderForLeg (native ETH transfer)", () => {
   it("refuses a non-ETH asset (no ERC20 send wired)", () => {
     const res = resolveOrderForLeg(transferLeg({ asset: "USDC" }), undefined, ETH_PRICE, 1);
     expect("unsupported" in res).toBe(true);
-    expect(res.unsupported).toContain("Only native ETH sends");
+    expect(res.unsupported).toContain("Only native gas token sends");
   });
 
-  it("refuses off mainnet", () => {
-    const res = resolveOrderForLeg(transferLeg(), undefined, ETH_PRICE, BASE_CHAIN_ID);
-    expect("unsupported" in res).toBe(true);
-    expect(res.unsupported).toContain("Ethereum mainnet");
+  it("supports ETH transfers on any chain", () => {
+    const order = resolveOrderForLeg(transferLeg(), undefined, ETH_PRICE, BASE_CHAIN_ID) as Order;
+    expect(order.type).toBe("transfer");
+    expect(order.protocol).toBe("eth");
+    expect(order.chainId).toBe(BASE_CHAIN_ID);
   });
 
   it("hard-fails with no live ETH price", () => {
@@ -230,8 +233,13 @@ describe("assetMap — approveOrderFor", () => {
     expect(approve!.chainId).toBe(BASE_CHAIN_ID);
   });
 
-  it("returns null for non-supply or non-token orders", () => {
-    expect(approveOrderFor({ ...supply, type: "repay" })).toBeNull();
+  it("also derives an approve for Aave repay (needs allowance too)", () => {
+    const approve = approveOrderFor({ ...supply, type: "repay" });
+    expect(approve).not.toBeNull();
+    expect(approve!.type).toBe("approve");
+  });
+
+  it("returns null when no token address is set", () => {
     expect(approveOrderFor({ ...supply, token: undefined })).toBeNull();
   });
 

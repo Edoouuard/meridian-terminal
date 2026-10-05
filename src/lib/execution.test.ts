@@ -170,7 +170,7 @@ describe("execution — buildExecution compound (Comet) plans", () => {
   });
 
   it("rejects a compound order on a chain with no wired USDC market", () => {
-    const res = buildExecution(compoundOrder({ chainId: 137 })); // Polygon -- not wired
+    const res = buildExecution(compoundOrder({ chainId: 250 })); // Fantom -- not wired
     expect("error" in res).toBe(true);
     expect((res as { error: string }).error).toContain("not supported");
   });

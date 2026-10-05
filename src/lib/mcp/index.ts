@@ -40,7 +40,7 @@ export async function buildMcpMarketContext(): Promise<string> {
   const { formatFundingRatesForLLM } = await import("./hyperliquid");
 
   const [aaveContext, fundingContext] = await Promise.all([
-    fetchAaveYieldSummary([1, 8453, 42161, 10, 137]).catch(() => ""),
+    fetchAaveYieldSummary([1, 8453, 42161, 10, 137, 43114, 56, 100, 534352, 324, 59144, 5000, 1088, 250, 146, 42220]).catch(() => ""),
     formatFundingRatesForLLM().catch(() => ""),
   ]);
 

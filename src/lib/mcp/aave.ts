@@ -191,6 +191,13 @@ const CHAIN_NAMES: Record<number, string> = {
   100: "Gnosis",
   534352: "Scroll",
   56: "BNB Chain",
+  324: "zkSync Era",
+  59144: "Linea",
+  5000: "Mantle",
+  1088: "Metis",
+  250: "Fantom",
+  146: "Sonic",
+  42220: "Celo",
 };
 
 /** Parse MCP tool result content into typed data. */

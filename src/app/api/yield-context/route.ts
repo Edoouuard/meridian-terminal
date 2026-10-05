@@ -407,7 +407,7 @@ export async function GET() {
     fetchHlpVault(),
     fetchLighterVaults(),
     fetchPhilidorVaults(),
-    fetchAaveYieldSummary([1, 8453, 42161, 10, 137, 43114]).catch(() => ""),
+    fetchAaveYieldSummary([1, 8453, 42161, 10, 137, 43114, 56, 100, 534352, 324, 59144, 5000, 1088, 250, 146, 42220]).catch(() => ""),
   ]);
 
   const vaults: VaultYield[] = [
