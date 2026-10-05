@@ -141,38 +141,72 @@ export const TRACKED_TOKENS_BY_CHAIN: Record<number, TrackedToken[]> = {
     { symbol: "DAI", address: "0x6B175474E89094C44Da98b954EedeAC495271d0F", decimals: 18, priceSymbol: "DAI", venue: "Wallet" },
     { symbol: "LINK", address: "0x514910771AF9Ca656af840dff83E8264EcF986CA", decimals: 18, priceSymbol: "LINK", venue: "Wallet" },
     { symbol: "UNI", address: "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984", decimals: 18, priceSymbol: "UNI", venue: "Wallet" },
+    { symbol: "AAVE", address: "0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9", decimals: 18, priceSymbol: "AAVE", venue: "Wallet" },
+    { symbol: "CRV", address: "0xD533a949740bb3306d119CC777fa900bA034cd52", decimals: 18, priceSymbol: "CRV", venue: "Wallet" },
+    { symbol: "MKR", address: "0x9f8F72aA9304c8B593d555F12eF6589cC3A579A2", decimals: 18, priceSymbol: "MKR", venue: "Wallet" },
+    { symbol: "SNX", address: "0xC011a73ee8576Fb46F5E1c5751cA3B9Fe0af2a6F", decimals: 18, priceSymbol: "SNX", venue: "Wallet" },
+    { symbol: "LDO", address: "0x5A98FcBEA516Cf06857215779Fd812CA3beF1B32", decimals: 18, priceSymbol: "LDO", venue: "Wallet" },
+    { symbol: "COMP", address: "0xc00e94Cb662C3520282E6f5717214004A7f26888", decimals: 18, priceSymbol: "COMP", venue: "Wallet" },
+    { symbol: "sUSDe", address: "0x9D39A5DE30e57443BfF2A8307A4256c8797A3497", decimals: 18, priceSymbol: "SUSDE", venue: "Wallet" },
+    { symbol: "weETH", address: "0xCd5fE23C85820F7B72D0926FC9b05b43E359b7ee", decimals: 18, priceSymbol: "WEETH", venue: "Wallet" },
+    { symbol: "rETH", address: "0xae78736Cd615f374D3085123A210448E74Fc6393", decimals: 18, priceSymbol: "RETH", venue: "Wallet" },
+    { symbol: "cbETH", address: "0xBe9895146f7AF43049ca1c1AE358B0541Ea49704", decimals: 18, priceSymbol: "CBETH", venue: "Wallet" },
+    { symbol: "GHO", address: "0x40D16FC0246aD3160Ccc09B8D0D3A2cD28aE6C2f", decimals: 18, priceSymbol: "GHO", venue: "Wallet" },
   ],
   [base.id]: [
     { symbol: "USDC", address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
     { symbol: "WETH", address: "0x4200000000000000000000000000000000000006", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
-    // Aave v3 Base canonical assets: wstETH (Lido) and cbBTC (Coinbase) are the
-    // chain's ETH-staking / BTC collateral markets. Base has no canonical WBTC.
     { symbol: "wstETH", address: "0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452", decimals: 18, priceSymbol: "WSTETH", venue: "Lido" },
     { symbol: "cbBTC", address: "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf", decimals: 8, priceSymbol: "WBTC", venue: "Wallet" },
+    { symbol: "USDbC", address: "0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
+    { symbol: "DAI", address: "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb", decimals: 18, priceSymbol: "DAI", venue: "Wallet" },
+    { symbol: "AERO", address: "0x940181a94A35A4569E4529A3CDfB74e38FD98631", decimals: 18, priceSymbol: "AERO", venue: "Wallet" },
+    { symbol: "cbETH", address: "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22", decimals: 18, priceSymbol: "CBETH", venue: "Wallet" },
+    { symbol: "weETH", address: "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A", decimals: 18, priceSymbol: "WEETH", venue: "Wallet" },
+    { symbol: "USDT", address: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
   ],
   [arbitrum.id]: [
     { symbol: "USDC", address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
     { symbol: "USDT", address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
     { symbol: "WETH", address: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
-    // Aave v3 Arbitrum major-asset markets:
     { symbol: "WBTC", address: "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", decimals: 8, priceSymbol: "WBTC", venue: "Wallet" },
     { symbol: "wstETH", address: "0x5979D7b546E38E414f7E9822514be443A4800529", decimals: 18, priceSymbol: "WSTETH", venue: "Lido" },
+    { symbol: "DAI", address: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1", decimals: 18, priceSymbol: "DAI", venue: "Wallet" },
+    { symbol: "ARB", address: "0x912CE59144191C1204E64559FE8253a0e49E6548", decimals: 18, priceSymbol: "ARB", venue: "Wallet" },
+    { symbol: "GMX", address: "0xfc5A1A6EB076a2C7aD06eD22C90d7E710E35ad0a", decimals: 18, priceSymbol: "GMX", venue: "Wallet" },
+    { symbol: "LINK", address: "0xf97f4df75117a78c1A5a0DBb814Af92458539FB4", decimals: 18, priceSymbol: "LINK", venue: "Wallet" },
+    { symbol: "UNI", address: "0xFa7F8980b0f1E64A2062791cc3b0871572f1F7f0", decimals: 18, priceSymbol: "UNI", venue: "Wallet" },
+    { symbol: "AAVE", address: "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196", decimals: 18, priceSymbol: "AAVE", venue: "Wallet" },
+    { symbol: "weETH", address: "0x35751007a407ca6FEFfE80b3cB397736D2cf4dbe", decimals: 18, priceSymbol: "WEETH", venue: "Wallet" },
+    { symbol: "rETH", address: "0xEC70Dcb4A1EFa46b8F2D97C310C9c4790ba5ffA8", decimals: 18, priceSymbol: "RETH", venue: "Wallet" },
+    { symbol: "GHO", address: "0x7dfF72693f6A4149b17e7C6314655f6A9F7c8B33", decimals: 18, priceSymbol: "GHO", venue: "Wallet" },
   ],
   [optimism.id]: [
     { symbol: "USDC", address: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
     { symbol: "USDT", address: "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
     { symbol: "WETH", address: "0x4200000000000000000000000000000000000006", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
-    // Aave v3 Optimism major-asset markets:
     { symbol: "WBTC", address: "0x68f180fcCe6836688e9084f035309E29Bf0A2095", decimals: 8, priceSymbol: "WBTC", venue: "Wallet" },
     { symbol: "wstETH", address: "0x1F32b1c2345538c0c6f582fCB022739c4AbeEfa8", decimals: 18, priceSymbol: "WSTETH", venue: "Lido" },
+    { symbol: "DAI", address: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1", decimals: 18, priceSymbol: "DAI", venue: "Wallet" },
+    { symbol: "OP", address: "0x4200000000000000000000000000000000000042", decimals: 18, priceSymbol: "OP", venue: "Wallet" },
+    { symbol: "LINK", address: "0x350a791Bfc2C21F9Ed5d10980Dad2e2638ffa7f6", decimals: 18, priceSymbol: "LINK", venue: "Wallet" },
+    { symbol: "AAVE", address: "0x76FB31fb4af56892A25e32cFC43De717950c9278", decimals: 18, priceSymbol: "AAVE", venue: "Wallet" },
+    { symbol: "SNX", address: "0x8700dAec35aF8Ff88c16BdF0418774CB3D7599B4", decimals: 18, priceSymbol: "SNX", venue: "Wallet" },
+    { symbol: "rETH", address: "0x9Bcef72be871e61ED4fBbc7630889beE758eb81D", decimals: 18, priceSymbol: "RETH", venue: "Wallet" },
+    { symbol: "UNI", address: "0x6fd9d7AD17242c41f7131d257212c54A0e816691", decimals: 18, priceSymbol: "UNI", venue: "Wallet" },
   ],
   [polygon.id]: [
     { symbol: "USDC", address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
     { symbol: "USDT", address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
-    // Aave v3 Polygon major-asset markets:
     { symbol: "WETH", address: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
     { symbol: "WBTC", address: "0x1bfd67037b42cf73acF2047067bd4F2C47D9BfD6", decimals: 8, priceSymbol: "WBTC", venue: "Wallet" },
     { symbol: "wstETH", address: "0x03b54A6e9a984069379fae1a4fC4dBAE93B3bCCD", decimals: 18, priceSymbol: "WSTETH", venue: "Lido" },
+    { symbol: "DAI", address: "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063", decimals: 18, priceSymbol: "DAI", venue: "Wallet" },
+    { symbol: "LINK", address: "0x53E0bca35eC356BD5ddDFebbD1Fc0fD03FaBad39", decimals: 18, priceSymbol: "LINK", venue: "Wallet" },
+    { symbol: "AAVE", address: "0xD6DF932A45C0f255f85145f286eA0b292B21C90B", decimals: 18, priceSymbol: "AAVE", venue: "Wallet" },
+    { symbol: "UNI", address: "0xb33EaAd8d922B1083446DC23f610c2567fB5180f", decimals: 18, priceSymbol: "UNI", venue: "Wallet" },
+    { symbol: "CRV", address: "0x172370d5Cd63279eFa6d502DAB29171933a610AF", decimals: 18, priceSymbol: "CRV", venue: "Wallet" },
+    { symbol: "WMATIC", address: "0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270", decimals: 18, priceSymbol: "MATIC", venue: "Wallet" },
   ],
   [bsc.id]: [
     { symbol: "USDT", address: "0x55d398326f99059fF775485246999027B3197955", decimals: 18, priceSymbol: "USDT", venue: "Wallet" },
@@ -199,12 +233,12 @@ export const TRACKED_TOKENS_BY_CHAIN: Record<number, TrackedToken[]> = {
   [avalanche.id]: [
     { symbol: "USDC", address: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
     { symbol: "USDT", address: "0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
-    // Aave v3 Avalanche markets. Native AVAX lives as wAVAX in Aave and needs the
-    // WrappedTokenGatewayV3 (wrap+supply) the harness doesn't wire, so it is left
-    // out rather than risking a broken plain-pool supply. WETH.e / WBTC.e are the
-    // canonical Aave v3 Avalanche markets and work directly via pool.supply.
     { symbol: "WETH", address: "0x49D5c2BdFfac6CE2BFdB6640F4F80f226bc10bAB", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
     { symbol: "WBTC", address: "0x50b7545627a5162F82A992c33b87aDc75187B218", decimals: 8, priceSymbol: "WBTC", venue: "Wallet" },
+    { symbol: "WAVAX", address: "0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7", decimals: 18, priceSymbol: "AVAX", venue: "Wallet" },
+    { symbol: "DAI", address: "0xd586E7F844cEa2F87f50152665BCbc2C279D8d70", decimals: 18, priceSymbol: "DAI", venue: "Wallet" },
+    { symbol: "LINK", address: "0x5947BB275c521040051D82396192181b413227A3", decimals: 18, priceSymbol: "LINK", venue: "Wallet" },
+    { symbol: "AAVE", address: "0x63a72806098Bd3D9520cC43356dD56502289c344", decimals: 18, priceSymbol: "AAVE", venue: "Wallet" },
   ],
   // ─── Chains that were missing tracked tokens ────────────────────────
   // Verified 2026-10 against each chain's block explorer + Aave v3 market list.

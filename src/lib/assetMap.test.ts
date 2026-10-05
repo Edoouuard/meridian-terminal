@@ -185,10 +185,12 @@ describe("assetMap — resolveOrderForLeg (native ETH transfer)", () => {
     expect(res.unsupported).toContain("recipient address");
   });
 
-  it("refuses a non-ETH asset (no ERC20 send wired)", () => {
-    const res = resolveOrderForLeg(transferLeg({ asset: "USDC" }), undefined, ETH_PRICE, 1);
-    expect("unsupported" in res).toBe(true);
-    expect(res.unsupported).toContain("Only native gas token sends");
+  it("routes an ERC-20 transfer (USDC) to the erc20 protocol", () => {
+    const order = resolveOrderForLeg(transferLeg({ asset: "USDC" }), undefined, USDC_PRICE, 1) as Order;
+    expect(order.type).toBe("transfer");
+    expect(order.protocol).toBe("erc20");
+    expect(order.token).toBeDefined();
+    expect(order.decimals).toBe(6);
   });
 
   it("supports ETH transfers on any chain", () => {

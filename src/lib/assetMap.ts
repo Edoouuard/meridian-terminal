@@ -81,10 +81,34 @@ function tokenDecimalsFor(symbol: string, chainId?: number): number {
   return token ? token.decimals : 18;
 }
 
-/** Find a tracked token by symbol on a given chain (case-insensitive). Exported for use by venue-specific execute buttons (e.g. Uniswap's live-quote flow) that need the same lookup outside resolveOrderForLeg. */
+/**
+ * Alias map: users/LLM say "ETH" but Uniswap / Aave use "WETH", etc.
+ * findToken tries the literal first, then the alias. This is critical for
+ * swap pairs ("USDC → ETH") since Uniswap only trades ERC20s.
+ */
+const SYMBOL_ALIASES: Record<string, string> = {
+  eth: "WETH",
+  bnb: "WBNB",
+  ftm: "WFTM",
+  mnt: "WMNT",
+  xdai: "WXDAI",
+  s: "WS",
+  metis: "METIS",
+  celo: "CELO",
+  matic: "WETH", // Polygon uses WETH, not WMATIC for Aave
+  avax: "WAVAX",
+  btc: "WBTC",
+};
+
+/** Find a tracked token by symbol on a given chain (case-insensitive). Tries exact match first, then common aliases (ETH→WETH, BNB→WBNB, etc.). */
 export function findToken(symbol: string, chainId: number) {
   const tokens = TRACKED_TOKENS_BY_CHAIN[chainId] ?? [];
-  return tokens.find((t) => t.symbol.toLowerCase() === symbol.trim().toLowerCase());
+  const needle = symbol.trim().toLowerCase();
+  const exact = tokens.find((t) => t.symbol.toLowerCase() === needle);
+  if (exact) return exact;
+  const alias = SYMBOL_ALIASES[needle];
+  if (alias) return tokens.find((t) => t.symbol.toLowerCase() === alias.toLowerCase());
+  return undefined;
 }
 
 /** Strip a PERP / PT / product suffix from an asset so we can match a token symbol ("ETH PERP" → "ETH"). */
@@ -143,36 +167,66 @@ export function resolveOrderForLeg(
       return { unsupported: "Send needs a recipient address — include one like 0x1234... in your thesis." };
     }
     const symbol = bareSymbol(leg.asset) || "ETH";
-    if (symbol !== "ETH") {
-      return { unsupported: `Only native gas token sends are wired — "${symbol}" transfers aren't yet.` };
-    }
-    // A literal quantity ("send 0.5 ETH") is already exact — no live price
-    // needed or used. execution.ts's normalizeAmount parses this decimal
-    // string directly into base units.
-    if (leg.sizeToken) {
+
+    // Native gas token transfer (ETH, BNB, etc.)
+    if (symbol === "ETH" || symbol === "BNB" || symbol === "AVAX" || symbol === "MATIC" || symbol === "FTM") {
+      if (leg.sizeToken) {
+        return {
+          type: "transfer",
+          protocol: "eth",
+          symbol,
+          amount: leg.sizeToken,
+          chainId: resolveChainId,
+          decimals: 18,
+          to: recipient,
+        };
+      }
+      const quote = quoteFor(symbol, 18);
+      if (!quote) {
+        return { unsupported: `No live price for ${symbol} — cannot size this order safely. Price feeds down?` };
+      }
       return {
         type: "transfer",
         protocol: "eth",
-        symbol: "ETH",
-        amount: leg.sizeToken,
+        symbol,
+        amount: quote.amountBase,
         chainId: resolveChainId,
         decimals: 18,
         to: recipient,
       };
     }
-    const quote = quoteFor("ETH", 18);
-    if (!quote) {
-      return { unsupported: "No live price for ETH — cannot size this order safely. Price feeds down?" };
+
+    // ERC-20 token transfer
+    const token = findToken(symbol, resolveChainId);
+    if (!token) {
+      return { unsupported: `"${symbol}" has no tracked address on this chain — can't build a transfer.` };
+    }
+    if (leg.sizeToken) {
+      return {
+        type: "transfer",
+        protocol: "erc20",
+        symbol: token.symbol,
+        token: token.address,
+        amount: leg.sizeToken,
+        chainId: resolveChainId,
+        decimals: token.decimals,
+        to: recipient,
+      } as Order;
+    }
+    const erc20Quote = quoteFor(token.symbol, token.decimals);
+    if (!erc20Quote) {
+      return { unsupported: `No live price for ${token.symbol} — cannot size this order safely.` };
     }
     return {
       type: "transfer",
-      protocol: "eth",
-      symbol: "ETH",
-      amount: quote.amountBase,
+      protocol: "erc20",
+      symbol: token.symbol,
+      token: token.address,
+      amount: erc20Quote.amountBase,
       chainId: resolveChainId,
-      decimals: 18,
+      decimals: token.decimals,
       to: recipient,
-    };
+    } as Order;
   }
 
   // --- Aave v3 supply / repay (executable) ----------------------------------

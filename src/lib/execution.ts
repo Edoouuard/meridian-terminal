@@ -27,7 +27,7 @@ import {
  */
 
 export type OrderType = "supply" | "repay" | "borrow" | "withdraw" | "transfer" | "approve" | "stake" | "swap" | "unstake" | "claim";
-export type OrderProtocol = "aave" | "eth" | "lido" | "uniswap" | "morpho" | "compound";
+export type OrderProtocol = "aave" | "eth" | "erc20" | "lido" | "uniswap" | "morpho" | "compound";
 
 /**
  * Protocol-agnostic order produced by the trade engine. Carries enough to build a
@@ -229,6 +229,20 @@ export const COMET_WITHDRAW_ABI = [
       { name: "amount", type: "uint256" },
     ],
     outputs: [],
+  },
+] as const;
+
+/** ERC20 transfer(to, amount) — for sending ERC-20 tokens directly. */
+export const ERC20_TRANSFER_ABI = [
+  {
+    type: "function",
+    name: "transfer",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "to", type: "address" },
+      { name: "amount", type: "uint256" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
   },
 ] as const;
 
@@ -455,6 +469,25 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         value: amount.value,
         description: `Send ${order.amount} native ${CHAIN_LABEL[chainId] ?? "ETH"} to ${to} on ${chainLabel}`,
         riskNote: `Moves real funds on ${chainLabel} — confirm the recipient and amount before signing. Native transfers are irreversible once confirmed.`,
+      };
+    }
+
+    case "erc20": {
+      if (order.type !== "transfer") return fail(`ERC-20 transfer only supports 'transfer', got '${order.type}'`);
+      const to = order.to;
+      if (!to) return fail("ERC-20 transfer requires a 'to' address");
+      const token = order.token;
+      if (!token) return fail("ERC-20 transfer requires a token address");
+      const amount = normalizeAmount(order.amount, decimals);
+      if ("error" in amount) return amount;
+      return {
+        chainId,
+        address: token,
+        abi: ERC20_TRANSFER_ABI,
+        functionName: "transfer",
+        args: [to, amount.value],
+        description: `Send ${order.amount} ${assetLabel} to ${to} on ${chainLabel}`,
+        riskNote: `Moves real ${assetLabel} on ${chainLabel} — confirm the recipient and amount before signing. Token transfers are irreversible once confirmed.`,
       };
     }
 
