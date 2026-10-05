@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAccount } from "wagmi";
 import type { Order } from "@/lib/execution";
 import { CHAIN_LABEL } from "@/lib/onchain";
@@ -37,15 +37,10 @@ export function AaveSupplyExecuteButton({ order, label }: { order: Order; label:
     void portfolio.refetchPortfolio();
   });
   const [dialogOpen, setDialogOpen] = useState(false);
-  const recordedConfirmedRef = useRef(false);
 
   useEffect(() => {
     if (state === "READY_FOR_SIGNATURE") setDialogOpen(true);
     if (state === "DRAFT") setDialogOpen(false);
-  }, [state]);
-
-  useEffect(() => {
-    if (state !== "CONFIRMED") recordedConfirmedRef.current = false;
   }, [state]);
 
   const amountLabel =
