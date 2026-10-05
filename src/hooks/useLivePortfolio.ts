@@ -1,5 +1,5 @@
 import { formatUnits } from "viem";
-import { useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useSyncExternalStore } from "react";
 import { useAccount, useBalance, useReadContracts } from "wagmi";
 import {
   arbitrum,
@@ -93,6 +93,14 @@ export interface LivePortfolio {
   ethPrice: number | null;
   /** stETH + wstETH as a percent of net portfolio value. */
   stakingConcentrationPct: number | null;
+  /**
+   * Refetch every live read this hook holds (native balances, ERC-20 token
+   * balances, Aave/Spark/Compound reads) — call this right after a
+   * transaction confirms so the portfolio reflects it without a page reload.
+   * Does not touch Hyperliquid/Morpho (those already refresh on their own
+   * effect/polling cadence).
+   */
+  refetchPortfolio: () => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -245,6 +253,53 @@ export function useLivePortfolio(): LivePortfolio {
     query: { enabled: isConnected && !!address },
   });
 
+  // Refetch every live read this hook holds. Exposed so a caller (e.g. right
+  // after a transaction confirms) can pull fresh on-chain state without
+  // waiting for an unrelated re-render or a full page reload.
+  const refetchPortfolio = useCallback(async () => {
+    await Promise.all([
+      mainnetBalance.refetch(),
+      baseBalance.refetch(),
+      arbitrumBalance.refetch(),
+      optimismBalance.refetch(),
+      polygonBalance.refetch(),
+      avalancheBalance.refetch(),
+      bscBalance.refetch(),
+      gnosisBalance.refetch(),
+      scrollBalance.refetch(),
+      zkSyncBalance.refetch(),
+      lineaBalance.refetch(),
+      mantleBalance.refetch(),
+      metisBalance.refetch(),
+      fantomBalance.refetch(),
+      sonicBalance.refetch(),
+      celoBalance.refetch(),
+      tokenBalancesQuery.refetch(),
+      lendingQuery.refetch(),
+      cometQuery.refetch(),
+    ]);
+  }, [
+    mainnetBalance,
+    baseBalance,
+    arbitrumBalance,
+    optimismBalance,
+    polygonBalance,
+    avalancheBalance,
+    bscBalance,
+    gnosisBalance,
+    scrollBalance,
+    zkSyncBalance,
+    lineaBalance,
+    mantleBalance,
+    metisBalance,
+    fantomBalance,
+    sonicBalance,
+    celoBalance,
+    tokenBalancesQuery,
+    lendingQuery,
+    cometQuery,
+  ]);
+
   function priceOf(symbol: string): number {
     return prices?.find((p) => p.symbol === symbol)?.price ?? 0;
   }
@@ -389,5 +444,6 @@ export function useLivePortfolio(): LivePortfolio {
     perpUnrealizedPnl,
     ethPrice,
     stakingConcentrationPct,
+    refetchPortfolio,
   };
 }
