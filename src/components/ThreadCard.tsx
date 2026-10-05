@@ -99,6 +99,29 @@ function NotWired({ venue, reason }: { venue: string; reason: string }) {
   );
 }
 
+/** Human-readable confirm dialog title for an order. */
+function confirmTitle(order: Order): string {
+  const p = order.protocol;
+  const t = order.type;
+  const label = p === "aave" ? "Aave" : p === "spark" ? "Spark" : p === "compound" ? "Compound"
+    : p === "morpho" ? "Morpho" : p === "lido" ? "Lido" : p === "uniswap" ? "Uniswap"
+    : p === "maker" ? "Maker DSR" : p === "rocketpool" ? "Rocket Pool" : p === "frax" ? "Frax"
+    : p === "weth" ? "WETH" : p === "erc20" ? "Token" : p === "eth" ? "Native" : String(p);
+  if (t === "supply" && (p === "aave" || p === "spark" || p === "compound" || p === "morpho" || p === "maker")) return `Approve & Supply on ${label}`;
+  if (t === "stake" && p === "lido") return "Stake on Lido";
+  if (t === "stake" && p === "rocketpool") return "Stake on Rocket Pool";
+  if (t === "stake" && p === "frax") return "Stake on Frax";
+  if (t === "unstake") return `Approve & Unstake on ${label}`;
+  if (t === "claim") return `Claim ${label} Withdrawal`;
+  if (t === "swap" && p === "uniswap") return "Approve & Swap on Uniswap";
+  if (t === "supply" && p === "weth") return "Wrap ETH → WETH";
+  if (t === "withdraw" && p === "weth") return "Unwrap WETH → ETH";
+  if (t === "withdraw") return `Withdraw from ${label}`;
+  if (t === "borrow") return `Borrow from ${label}`;
+  if (t === "transfer") return `Send ${order.symbol ?? "tokens"}`;
+  return "Confirm on-chain action";
+}
+
 /**
  * Real Execute button. Uses the wagmi harness (`useExecute`): on click it builds
  * the order and asks the wallet to sign (Aave v3 supply/repay, native transfer).
@@ -200,25 +223,7 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
       </button>
       <ConfirmDialog
         open={confirming}
-        title={
-          order.protocol === "aave" && order.type === "supply"
-            ? "Approve & Supply on Aave"
-            : order.protocol === "aave" && order.type === "withdraw"
-              ? "Withdraw from Aave"
-              : order.protocol === "lido" && order.type === "stake"
-                ? "Stake on Lido"
-                : order.protocol === "lido" && order.type === "unstake"
-                  ? "Approve & Request Withdrawal on Lido"
-                  : order.protocol === "lido" && order.type === "claim"
-                    ? "Claim Lido Withdrawal"
-                    : order.protocol === "uniswap" && order.type === "swap"
-                      ? "Approve & Swap on Uniswap"
-                      : order.protocol === "morpho" && order.type === "supply"
-                        ? "Approve & Deposit on Morpho"
-                        : order.protocol === "morpho" && order.type === "withdraw"
-                          ? "Withdraw from Morpho"
-                          : "Confirm on-chain action"
-        }
+        title={confirmTitle(order)}
         body={
           <div>
             Sign and broadcast <strong>{order.type}</strong> of{" "}
@@ -263,17 +268,13 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
           </div>
         }
         confirmLabel={
-          order.protocol === "aave" && order.type === "supply"
-            ? "Approve & Supply"
-            : order.protocol === "uniswap" && order.type === "swap"
-              ? "Approve & Swap"
-              : order.protocol === "morpho" && order.type === "supply"
-                ? "Approve & Deposit"
-                : order.protocol === "lido" && order.type === "unstake"
-                  ? "Approve & Request Withdrawal"
-                  : order.protocol === "lido" && order.type === "claim"
-                    ? "Claim ETH"
-                    : "Sign"
+          order.type === "supply" ? "Approve & Supply"
+            : order.type === "swap" ? "Approve & Swap"
+            : order.type === "stake" ? "Stake"
+            : order.type === "unstake" ? "Approve & Unstake"
+            : order.type === "claim" ? "Claim"
+            : order.type === "transfer" ? "Send"
+            : "Sign"
         }
         warning="This moves real funds from your wallet."
         guardrail={guardrail}

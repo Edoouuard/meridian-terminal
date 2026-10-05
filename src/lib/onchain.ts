@@ -88,6 +88,38 @@ export const AAVE_V3_POOL_BY_CHAIN: Record<number, Address> = {
 export const STETH_ADDRESS: Address = "0xae7ab96520DE3A18E5e111B5EaAb095312D7fE84";
 
 /**
+ * Spark (MakerDAO/Sky's Aave v3 fork) pool addresses. Same ABI as Aave v3 —
+ * supply/repay/borrow/withdraw/getUserAccountData all use identical signatures.
+ * Already present in LENDING_POOLS_BY_CHAIN for read-only portfolio health;
+ * now also used for execution.
+ */
+export const SPARK_POOL_BY_CHAIN: Record<number, Address> = {
+  [mainnet.id]: "0xC13e21B648A5Ee794902342038FF3aDAB66BE987",
+  [gnosis.id]: "0x2Dae5307c5E3FD1CF5A72Cb6F698f915860607e0",
+};
+
+/**
+ * Maker/Sky sDAI — ERC-4626 vault wrapping the DAI Savings Rate (DSR).
+ * Deposit DAI → sDAI (accrues yield continuously). Withdraw sDAI → DAI.
+ * Standard EIP-4626, same interface as Morpho vaults.
+ */
+export const SDAI_VAULT: Address = "0x83F20F44975D03b1b09e64809B757c47f942BEeA";
+
+/**
+ * Rocket Pool deposit contract — deposit ETH, receive rETH 1:1 (at the
+ * current exchange rate). Mainnet only.
+ */
+export const ROCKET_DEPOSIT_POOL: Address = "0xDD9BC35aE942eF0cFa76930954a156B3fF30a4E1";
+
+/**
+ * Frax frxETHMinter — submitAndDeposit(recipient) payable: sends ETH,
+ * mints frxETH, deposits frxETH into sfrxETH vault, sends sfrxETH to
+ * recipient. Single-tx ETH → sfrxETH. Mainnet only.
+ */
+export const FRXETH_MINTER: Address = "0xbAFA44EFE7901E04E39Dad13167D089C559c1138";
+export const SFRXETH_ADDRESS: Address = "0xac3E018457B222d93114458476f3E3416Abbe38F";
+
+/**
  * Compound III (Comet) USDC-market proxy addresses. Compound has no single
  * pool like Aave — each Comet is its own base-asset market (USDC, WETH,
  * USDT, ...) with other assets usable only as collateral against it. The

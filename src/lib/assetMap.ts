@@ -1,7 +1,7 @@
 import type { Address } from "viem";
 import type { Order } from "@/lib/execution";
 import type { TradeLeg } from "@/lib/tradePlan";
-import { TRACKED_TOKENS_BY_CHAIN } from "@/lib/onchain";
+import { TRACKED_TOKENS_BY_CHAIN, SPARK_POOL_BY_CHAIN, SDAI_VAULT } from "@/lib/onchain";
 import {
   type PriceEntry,
   resolvePriceFromList,
@@ -41,11 +41,22 @@ export const EXECUTABLE_VENUES: { venue: string; side: string; orderType: Order[
   { venue: "Aave", side: "Repay", orderType: "repay", protocol: "aave" },
   { venue: "Aave", side: "Borrow", orderType: "borrow", protocol: "aave" },
   { venue: "Aave", side: "Withdraw", orderType: "withdraw", protocol: "aave" },
+  { venue: "Spark", side: "Supply", orderType: "supply", protocol: "spark" },
+  { venue: "Spark", side: "Repay", orderType: "repay", protocol: "spark" },
+  { venue: "Spark", side: "Borrow", orderType: "borrow", protocol: "spark" },
+  { venue: "Spark", side: "Withdraw", orderType: "withdraw", protocol: "spark" },
   { venue: "Compound", side: "Supply", orderType: "supply", protocol: "compound" },
   { venue: "Compound", side: "Repay", orderType: "repay", protocol: "compound" },
   { venue: "Compound", side: "Borrow", orderType: "borrow", protocol: "compound" },
   { venue: "Compound", side: "Withdraw", orderType: "withdraw", protocol: "compound" },
+  { venue: "Maker", side: "Supply", orderType: "supply", protocol: "maker" },
+  { venue: "Maker", side: "Withdraw", orderType: "withdraw", protocol: "maker" },
+  { venue: "Rocket Pool", side: "Stake", orderType: "stake", protocol: "rocketpool" },
+  { venue: "Frax", side: "Stake", orderType: "stake", protocol: "frax" },
+  { venue: "WETH", side: "Wrap", orderType: "supply", protocol: "weth" },
+  { venue: "WETH", side: "Unwrap", orderType: "withdraw", protocol: "weth" },
   { venue: "L1", side: "Transfer", orderType: "transfer", protocol: "eth" },
+  { venue: "ERC20", side: "Transfer", orderType: "transfer", protocol: "erc20" },
 ];
 
 /** Human-readable venue label for a protocol display string (e.g. "Hyperliquid"). */
@@ -374,6 +385,109 @@ export function resolveOrderForLeg(
     };
   }
 
+  // --- Spark (Aave v3 fork) supply / repay / borrow / withdraw -------------
+  if (protocol === "spark") {
+    const orderType: Order["type"] | undefined =
+      side === "repay" ? "repay" : side === "supply" ? "supply" : side === "borrow" ? "borrow"
+        : side === "withdraw" ? "withdraw" : side === "approve" ? "approve" : undefined;
+    if (!orderType) {
+      return { unsupported: `Spark ${leg.side} is not wired for live execution yet` };
+    }
+    if (!SPARK_POOL_BY_CHAIN[resolveChainId]) {
+      return { unsupported: `Spark is not deployed on this chain — only Ethereum and Gnosis.` };
+    }
+    const symbol = bareSymbol(leg.asset);
+    const token = findToken(symbol, resolveChainId);
+    if (!token) {
+      return { unsupported: `Spark: "${symbol}" has no tracked address on this chain.` };
+    }
+    const quote = quoteFor(token.symbol, token.decimals);
+    if (!quote) {
+      return { unsupported: `No live price for ${token.symbol} — cannot size this order safely.` };
+    }
+    return {
+      type: orderType, protocol: "spark", symbol: token.symbol,
+      token: token.address, amount: quote.amountBase, chainId: resolveChainId, decimals: token.decimals,
+    };
+  }
+
+  // --- Maker/Sky sDAI (DAI Savings Rate, ERC-4626) -------------------------
+  if (protocol === "maker" || protocol === "sky" || protocol === "sdai") {
+    if (side !== "supply" && side !== "withdraw" && side !== "stake" && side !== "deposit" && side !== "approve") {
+      return { unsupported: `Maker DSR only supports supply/withdraw.` };
+    }
+    if (resolveChainId !== 1) {
+      return { unsupported: "Maker's sDAI vault is only available on Ethereum mainnet." };
+    }
+    const token = findToken("DAI", resolveChainId);
+    if (!token) {
+      return { unsupported: "DAI not tracked on this chain." };
+    }
+    const quote = quoteFor("DAI", token.decimals);
+    if (!quote) {
+      return { unsupported: "No live price for DAI — cannot size this order safely." };
+    }
+    return {
+      type: side === "withdraw" ? "withdraw" : "supply",
+      protocol: "maker", symbol: "DAI", token: token.address,
+      amount: quote.amountBase, chainId: resolveChainId, decimals: token.decimals,
+      spender: SDAI_VAULT,
+    } as Order;
+  }
+
+  // --- Rocket Pool (ETH staking → rETH, mainnet only) ---------------------
+  if (protocol === "rocket pool" || protocol === "rocketpool" || protocol === "rocket") {
+    if (resolveChainId !== 1) {
+      return { unsupported: "Rocket Pool is only available on Ethereum mainnet." };
+    }
+    if (side !== "stake" && side !== "supply" && side !== "deposit") {
+      return { unsupported: `Rocket Pool only supports staking, not "${leg.side}".` };
+    }
+    const quote = quoteFor("ETH", 18);
+    if (!quote) {
+      return { unsupported: "No live price for ETH — cannot size this order safely." };
+    }
+    return {
+      type: "stake", protocol: "rocketpool", symbol: "ETH",
+      amount: quote.amountBase, chainId: resolveChainId, decimals: 18,
+    };
+  }
+
+  // --- Frax (ETH staking → sfrxETH, mainnet only) -------------------------
+  if (protocol === "frax") {
+    if (resolveChainId !== 1) {
+      return { unsupported: "Frax ETH staking is only available on Ethereum mainnet." };
+    }
+    if (side !== "stake" && side !== "supply" && side !== "deposit") {
+      return { unsupported: `Frax only supports staking, not "${leg.side}".` };
+    }
+    const quote = quoteFor("ETH", 18);
+    if (!quote) {
+      return { unsupported: "No live price for ETH — cannot size this order safely." };
+    }
+    return {
+      type: "stake", protocol: "frax", symbol: "ETH",
+      amount: quote.amountBase, chainId: resolveChainId, decimals: 18,
+    };
+  }
+
+  // --- WETH wrap / unwrap --------------------------------------------------
+  if (protocol === "weth") {
+    const token = findToken("WETH", resolveChainId);
+    if (!token) {
+      return { unsupported: "WETH not tracked on this chain." };
+    }
+    const quote = quoteFor("ETH", 18);
+    if (!quote) {
+      return { unsupported: "No live price for ETH — cannot size this order safely." };
+    }
+    return {
+      type: side === "unwrap" || side === "withdraw" ? "withdraw" : "supply",
+      protocol: "weth", symbol: "WETH", token: token.address,
+      amount: quote.amountBase, chainId: resolveChainId, decimals: 18,
+    };
+  }
+
   // --- Morpho vault supply / withdraw (executable via Philidor) ------------
   // Note: the actual vault is resolved dynamically at execute-time by
   // MorphoExecuteButton using Philidor risk data — this order carries the
@@ -531,6 +645,31 @@ export function approveOrderFor(order: Order): Order | null {
       amount: order.amount,
       chainId: order.chainId,
       decimals: order.decimals,
+    };
+  }
+  // Spark: same approve flow as Aave (it's a fork).
+  if (order.protocol === "spark" && (order.type === "supply" || order.type === "repay") && order.token) {
+    return {
+      type: "approve",
+      protocol: "spark",
+      token: order.token,
+      symbol: order.symbol,
+      amount: order.amount,
+      chainId: order.chainId,
+      decimals: order.decimals,
+    };
+  }
+  // Maker sDAI: approve sDAI vault to pull DAI.
+  if (order.protocol === "maker" && order.type === "supply" && order.token) {
+    return {
+      type: "approve",
+      protocol: "maker",
+      token: order.token,
+      symbol: order.symbol,
+      amount: order.amount,
+      chainId: order.chainId,
+      decimals: order.decimals,
+      spender: order.spender,
     };
   }
   return null;

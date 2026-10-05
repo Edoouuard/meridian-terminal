@@ -170,8 +170,8 @@ describe("tradePlan — parseThesisVariants (risk-tiered alternatives)", () => {
 
   it("offers Aave vs Morpho vs Compound for a generic USDC supply thesis, with the live Philidor score deferred to LegRiskBadge rather than an invented number", () => {
     const variants = parseThesisVariants("supply 5k USDC for yield");
-    expect(variants).toHaveLength(3);
-    expect(variants.map((v) => v.variantLabel)).toEqual(["Aave", "Morpho", "Compound"]);
+    expect(variants).toHaveLength(4);
+    expect(variants.map((v) => v.variantLabel)).toEqual(["Aave", "Spark", "Morpho", "Compound"]);
     for (const v of variants) {
       expect(v.legs[0]).toMatchObject({ side: "Supply", protocol: v.variantLabel });
       expect(v.variantNote).toBeTruthy();
@@ -180,17 +180,17 @@ describe("tradePlan — parseThesisVariants (risk-tiered alternatives)", () => {
 
   it("excludes Compound from the supply picker for a non-USDC asset -- it only has a USDC market wired", () => {
     const variants = parseThesisVariants("supply 5k ETH for yield");
-    expect(variants.map((v) => v.variantLabel)).toEqual(["Aave", "Morpho"]);
+    expect(variants.map((v) => v.variantLabel)).toEqual(["Aave", "Spark", "Morpho"]);
   });
 
   it("names Morpho first when the thesis asked for it, still offering Aave and Compound as alternatives", () => {
     const variants = parseThesisVariants("supply 5k USDC to Morpho");
-    expect(variants.map((v) => v.variantLabel)).toEqual(["Morpho", "Aave", "Compound"]);
+    expect(variants.map((v) => v.variantLabel)).toEqual(["Morpho", "Aave", "Spark", "Compound"]);
   });
 
   it("names Compound first when the thesis asked for it, for a USDC supply", () => {
     const variants = parseThesisVariants("supply 5k USDC to Compound");
-    expect(variants.map((v) => v.variantLabel)).toEqual(["Compound", "Aave", "Morpho"]);
+    expect(variants.map((v) => v.variantLabel)).toEqual(["Compound", "Aave", "Spark", "Morpho"]);
     expect(variants[0].legs[0].protocol).toBe("Compound");
   });
 
@@ -211,17 +211,17 @@ describe("tradePlan — parseThesisVariants (risk-tiered alternatives)", () => {
 
   it("offers Aave vs Compound for a USDC borrow thesis", () => {
     const variants = parseThesisVariants("borrow 10k USDC on Aave");
-    expect(variants).toHaveLength(2);
-    expect(variants.map((v) => v.variantLabel)).toEqual(["Aave", "Compound"]);
+    expect(variants).toHaveLength(3);
+    expect(variants.map((v) => v.variantLabel)).toEqual(["Aave", "Spark", "Compound"]);
     for (const v of variants) {
       expect(v.legs[0]).toMatchObject({ side: "Borrow", protocol: v.variantLabel });
     }
   });
 
-  it("does not offer a borrow picker for a non-USDC asset -- Compound has no other market wired", () => {
+  it("offers Aave vs Spark for a non-USDC borrow (Compound filtered out)", () => {
     const variants = parseThesisVariants("borrow 10k ETH on Aave");
-    expect(variants).toHaveLength(1);
-    expect(variants[0].variantLabel).toBeUndefined();
+    expect(variants).toHaveLength(2);
+    expect(variants.map((v) => v.variantLabel)).toEqual(["Aave", "Spark"]);
   });
 
   it("returns a single, unlabeled variant for intents with no honest alternative to offer", () => {

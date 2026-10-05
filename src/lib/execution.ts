@@ -1,6 +1,6 @@
 import type { Abi, Address } from "viem";
 import { parseUnits, zeroAddress } from "viem";
-import { AAVE_V3_POOL_BY_CHAIN, CHAIN_LABEL, COMPOUND_V3_USDC_COMET_BY_CHAIN, STETH_ADDRESS } from "./onchain";
+import { AAVE_V3_POOL_BY_CHAIN, CHAIN_LABEL, COMPOUND_V3_USDC_COMET_BY_CHAIN, STETH_ADDRESS, SPARK_POOL_BY_CHAIN, SDAI_VAULT, ROCKET_DEPOSIT_POOL, FRXETH_MINTER } from "./onchain";
 import { SWAP_ROUTER02_EXACT_INPUT_SINGLE_ABI, UNISWAP_SWAP_ROUTER02_BY_CHAIN } from "./integrations/uniswap";
 import { ERC4626_DEPOSIT_ABI, ERC4626_WITHDRAW_ABI } from "./integrations/morpho";
 import {
@@ -27,7 +27,7 @@ import {
  */
 
 export type OrderType = "supply" | "repay" | "borrow" | "withdraw" | "transfer" | "approve" | "stake" | "swap" | "unstake" | "claim";
-export type OrderProtocol = "aave" | "eth" | "erc20" | "lido" | "uniswap" | "morpho" | "compound";
+export type OrderProtocol = "aave" | "eth" | "erc20" | "lido" | "uniswap" | "morpho" | "compound" | "spark" | "maker" | "weth" | "rocketpool" | "frax";
 
 /**
  * Protocol-agnostic order produced by the trade engine. Carries enough to build a
@@ -229,6 +229,53 @@ export const COMET_WITHDRAW_ABI = [
       { name: "amount", type: "uint256" },
     ],
     outputs: [],
+  },
+] as const;
+
+/** WETH deposit() — wrap native ETH into WETH (payable, amount = msg.value). */
+export const WETH_DEPOSIT_ABI = [
+  {
+    type: "function",
+    name: "deposit",
+    stateMutability: "payable",
+    inputs: [],
+    outputs: [],
+  },
+] as const;
+
+/** WETH withdraw(wad) — unwrap WETH back to native ETH. */
+export const WETH_WITHDRAW_ABI = [
+  {
+    type: "function",
+    name: "withdraw",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "wad", type: "uint256" }],
+    outputs: [],
+  },
+] as const;
+
+/** Rocket Pool RocketDepositPool.deposit() — payable, sends ETH, mints rETH to msg.sender. */
+export const ROCKET_DEPOSIT_ABI = [
+  {
+    type: "function",
+    name: "deposit",
+    stateMutability: "payable",
+    inputs: [],
+    outputs: [],
+  },
+] as const;
+
+/**
+ * Frax frxETHMinter.submitAndDeposit(recipient) — payable, sends ETH,
+ * mints frxETH, deposits into sfrxETH vault, sends sfrxETH to recipient.
+ */
+export const FRXETH_SUBMIT_AND_DEPOSIT_ABI = [
+  {
+    type: "function",
+    name: "submitAndDeposit",
+    stateMutability: "payable",
+    inputs: [{ name: "recipient", type: "address" }],
+    outputs: [{ name: "", type: "uint256" }],
   },
 ] as const;
 
@@ -672,6 +719,159 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
       }
 
       return fail(`Morpho does not yet support order type '${order.type}'`);
+    }
+
+    case "spark": {
+      // Spark is an Aave v3 fork — same ABIs, different pool addresses.
+      const pool = SPARK_POOL_BY_CHAIN[chainId];
+      if (!pool) return fail(`Spark is not supported on ${chainLabel}`);
+      const token = order.token;
+      if (!token) return fail("spark order requires a token address");
+      const amount = normalizeAmount(order.amount, decimals);
+      if ("error" in amount) return amount;
+
+      if (order.type === "approve") {
+        const spender = (order.spender as Address | undefined) ?? pool;
+        return {
+          chainId, address: token, abi: ERC20_APPROVE_ABI, functionName: "approve",
+          args: [spender, amount.value],
+          description: `Approve Spark to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`,
+          riskNote: `Approval lets the spender transfer up to this amount of ${assetLabel}. Confirm before signing.`,
+        };
+      }
+      if (order.type === "supply") {
+        return {
+          chainId, address: pool, abi: AAVE_V3_POOL_SUPPLY_ABI, functionName: "supply",
+          args: [token, amount.value, zeroAddress, BigInt(0)], senderIndex: 2,
+          description: `Supply ${order.amount} ${assetLabel} as collateral to Spark on ${chainLabel}`,
+          riskNote: `Moves real funds on ${chainLabel} — confirm the amount before signing. Your supply earns yield and can be used as collateral (subject to liquidation).`,
+        };
+      }
+      if (order.type === "repay") {
+        return {
+          chainId, address: pool, abi: AAVE_V3_POOL_REPAY_ABI, functionName: "repay",
+          args: [token, amount.value, AAVE_INTEREST_RATE_MODE_VARIABLE, zeroAddress], senderIndex: 3,
+          description: `Repay ${order.amount} ${assetLabel} of Spark debt (variable rate) on ${chainLabel}`,
+          riskNote: `Moves real funds on ${chainLabel} — confirm the amount before signing. This reduces your open Spark debt.`,
+        };
+      }
+      if (order.type === "withdraw") {
+        return {
+          chainId, address: pool, abi: AAVE_V3_POOL_WITHDRAW_ABI, functionName: "withdraw",
+          args: [token, amount.value, zeroAddress], senderIndex: 2,
+          description: `Withdraw ${order.amount} ${assetLabel} from Spark on ${chainLabel}`,
+          riskNote: `Withdraws ${assetLabel} collateral from Spark on ${chainLabel}. Watch your health factor — confirm before signing.`,
+        };
+      }
+      if (order.type === "borrow") {
+        return {
+          chainId, address: pool, abi: AAVE_V3_POOL_BORROW_ABI, functionName: "borrow",
+          args: [token, amount.value, AAVE_INTEREST_RATE_MODE_VARIABLE, BigInt(0), zeroAddress], senderIndex: 4,
+          description: `Borrow ${order.amount} ${assetLabel} against Spark collateral on ${chainLabel} (variable rate)`,
+          riskNote: `Borrowing creates Spark debt on ${chainLabel} and lowers your health factor. Confirm before signing.`,
+        };
+      }
+      return fail(`Spark does not yet support order type '${order.type}'`);
+    }
+
+    case "maker": {
+      // Maker/Sky sDAI — ERC-4626 vault wrapping the DAI Savings Rate.
+      const token = order.token;
+      if (!token) return fail("maker order requires a token address");
+      const amount = normalizeAmount(order.amount, decimals);
+      if ("error" in amount) return amount;
+
+      if (order.type === "approve") {
+        const spender = (order.spender as Address | undefined) ?? SDAI_VAULT;
+        return {
+          chainId, address: token, abi: ERC20_APPROVE_ABI, functionName: "approve",
+          args: [spender, amount.value],
+          description: `Approve sDAI vault to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`,
+          riskNote: `Approval lets the vault transfer up to this amount of ${assetLabel}. Confirm before signing.`,
+        };
+      }
+      if (order.type === "supply") {
+        return {
+          chainId, address: SDAI_VAULT, abi: ERC4626_DEPOSIT_ABI, functionName: "deposit",
+          args: [amount.value, zeroAddress], senderIndex: 1,
+          description: `Deposit ${order.amount} ${assetLabel} into sDAI (Maker DSR) on ${chainLabel}`,
+          riskNote: `Moves real funds on ${chainLabel} into Maker's DAI Savings Rate vault — your DAI earns the DSR yield continuously.`,
+        };
+      }
+      if (order.type === "withdraw") {
+        return {
+          chainId, address: SDAI_VAULT, abi: ERC4626_WITHDRAW_ABI, functionName: "withdraw",
+          args: [amount.value, zeroAddress, zeroAddress], senderIndices: [1, 2],
+          description: `Withdraw ${order.amount} ${assetLabel} from sDAI (Maker DSR) on ${chainLabel}`,
+          riskNote: `Withdraws DAI from the Maker DSR vault back to your wallet. Confirm the amount before signing.`,
+        };
+      }
+      return fail(`Maker DSR does not yet support order type '${order.type}'`);
+    }
+
+    case "weth": {
+      // WETH wrap (deposit ETH → WETH) and unwrap (withdraw WETH → ETH).
+      const token = order.token;
+      if (!token) return fail("WETH order requires the WETH token address");
+      const amount = normalizeAmount(order.amount, decimals);
+      if ("error" in amount) return amount;
+
+      if (order.type === "supply" || order.type === "swap") {
+        // Wrap: deposit() payable — sends ETH as msg.value, credits WETH.
+        return {
+          chainId, address: token, abi: WETH_DEPOSIT_ABI, functionName: "deposit",
+          args: [], value: amount.value,
+          description: `Wrap ${order.amount} ETH into WETH on ${chainLabel}`,
+          riskNote: `Converts native ETH to WETH (wrapped ETH) 1:1. WETH is needed for most DeFi interactions. Fully reversible via unwrap.`,
+        };
+      }
+      if (order.type === "withdraw") {
+        // Unwrap: withdraw(wad) — burns WETH, sends ETH.
+        return {
+          chainId, address: token, abi: WETH_WITHDRAW_ABI, functionName: "withdraw",
+          args: [amount.value],
+          description: `Unwrap ${order.amount} WETH into native ETH on ${chainLabel}`,
+          riskNote: `Converts WETH back to native ETH 1:1. Fully reversible via wrap.`,
+        };
+      }
+      return fail(`WETH only supports wrap (supply) and unwrap (withdraw), got '${order.type}'`);
+    }
+
+    case "rocketpool": {
+      // Rocket Pool: deposit ETH, receive rETH at the current exchange rate.
+      if (chainId !== 1) return fail(`Rocket Pool is only supported on Ethereum mainnet, not ${chainLabel}`);
+      if (order.type !== "stake") return fail(`Rocket Pool only supports 'stake', got '${order.type}'`);
+      const amount = normalizeAmount(order.amount, decimals);
+      if ("error" in amount) return amount;
+      return {
+        chainId,
+        address: ROCKET_DEPOSIT_POOL,
+        abi: ROCKET_DEPOSIT_ABI,
+        functionName: "deposit",
+        args: [],
+        value: amount.value,
+        description: `Stake ${order.amount} ETH via Rocket Pool on ${chainLabel} for rETH`,
+        riskNote: `Moves real ETH on ${chainLabel} and mints rETH at the current exchange rate. Rocket Pool is decentralized staking — rETH accrues staking yield via its exchange rate.`,
+      };
+    }
+
+    case "frax": {
+      // Frax: submitAndDeposit sends ETH → mints frxETH → deposits into sfrxETH vault.
+      if (chainId !== 1) return fail(`Frax ETH staking is only supported on Ethereum mainnet, not ${chainLabel}`);
+      if (order.type !== "stake") return fail(`Frax only supports 'stake', got '${order.type}'`);
+      const amount = normalizeAmount(order.amount, decimals);
+      if ("error" in amount) return amount;
+      return {
+        chainId,
+        address: FRXETH_MINTER,
+        abi: FRXETH_SUBMIT_AND_DEPOSIT_ABI,
+        functionName: "submitAndDeposit",
+        args: [zeroAddress], // recipient patched to connected sender
+        senderIndex: 0,
+        value: amount.value,
+        description: `Stake ${order.amount} ETH via Frax on ${chainLabel} for sfrxETH`,
+        riskNote: `Moves real ETH on ${chainLabel} through Frax's minter — mints frxETH and auto-deposits into sfrxETH for yield. sfrxETH accrues staking yield via its exchange rate.`,
+      };
     }
 
     default:

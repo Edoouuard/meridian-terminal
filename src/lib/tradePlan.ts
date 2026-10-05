@@ -273,10 +273,13 @@ const PROTOCOL_PATTERNS: Array<[RegExp, string]> = [
   [/\bdydx\b|\bdydx\b/i, "dYdX"],
   [/\bgmx\b/i, "GMX"],
   [/\bjupiter\b/i, "Jupiter"],
-  [/\bmaker\b|\bdsr\b/i, "Maker"],
+  [/\bmaker\b|\bdsr\b|\bsdai\b|\bsky\b/i, "Maker"],
+  [/\brocket\s*pool\b|\breth\b/i, "Rocket Pool"],
+  [/\bfrax\b|\bsfrxeth\b|\bfrxeth\b/i, "Frax"],
   [/\bfluid\b/i, "Fluid"],
   [/\bsilo\b/i, "Silo"],
   [/\bspark\b/i, "Spark"],
+  [/\bbalancer\b|\bbal\b/i, "Balancer"],
   [/\bexpress\b/i, "Express"],
   [/\bsolana\b/i, "Solana"],
 ];
@@ -576,19 +579,32 @@ const BETA_NEUTRAL_VENUE_NOTE: Record<string, string> = {
  * of a made-up score. Compound is USDC-only (see
  * COMPOUND_V3_USDC_COMET_BY_CHAIN) — filtered out below for any other asset.
  */
-const SUPPLY_PROTOCOLS = ["Aave", "Morpho", "Compound"] as const;
+const SUPPLY_PROTOCOLS = ["Aave", "Spark", "Morpho", "Compound"] as const;
 const SUPPLY_PROTOCOL_NOTE: Record<string, string> = {
   Aave: "Established money market, deepest liquidity — pooled risk across all listed assets.",
+  Spark: "MakerDAO's Aave v3 fork — same battle-tested codebase, backed by Sky/Maker governance. Ethereum + Gnosis only.",
   Morpho: "Curated ERC-4626 vaults — safety varies by vault; its live Philidor risk score (Prime/Core/Edge) shows once selected.",
   Compound: "Isolated per-market design (each base asset is its own market) — separate risk from Aave's shared pool.",
 };
 
-/** Protocols that can take a plain borrow leg with real live execution. Compound is USDC-only, same constraint as the supply picker. */
-const BORROW_PROTOCOLS = ["Aave", "Compound"] as const;
+/** Protocols that can take a plain borrow leg with real live execution. */
+const BORROW_PROTOCOLS = ["Aave", "Spark", "Compound"] as const;
 const BORROW_PROTOCOL_NOTE: Record<string, string> = {
   Aave: "Established money market, deepest liquidity — pooled risk across all listed assets.",
+  Spark: "MakerDAO's Aave v3 fork — same battle-tested codebase, backed by Sky/Maker governance. Ethereum + Gnosis only.",
   Compound: "Isolated per-market design (each base asset is its own market) — separate risk from Aave's shared pool.",
 };
+
+/** ETH liquid staking protocols, all wired for live execution on mainnet. */
+const STAKING_PROTOCOLS = ["Lido", "Rocket Pool", "Frax"] as const;
+const STAKING_PROTOCOL_NOTE: Record<string, string> = {
+  Lido: "Largest liquid staking protocol — stETH/wstETH, deepest DeFi liquidity, widely accepted as collateral.",
+  "Rocket Pool": "Decentralized staking — rETH accrues yield via exchange rate, no rebasing. Node operator diversification.",
+  Frax: "Dual-token model — sfrxETH accrues yield via exchange rate. Higher yield when frxETH trades below peg.",
+};
+
+/** Protocol that takes a DAI savings deposit. */
+const DAI_SAVINGS_NOTE = "Maker's DAI Savings Rate (DSR) — deposit DAI into sDAI for risk-free (within Maker) yield. Mainnet only.";
 
 /** Leverage tiers offered for a directional perp when the thesis didn't pin an exact leverage itself. */
 const DIRECTIONAL_LEVERAGE_TIERS: { label: string; lev: number; note: string }[] = [
@@ -693,6 +709,45 @@ export function parseThesisVariants(rawText: string): TradePlan[] {
         variantLabel: p,
         variantNote: BORROW_PROTOCOL_NOTE[p],
       }));
+    }
+  }
+
+  // ETH staking: offer Lido, Rocket Pool, and Frax when the thesis didn't
+  // already pin a specific staking provider.
+  if (base.intent === "stake" && (base.asset === "ETH" || base.asset === "stETH")) {
+    const leg = base.legs[0];
+    if (base.protocol === undefined || (STAKING_PROTOCOLS as readonly string[]).includes(base.protocol)) {
+      const named = (STAKING_PROTOCOLS as readonly string[]).includes(leg.protocol) ? leg.protocol : undefined;
+      const ordered = named ? [named, ...STAKING_PROTOCOLS.filter((p) => p !== named)] : [...STAKING_PROTOCOLS];
+      const size = base.sizeUsd ?? 0;
+      const outputToken: Record<string, string> = { Lido: "stETH", "Rocket Pool": "rETH", Frax: "sfrxETH" };
+      return ordered.map((p) => ({
+        ...base,
+        protocol: p,
+        legs: [{ ...leg, protocol: p, asset: outputToken[p] ?? leg.asset }],
+        summary: `Stake ~${fmtUsd(size)} ETH on ${p} for liquid staking yield (${outputToken[p]} in return).`,
+        variantLabel: p,
+        variantNote: STAKING_PROTOCOL_NOTE[p],
+      }));
+    }
+  }
+
+  // DAI supply: add Maker DSR as a variant alongside lending protocols.
+  if (base.intent === "supply" && (base.asset === "DAI" || base.asset === "USDC") && base.asset === "DAI") {
+    const leg = base.legs[0];
+    if (base.protocol === undefined || base.protocol === "Maker") {
+      const size = base.sizeUsd ?? 0;
+      const otherVariants = SUPPLY_PROTOCOLS.filter((p) => p !== "Compound"); // DAI isn't in Compound's USDC market
+      return [
+        { ...base, protocol: "Maker", legs: [{ ...leg, protocol: "Maker" }],
+          summary: `Deposit ~${fmtUsd(size)} DAI into sDAI (Maker DSR) for savings rate yield.`,
+          variantLabel: "Maker DSR", variantNote: DAI_SAVINGS_NOTE },
+        ...otherVariants.map((p) => ({
+          ...base, protocol: p, legs: [{ ...leg, protocol: p }],
+          summary: `Supply ~${fmtUsd(size)} DAI as collateral on ${p} to earn yield while keeping it ready to borrow against.`,
+          variantLabel: p, variantNote: SUPPLY_PROTOCOL_NOTE[p],
+        })),
+      ];
     }
   }
 
