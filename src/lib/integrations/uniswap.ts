@@ -103,22 +103,26 @@ export const SWAP_ROUTER02_EXACT_INPUT_SINGLE_ABI = [
   },
 ] as const;
 
-/** Uniswap v3 fee tiers, in hundredths of a bip (500 = 0.05%, 3000 = 0.3%, 10000 = 1%). */
+/** Uniswap v3 fee tiers, in hundredths of a bip (100 = 0.01%, 500 = 0.05%, 3000 = 0.3%, 10000 = 1%). */
+export const FEE_TIER_LOWEST = 100;
 export const FEE_TIER_STABLE = 500;
 export const FEE_TIER_STANDARD = 3000;
 
 const STABLE_SYMBOLS = new Set(["USDC", "USDT", "DAI"]);
+/** The tightest stablecoin pairs (USDC↔USDT) have their deepest liquidity in the 1 bps pool. */
+const TIGHT_STABLE_PAIRS = new Set(["USDC:USDT", "USDT:USDC"]);
 
 /**
- * Pick a sensible default v3 fee tier: 0.05% for stable-to-stable pairs
- * (deepest, tightest-spread pools), 0.3% for everything else. Deliberately a
- * single-tier heuristic, not multi-pool liquidity probing — v1 scope, same
- * "curated, not auto-discovered" tradeoff already made for tracked tokens
- * (see onchain.ts).
+ * Pick a sensible default v3 fee tier:
+ *   - 0.01% for the tightest stablecoin pairs (USDC↔USDT) where the 1 bps
+ *     pool has the deepest liquidity on mainnet/L2s.
+ *   - 0.05% for other stable-to-stable pairs (e.g. DAI↔USDC).
+ *   - 0.3% for everything else.
  */
 export function defaultFeeTier(tokenInSymbol: string, tokenOutSymbol: string): number {
   const a = tokenInSymbol.trim().toUpperCase();
   const b = tokenOutSymbol.trim().toUpperCase();
+  if (TIGHT_STABLE_PAIRS.has(`${a}:${b}`)) return FEE_TIER_LOWEST;
   return STABLE_SYMBOLS.has(a) && STABLE_SYMBOLS.has(b) ? FEE_TIER_STABLE : FEE_TIER_STANDARD;
 }
 

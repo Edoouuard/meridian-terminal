@@ -5,6 +5,7 @@ import { useAccount, useSendTransaction, useWriteContract, usePublicClient } fro
 import { applySender, buildExecution, type ExecutionPlan, type Order } from "@/lib/execution";
 import { mainnet, base, arbitrum, optimism, polygon, avalanche } from "wagmi/chains";
 import { CHAIN_LABEL } from "@/lib/onchain";
+import { needsAllowanceReset } from "@/lib/integrations/usdt";
 
 export type ExecuteStatus = "idle" | "confirming" | "confirmed" | "error";
 
@@ -133,7 +134,28 @@ export function useExecute(): UseExecuteResult {
         setState({ status: "idle" });
 
         // Step 1: approve (if needed) — sign, broadcast, and WAIT for it to be mined.
+        // USDT quirk: its approve() reverts if the current allowance is > 0.
+        // We must first approve(spender, 0) and wait for it to mine, then
+        // approve(spender, amount). This is harmless for standard ERC20s but
+        // required for USDT on every chain.
         if (approve) {
+          // Step 1a: for USDT-like tokens, reset allowance to 0 first.
+          if (needsAllowanceReset(approve.token) && publicClient) {
+            const resetOrder: Order = { ...approve, amount: BigInt(0) };
+            const resetPlan = preparePlan(resetOrder);
+            if (!resetPlan) return;
+
+            setState({ status: "confirming" });
+            try {
+              const resetHash = await submitPlan(resetPlan, writeContractAsync, sendTransactionAsync);
+              await publicClient.waitForTransactionReceipt({ hash: resetHash });
+            } catch (err) {
+              // If the reset fails (e.g. allowance was already 0), continue —
+              // the actual approve below will either succeed or give its own error.
+            }
+          }
+
+          // Step 1b: set the actual allowance.
           const approvePlan = preparePlan(approve);
           if (!approvePlan) return;
 

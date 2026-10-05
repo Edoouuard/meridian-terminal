@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applySlippage,
   defaultFeeTier,
+  FEE_TIER_LOWEST,
   FEE_TIER_STABLE,
   FEE_TIER_STANDARD,
   parseSwapAsset,
@@ -10,9 +11,14 @@ import {
 } from "@/lib/integrations/uniswap";
 
 describe("uniswap — defaultFeeTier", () => {
-  it("picks the stable tier for a stable-to-stable pair", () => {
-    expect(defaultFeeTier("USDC", "USDT")).toBe(FEE_TIER_STABLE);
+  it("picks the lowest tier for USDC↔USDT (tightest stablecoin pair)", () => {
+    expect(defaultFeeTier("USDC", "USDT")).toBe(FEE_TIER_LOWEST);
+    expect(defaultFeeTier("usdt", "usdc")).toBe(FEE_TIER_LOWEST);
+  });
+
+  it("picks the stable tier for other stable-to-stable pairs", () => {
     expect(defaultFeeTier("dai", "usdc")).toBe(FEE_TIER_STABLE);
+    expect(defaultFeeTier("DAI", "USDT")).toBe(FEE_TIER_STABLE);
   });
 
   it("picks the standard tier for any pair involving a non-stable asset", () => {
