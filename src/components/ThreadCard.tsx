@@ -10,6 +10,7 @@ import { CHAIN_LABEL, STETH_ADDRESS } from "@/lib/onchain";
 import type { Order } from "@/lib/execution";
 import type { TradeLeg, TradePlan } from "@/lib/tradePlan";
 import { useExecute, explorerUrlFor, type UseExecuteResult } from "@/hooks/useExecute";
+import { useStrategyExecutor, type LegStatus } from "@/hooks/useStrategyExecutor";
 import { useHyperliquid } from "@/hooks/useHyperliquid";
 import { useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
 import { useExtendedAccount } from "@/hooks/useExtendedAccount";
@@ -1309,6 +1310,162 @@ function StrategyLegs({ plan }: { plan: TradePlan }) {
   );
 }
 
+const LEG_STATUS_LABEL: Record<LegStatus, string> = {
+  pending: "Pending",
+  "switching-chain": "Switching chain…",
+  approving: "Approving…",
+  executing: "Signing…",
+  confirmed: "Confirmed",
+  error: "Failed",
+  skipped: "Skipped",
+};
+const LEG_STATUS_COLOR: Record<LegStatus, string> = {
+  pending: "var(--color-neutral-500)",
+  "switching-chain": "var(--color-accent-700)",
+  approving: "var(--color-accent-700)",
+  executing: "var(--color-accent-700)",
+  confirmed: "var(--risk-good, #27ae60)",
+  error: "var(--risk-bad, #c0392b)",
+  skipped: "var(--color-neutral-400)",
+};
+
+/** Batch "Execute Strategy" button — runs all executable legs sequentially with chain switching. */
+function ExecuteStrategyButton({ plan }: { plan: TradePlan }) {
+  const { data: prices } = useLivePrices();
+  const { chain, isConnected } = useAccount();
+  const { progress, executeAll, cancel, reset } = useStrategyExecutor();
+  const [confirming, setConfirming] = useState(false);
+
+  // Resolve all legs to orders, filtering out unsupported ones
+  const resolvedOrders = useMemo(() => {
+    const results: { leg: TradeLeg; order: Order; legIndex: number }[] = [];
+    for (let i = 0; i < plan.legs.length; i++) {
+      const leg = plan.legs[i];
+      const resolved = resolveOrderForLeg(leg, undefined, prices, chain?.id);
+      if (!isUnsupported(resolved)) {
+        results.push({ leg, order: resolved, legIndex: i });
+      }
+    }
+    return results;
+  }, [plan.legs, prices, chain?.id]);
+
+  if (resolvedOrders.length === 0) return null;
+
+  // Running state — show progress
+  if (progress.status === "running" || progress.status === "completed" || progress.status === "error" || progress.status === "cancelled") {
+    const confirmed = progress.legs.filter((l) => l.status === "confirmed").length;
+    const total = progress.legs.length;
+    return (
+      <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <span style={{ fontSize: 12, fontWeight: 600 }}>
+            {progress.status === "running"
+              ? `Executing… ${confirmed}/${total}`
+              : progress.status === "completed"
+                ? `All ${total} legs executed`
+                : progress.status === "cancelled"
+                  ? `Cancelled (${confirmed}/${total} done)`
+                  : `Stopped at leg ${progress.currentLeg + 1} (${confirmed}/${total} done)`}
+          </span>
+          {progress.status === "running" ? (
+            <button
+              className="btn"
+              style={{ fontSize: 11, padding: "2px 8px", cursor: "pointer" }}
+              onClick={cancel}
+            >
+              Cancel
+            </button>
+          ) : (
+            <button
+              className="btn"
+              style={{ fontSize: 11, padding: "2px 8px", cursor: "pointer" }}
+              onClick={reset}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+        {/* Progress bar */}
+        <div style={{ height: 3, borderRadius: 2, background: "var(--color-divider)", overflow: "hidden" }}>
+          <div
+            style={{
+              height: "100%",
+              width: `${total > 0 ? (confirmed / total) * 100 : 0}%`,
+              background: progress.status === "error" ? "var(--risk-bad, #c0392b)" : "var(--risk-good, #27ae60)",
+              transition: "width 0.3s ease",
+            }}
+          />
+        </div>
+        {/* Per-leg status */}
+        {progress.legs.map((lp, i) => {
+          const entry = resolvedOrders[i];
+          return (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "1px 0" }}>
+              <span className="text-muted">{entry ? legRowValue(entry.leg) : `Leg ${i + 1}`}</span>
+              <span style={{ color: LEG_STATUS_COLOR[lp.status], fontWeight: lp.status === "confirmed" || lp.status === "error" ? 600 : 400 }}>
+                {LEG_STATUS_LABEL[lp.status]}
+                {lp.hash && (
+                  <>
+                    {" · "}
+                    <a
+                      href={explorerUrlFor(entry?.order.chainId ?? 1, lp.hash)}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ color: "inherit", textDecoration: "underline" }}
+                    >
+                      {lp.hash.slice(0, 8)}…
+                    </a>
+                  </>
+                )}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <button
+        className="btn btn-primary"
+        style={{ fontSize: 13, marginTop: 8, cursor: "pointer", width: "100%" }}
+        onClick={() => setConfirming(true)}
+        title={isConnected ? `Execute all ${resolvedOrders.length} legs sequentially` : "Connect a wallet first"}
+      >
+        Execute Strategy ({resolvedOrders.length} leg{resolvedOrders.length > 1 ? "s" : ""})
+      </button>
+      <ConfirmDialog
+        open={confirming}
+        title="Execute Full Strategy"
+        body={
+          <div>
+            <p style={{ marginBottom: 8 }}>
+              This will execute <strong>{resolvedOrders.length} transaction{resolvedOrders.length > 1 ? "s" : ""}</strong> sequentially,
+              including approvals and chain switching as needed.
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 12 }}>
+              {resolvedOrders.map(({ leg }, i) => (
+                <div key={i} style={{ display: "flex", gap: 4 }}>
+                  <span style={{ color: "var(--color-neutral-400)" }}>{i + 1}.</span>
+                  <span>{leg.side} {leg.asset} on {leg.protocol}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        }
+        confirmLabel={`Execute ${resolvedOrders.length} Leg${resolvedOrders.length > 1 ? "s" : ""}`}
+        warning="This moves real funds from your wallet. Each leg will require wallet confirmation."
+        onConfirm={async () => {
+          setConfirming(false);
+          await executeAll(resolvedOrders.map((r) => r.order));
+        }}
+        onCancel={() => setConfirming(false)}
+      />
+    </>
+  );
+}
+
 /** Individual strategy card — collapsed (preview) or expanded (full details). */
 function StrategyCard({ plan, item, isActive, onClick }: {
   plan: TradePlan;
@@ -1400,6 +1557,9 @@ function StrategyCard({ plan, item, isActive, onClick }: {
 
           {/* Execution legs */}
           <StrategyLegs plan={plan} />
+
+          {/* Batch execute button — only when there are multiple executable legs */}
+          {plan.legs.length > 1 && <ExecuteStrategyButton plan={plan} />}
         </div>
       )}
     </div>
