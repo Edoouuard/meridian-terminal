@@ -48,7 +48,7 @@ export function isTerminalState(state: SupplyFlowState): boolean {
   return state === "CONFIRMED" || isFailureState(state);
 }
 
-const FAILURE_STATES: ReadonlySet<string> = new Set<FailureState>([
+const FAILURE_STATES: ReadonlySet<FailureState> = new Set<FailureState>([
   "WRONG_CHAIN",
   "INSUFFICIENT_BALANCE",
   "INVALID_AMOUNT",
@@ -63,7 +63,7 @@ const FAILURE_STATES: ReadonlySet<string> = new Set<FailureState>([
 ]);
 
 export function isFailureState(state: SupplyFlowState): state is FailureState {
-  return FAILURE_STATES.has(state);
+  return (FAILURE_STATES as ReadonlySet<string>).has(state);
 }
 
 /** A frozen, versioned snapshot of a single USDC -> Aave v3 supply action. */
