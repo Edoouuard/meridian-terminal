@@ -18,7 +18,7 @@ import { LiveAsset, LivePortfolio, useLivePortfolio } from "@/hooks/useLivePortf
 import { NewsFeed } from "@/components/NewsFeed";
 import { CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
 import { routeThesis, type TradePlan } from "@/lib/routeThesis";
-import { routeThesisAsync } from "@/lib/intentEngine";
+import { routeThesisAsync, type PortfolioContext } from "@/lib/intentEngine";
 import { recordExecution } from "@/lib/history";
 
 // Expose the local order-history API on the page module so real execution
@@ -73,8 +73,10 @@ export default function TerminalApp() {
   const [promptText, setPromptText] = useState("");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [pendingText, setPendingText] = useState("");
+  const [analyzeStep, setAnalyzeStep] = useState(0);
   const threadEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Everything below Positions used to stack 9 panels in one long scroll
   // (Risk, Vault risk, 4 venue connect panels, History, Chains, Solana) --
   // grouped into tabs so the left column stays scannable instead of dense.
@@ -107,15 +109,38 @@ export default function TerminalApp() {
     setPromptText("");
     setPendingText(trimmed);
     setIsAnalyzing(true);
+    setAnalyzeStep(0);
+
+    // Animate loading steps
+    const stepTimers = [
+      setTimeout(() => setAnalyzeStep(1), 800),
+      setTimeout(() => setAnalyzeStep(2), 2200),
+    ];
+
+    // Snapshot the live portfolio for the LLM (only if wallet connected)
+    // Free balance = wallet token holdings (idle assets not locked in protocols)
+    const freeBalanceUsd = live.assetsUsd;
+    const portfolioSnapshot: PortfolioContext | undefined = live.isConnected
+      ? {
+          netUsd: live.netUsd,
+          freeBalanceUsd,
+          assets: live.assets,
+          lendingPositions: live.aavePositions,
+          perps: live.perps,
+          netDeltaEthTotal: live.netDeltaEthTotal,
+        }
+      : undefined;
 
     try {
-      const routed = await routeThesisAsync(trimmed);
+      const routed = await routeThesisAsync(trimmed, portfolioSnapshot);
       setThread((cur) => cur.concat([routed]));
     } catch {
       setThread((cur) => cur.concat([routeThesis(trimmed)]));
     } finally {
+      stepTimers.forEach(clearTimeout);
       setIsAnalyzing(false);
       setPendingText("");
+      setAnalyzeStep(0);
     }
   }
 
@@ -129,6 +154,13 @@ export default function TerminalApp() {
     { label: "Farm airdrops", thesis: "I want to farm airdrops and points with a delta-neutral strategy" },
     { label: "Hedge portfolio", thesis: "I need to hedge my ETH exposure, I think the market is going down" },
     { label: "Stake ETH", thesis: "I want to stake my ETH for yield, what are the best options?" },
+  ];
+
+  const FOLLOW_UPS = [
+    { label: "Lower risk", thesis: "Same idea but more conservative, less leverage" },
+    { label: "More yield", thesis: "I want to push for higher yield, I can take more risk" },
+    { label: "On Arbitrum", thesis: "Show me the same strategies but on Arbitrum" },
+    { label: "Delta neutral", thesis: "Make it delta neutral, I don't want directional exposure" },
   ];
 
   return (
@@ -275,40 +307,48 @@ export default function TerminalApp() {
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                gap: "var(--space-4)",
+                gap: "var(--space-6)",
                 padding: "var(--space-8) var(--space-4)",
                 textAlign: "center",
               }}>
-                <h3 style={{
-                  fontFamily: "var(--font-heading)",
-                  color: "var(--color-text)",
-                  margin: 0,
-                  fontSize: 26,
-                  letterSpacing: "-0.02em",
-                }}>
-                  What do you want to do?
-                </h3>
-                <p style={{
-                  margin: 0,
-                  fontSize: 14,
-                  color: "color-mix(in srgb, var(--color-text) 55%, transparent)",
-                  maxWidth: 420,
-                  lineHeight: 1.6,
-                }}>
-                  Describe your goal in your own words. Meridian fetches live rates from every protocol and designs 3 strategies at different risk levels.
-                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", alignItems: "center" }}>
+                  <h3 style={{
+                    fontFamily: "var(--font-heading)",
+                    color: "var(--color-text)",
+                    margin: 0,
+                    fontSize: 28,
+                    letterSpacing: "-0.02em",
+                  }}>
+                    What do you want to do?
+                  </h3>
+                  <p style={{
+                    margin: 0,
+                    fontSize: 14,
+                    color: "color-mix(in srgb, var(--color-text) 50%, transparent)",
+                    maxWidth: 440,
+                    lineHeight: 1.7,
+                  }}>
+                    Describe your goal. Meridian fetches live rates across every protocol and designs strategies at different risk levels.
+                  </p>
+                </div>
                 <div style={{
-                  display: "flex",
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
                   gap: 8,
-                  flexWrap: "wrap",
-                  justifyContent: "center",
-                  marginTop: "var(--space-2)",
+                  width: "100%",
+                  maxWidth: 500,
                 }}>
                   {QUICK_PROMPTS.map((qp) => (
                     <button
                       key={qp.label}
                       className="btn btn-secondary"
-                      style={{ fontSize: 12 }}
+                      style={{
+                        fontSize: 12,
+                        padding: "10px 12px",
+                        textAlign: "left",
+                        justifyContent: "flex-start",
+                        borderRadius: "var(--radius-lg)",
+                      }}
                       disabled={isAnalyzing}
                       onClick={() => submitThesis(qp.thesis)}
                     >
@@ -324,35 +364,30 @@ export default function TerminalApp() {
             ))}
 
             {isAnalyzing && (
-              <div
-                className="card"
-                style={{
-                  gap: 8,
-                  padding: "var(--space-3)",
-                  borderColor: "var(--color-accent-300)",
-                  borderStyle: "solid",
-                  borderWidth: 1,
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span
-                    style={{
-                      display: "inline-block",
-                      width: 14,
-                      height: 14,
-                      borderRadius: "50%",
-                      border: "2px solid var(--color-accent)",
-                      borderTopColor: "transparent",
-                      animation: "spin 0.8s linear infinite",
-                    }}
-                  />
-                  <span style={{ fontSize: 13, fontFamily: "var(--font-heading)", color: "var(--color-accent)" }}>
-                    Fetching live rates & designing strategies
-                  </span>
+              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+                <div className="user-bubble">
+                  <p>{pendingText}</p>
                 </div>
-                <p style={{ margin: 0, fontSize: 12 }} className="text-muted">
-                  &ldquo;{pendingText}&rdquo;
-                </p>
+                <div className="ai-bubble">
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    {[
+                      "Reading your portfolio & market context",
+                      "Fetching live rates across protocols",
+                      "Designing risk-tiered strategies",
+                    ].map((step, i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, opacity: analyzeStep >= i ? 1 : 0.3, transition: "opacity 0.4s" }}>
+                        {analyzeStep > i ? (
+                          <span style={{ width: 16, height: 16, fontSize: 13, color: "var(--color-accent)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>&#10003;</span>
+                        ) : analyzeStep === i ? (
+                          <span style={{ display: "inline-block", width: 16, height: 16, borderRadius: "50%", border: "2px solid var(--color-accent)", borderTopColor: "transparent", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />
+                        ) : (
+                          <span style={{ width: 16, height: 16, borderRadius: "50%", border: "1.5px solid var(--color-divider)", flexShrink: 0 }} />
+                        )}
+                        <span style={{ fontSize: 13, color: analyzeStep >= i ? "var(--color-text)" : "var(--color-neutral-400)" }}>{step}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             )}
 
@@ -367,41 +402,69 @@ export default function TerminalApp() {
             background: "var(--color-bg)",
           }}>
             {thread.length > 0 && !isAnalyzing && (
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: "var(--space-2)" }}>
-                {QUICK_PROMPTS.map((qp) => (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: "var(--space-2)", alignItems: "center" }}>
+                {FOLLOW_UPS.map((f) => (
                   <button
-                    key={qp.label}
+                    key={f.label}
                     className="btn btn-secondary"
                     style={{ fontSize: 11, padding: "2px 8px" }}
                     disabled={isAnalyzing}
-                    onClick={() => submitThesis(qp.thesis)}
+                    onClick={() => submitThesis(f.thesis)}
                   >
-                    {qp.label}
+                    {f.label}
                   </button>
                 ))}
+                <button
+                  className="btn btn-secondary"
+                  style={{ fontSize: 11, padding: "2px 8px", marginLeft: "auto", color: "var(--color-neutral-500)" }}
+                  onClick={() => setThread([])}
+                  title="Clear conversation"
+                >
+                  Clear
+                </button>
               </div>
             )}
-            <div style={{ display: "flex", gap: 8 }}>
-              <input
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+              <textarea
+                ref={textareaRef}
                 className="input"
                 placeholder="Describe what you want: yield, exposure, hedge, airdrops..."
                 value={promptText}
                 disabled={isAnalyzing}
-                onChange={(e) => setPromptText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") submitThesis(promptText);
+                onChange={(e) => {
+                  setPromptText(e.target.value);
+                  // Auto-grow
+                  const ta = e.target;
+                  ta.style.height = "auto";
+                  ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
                 }}
-                style={{ fontSize: 14 }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    submitThesis(promptText);
+                    // Reset height
+                    if (textareaRef.current) textareaRef.current.style.height = "auto";
+                  }
+                }}
+                rows={1}
+                style={{ fontSize: 14, resize: "none", lineHeight: 1.5 }}
               />
               <button
                 className="btn btn-primary btn-icon"
                 aria-label="Send"
-                onClick={() => submitThesis(promptText)}
+                onClick={() => {
+                  submitThesis(promptText);
+                  if (textareaRef.current) textareaRef.current.style.height = "auto";
+                }}
                 disabled={isAnalyzing || !promptText.trim()}
+                style={{ flexShrink: 0 }}
               >
-                →
+                &#8593;
               </button>
             </div>
+            <p className="text-muted" style={{ margin: "4px 0 0", fontSize: 10, textAlign: "center" }}>
+              Enter to send &middot; Shift+Enter for new line
+            </p>
           </div>
         </div>
 

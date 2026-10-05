@@ -151,6 +151,7 @@ a:hover { color: var(--color-accent-700); }
 }
 .input:hover { border-color: color-mix(in srgb, var(--color-text) 45%, transparent); }
 .input:focus-visible { border-color: var(--color-accent); outline-offset: 0; }
+textarea.input { overflow-y: auto; max-height: 120px; }
 
 /* — segmented control (News/Alpha tabs, left-column tabs): a row of radio
    options styled as pill buttons. Was unstyled (raw radio inputs) until now —
@@ -229,6 +230,205 @@ a:hover { color: var(--color-accent-700); }
 }
 
 
+/* ————— strategy cards ————— */
+
+/* The "AI thinking" response bubble, left-aligned like a chat response */
+.ai-bubble {
+  max-width: 92%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.ai-bubble-text {
+  font-size: 13.5px;
+  line-height: 1.65;
+  color: color-mix(in srgb, var(--color-text) 85%, transparent);
+  margin: 0;
+}
+
+/* Horizontal grid of strategy cards */
+.strategy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+  width: 100%;
+}
+
+/* Individual strategy card */
+.strategy-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg);
+  overflow: hidden;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+}
+.strategy-card:hover {
+  border-color: color-mix(in srgb, var(--color-text) 30%, transparent);
+}
+.strategy-card--active {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+  background: var(--color-surface);
+  cursor: default;
+}
+
+/* Risk-colored bar at card top */
+.strategy-card__risk-bar {
+  height: 3px;
+  width: 100%;
+  flex-shrink: 0;
+}
+
+/* Card header with name + risk */
+.strategy-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px 0;
+  gap: 6px;
+}
+.strategy-card__name {
+  font-family: var(--font-heading);
+  font-weight: var(--font-heading-weight);
+  font-size: 14px;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.strategy-card__risk-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+
+/* Card body: summary + meta */
+.strategy-card__body {
+  padding: 6px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+.strategy-card__summary {
+  font-size: 11.5px;
+  line-height: 1.55;
+  color: color-mix(in srgb, var(--color-text) 65%, transparent);
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.strategy-card--active .strategy-card__summary {
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
+/* Protocol pills row */
+.strategy-card__protocols {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.protocol-pill {
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  font-size: 10px;
+  color: var(--color-text);
+  white-space: nowrap;
+}
+
+/* Meta row (size, leverage) */
+.strategy-card__meta {
+  display: flex;
+  gap: 10px;
+  font-size: 10px;
+  color: var(--color-neutral-600);
+}
+
+/* Expanded execution section inside selected card */
+.strategy-card__exec {
+  padding: 0 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--color-divider);
+  margin-top: 6px;
+  padding-top: 10px;
+}
+
+/* Individual leg card inside execution */
+.leg-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-divider);
+  background: color-mix(in srgb, var(--color-bg) 60%, var(--color-surface));
+}
+.leg-card__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 6px;
+}
+.leg-card__side {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-accent);
+}
+.leg-card__detail {
+  font-size: 11px;
+  color: var(--color-text);
+  text-align: right;
+}
+
+/* Risk note callout */
+.risk-note {
+  padding: 8px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.risk-note__label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  margin-bottom: 3px;
+}
+
+/* User bubble (right-aligned) */
+.user-bubble {
+  align-self: flex-end;
+  max-width: 75%;
+  background: var(--color-surface);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-sm) var(--radius-lg);
+  padding: var(--space-2) var(--space-3);
+}
+.user-bubble p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
 /* ————— app shell: error boundary + responsive (additive) ————— */
 
 /* Error boundary fallback surface (shared by ErrorBoundary.tsx). */
@@ -275,6 +475,16 @@ body {
     border-left: 0 !important;
     padding-left: var(--space-3) !important;
     padding-right: var(--space-3) !important;
+  }
+}
+
+/* Strategy cards stack vertically below 860px (single-column layout) */
+@media (max-width: 860px) {
+  .strategy-grid {
+    grid-template-columns: 1fr;
+  }
+  .user-bubble {
+    max-width: 90%;
   }
 }
 

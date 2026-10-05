@@ -9,7 +9,7 @@ import { resolveOrderForLeg, protocolLabel, approveOrderFor, findToken, DEFAULT_
 import { CHAIN_LABEL, STETH_ADDRESS } from "@/lib/onchain";
 import type { Order } from "@/lib/execution";
 import type { TradeLeg, TradePlan } from "@/lib/tradePlan";
-import { useExecute, explorerUrlFor } from "@/hooks/useExecute";
+import { useExecute, explorerUrlFor, type UseExecuteResult } from "@/hooks/useExecute";
 import { useHyperliquid } from "@/hooks/useHyperliquid";
 import { useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
 import { useExtendedAccount } from "@/hooks/useExtendedAccount";
@@ -54,23 +54,6 @@ function recordTypeFor(orderType: string): OrderRecordType {
     default:
       return "custom";
   }
-}
-
-function UserBubble({ children }: { children: React.ReactNode }) {
-  return (
-    <div
-      style={{
-        alignSelf: "flex-end",
-        maxWidth: "80%",
-        background: "var(--color-surface)",
-        border: "1px solid var(--color-divider)",
-        borderRadius: "var(--radius-md)",
-        padding: "var(--space-2) var(--space-3)",
-      }}
-    >
-      <p style={{ margin: 0, fontSize: 14 }}>{children}</p>
-    </div>
-  );
 }
 
 function OrderRow({ label, value, valueColor }: { label: string; value: React.ReactNode; valueColor?: string }) {
@@ -124,7 +107,7 @@ function NotWired({ venue, reason }: { venue: string; reason: string }) {
  */
 function ExecuteButton({ order, label }: { order: Order; label: string }) {
   const { isConnected } = useAccount();
-  const { status, data, error, execute, reset } = useExecute();
+  const { status, data, error, execute, executeWithApproval, reset } = useExecute();
   const [confirming, setConfirming] = useState(false);
   const recordedRef = useRef<string | null>(null);
 
@@ -296,8 +279,7 @@ function ExecuteButton({ order, label }: { order: Order; label: string }) {
         onConfirm={async () => {
           setConfirming(false);
           const approving = approveOrderFor(order);
-          if (approving) await execute(approving);
-          await execute(order);
+          await executeWithApproval(approving, order);
         }}
         onCancel={() => setConfirming(false)}
       />
@@ -1074,7 +1056,6 @@ function isUnsupported(r: Order | { unsupported: string }): r is { unsupported: 
   return "unsupported" in r && typeof r.unsupported === "string";
 }
 
-/** Order card rendered from a parsed TradePlan when item.plan is present. */
 /** One honest row for a single yield option inside YieldFinderCard — a real Execute button when the venue is wired (Aave/Morpho/Compound), an honest "not wired" note with the real APY otherwise (vault deposits, LP pools, every other DefiLlama-tracked protocol). */
 function YieldOptionRow({ option, asset, sizeUsd }: { option: MergedYieldOption; asset: string; sizeUsd: number }) {
   const { data: prices } = useLivePrices();
@@ -1231,137 +1212,22 @@ function YieldFinderCard({ asset, sizeUsd }: { asset: string; sizeUsd: number })
   );
 }
 
-function PlanCard({ item }: { item: ThreadItem }) {
-  const plan = item.plan!;
-  // Live price list used to quote each leg's USD notional into an exact token amount.
-  const { data: prices } = useLivePrices();
-  // Connected chain routes Aave legs to the wallet's network (multi-EVM execution).
-  const { chain } = useAccount();
-  const orderStyle: React.CSSProperties = {
-    borderLeft: "2px solid var(--color-accent)",
-    paddingLeft: "var(--space-2)",
-    fontSize: 13,
-  };
-
-  // Exact human token amount for an already-quoted Order (single source of truth).
-  const orderAmountDisplay = (order: Order): string =>
-    typeof order.amount === "bigint"
-      ? `${formatBaseUnits(order.amount, order.decimals ?? 18)} ${order.symbol ?? ""}`
-      : `${String(order.amount)} ${order.symbol ?? ""}`;
-
-  const risk = riskLabel(plan);
-  const riskColor = risk ? RISK_COLORS[risk] : undefined;
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-      <UserBubble>{item.text || "Describe your thesis."}</UserBubble>
-      <div
-        style={{
-          maxWidth: "90%",
-          background: "var(--color-surface)",
-          border: "1px solid var(--color-divider)",
-          borderRadius: "var(--radius-md)",
-          padding: "var(--space-3)",
-          display: "flex",
-          flexDirection: "column",
-          gap: "var(--space-2)",
-        }}
-      >
-        {/* Strategy header with risk badge */}
-        {plan.variantLabel && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
-            {riskColor && (
-              <span style={{
-                width: 8, height: 8, borderRadius: "50%",
-                background: riskColor, flexShrink: 0,
-              }} />
-            )}
-            <span style={{
-              fontSize: 13,
-              fontFamily: "var(--font-heading)",
-              fontWeight: 600,
-              color: "var(--color-text)",
-            }}>
-              {plan.variantLabel}
-            </span>
-            {risk && (
-              <span style={{
-                fontSize: 10,
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                color: riskColor,
-                fontWeight: 600,
-              }}>
-                {risk}
-              </span>
-            )}
-          </div>
-        )}
-        <p style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: "color-mix(in srgb, var(--color-text) 80%, transparent)" }}>{plan.summary}</p>
-        {plan.intent === "yieldSearch" && <YieldFinderCard asset={plan.asset ?? "USDC"} sizeUsd={plan.sizeUsd ?? 10000} />}
-        {plan.legs.length > 0 && (
-          <div style={orderStyle}>
-            {plan.legs.map((leg, i) => {
-              const resolved = resolveOrderForLeg(leg, undefined, prices, chain?.id);
-              const legSide = (leg.side || "").toLowerCase();
-              const isMorpho = /morpho/i.test(leg.protocol || "");
-              const isLidoWithdraw = /lido/i.test(leg.protocol || "") && legSide === "withdraw";
-              const liveVenue =
-                /hyperliquid|extended|ondo|lighter|uniswap/i.test(leg.protocol || "") || isMorpho || isLidoWithdraw;
-              const building = isUnsupported(resolved) && !liveVenue;
-              return (
-                <div key={i} style={{ marginTop: i === 0 ? 0 : "var(--space-2)", opacity: building ? 0.55 : 1 }}>
-                  <OrderRow label={leg.side} value={legRowValue(leg)} />
-                  <LegRiskBadge leg={leg} />
-                  <StakeYieldBadge leg={leg} />
-                  {isUnsupported(resolved) ? (
-                    /hyperliquid/i.test(leg.protocol || "") ? (
-                      <PerpExecuteButton leg={leg} prices={prices} />
-                    ) : /extended/i.test(leg.protocol || "") ? (
-                      <ExtendedPerpExecuteButton leg={leg} prices={prices} />
-                    ) : /ondo/i.test(leg.protocol || "") ? (
-                      <LifiPerpExecuteButton leg={leg} prices={prices} provider="ondo" />
-                    ) : /lighter/i.test(leg.protocol || "") ? (
-                      <LifiPerpExecuteButton leg={leg} prices={prices} provider="lighter" />
-                    ) : /uniswap/i.test(leg.protocol || "") ? (
-                      <SwapExecuteButton leg={leg} prices={prices} />
-                    ) : isMorpho ? (
-                      legSide === "withdraw" ? <MorphoWithdrawButton leg={leg} prices={prices} /> : <MorphoExecuteButton leg={leg} prices={prices} />
-                    ) : isLidoWithdraw ? (
-                      <LidoUnstakeButton leg={leg} prices={prices} />
-                    ) : (
-                      <NotWired venue={protocolLabel(leg.protocol)} reason={resolved.unsupported} />
-                    )
-                  ) : (
-                    <>
-                      <OrderRow label="Amount" value={orderAmountDisplay(resolved)} valueColor="var(--color-accent-700)" />
-                      <ExecuteButton order={resolved} label={`Execute on ${leg.protocol} →`} />
-                    </>
-                  )}
-                </div>
-              );
-            })}
-            {plan.legs.some((l) => l.note) && (
-              <OrderRow label="Note" value={plan.legs.map((l) => l.note).filter(Boolean).join(" · ")} />
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/**
- * Alternative plans for the same thesis (see tradePlan.parseThesisVariants) —
- * e.g. which perp venue takes a beta-neutral short leg, or a directional
- * perp's leverage tier. Switching never re-parses the thesis; it just swaps
- * which already-computed TradePlan is active, so the risk-relevant fields
- * (leverage, venue) always match what variantNote described.
- */
 const RISK_COLORS: Record<string, string> = {
   conservative: "var(--risk-good)",
   moderate: "var(--risk-warning)",
   aggressive: "var(--risk-serious)",
+};
+
+const RISK_BG: Record<string, string> = {
+  conservative: "color-mix(in srgb, var(--risk-good) 8%, transparent)",
+  moderate: "color-mix(in srgb, var(--risk-warning) 8%, transparent)",
+  aggressive: "color-mix(in srgb, var(--risk-serious) 8%, transparent)",
+};
+
+const RISK_BORDER: Record<string, string> = {
+  conservative: "color-mix(in srgb, var(--risk-good) 20%, transparent)",
+  moderate: "color-mix(in srgb, var(--risk-warning) 20%, transparent)",
+  aggressive: "color-mix(in srgb, var(--risk-serious) 20%, transparent)",
 };
 
 function riskLabel(plan: TradePlan): string | null {
@@ -1377,228 +1243,11 @@ function riskLabel(plan: TradePlan): string | null {
   return null;
 }
 
-function VariantSwitcher({ variants, active, onSelect }: { variants: TradePlan[]; active: TradePlan; onSelect?: (plan: TradePlan) => void }) {
-  return (
-    <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-      <p className="text-muted" style={{ margin: 0, fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>
-        Strategy alternatives
-      </p>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-        {variants.map((v, i) => {
-          const isActive = v === active;
-          const risk = riskLabel(v);
-          const riskColor = risk ? RISK_COLORS[risk] : undefined;
-          return (
-            <button
-              key={i}
-              onClick={() => !isActive && onSelect?.(v)}
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 2,
-                padding: "8px 10px",
-                borderRadius: "var(--radius-md)",
-                border: isActive ? "1px solid var(--color-accent)" : "1px solid var(--color-divider)",
-                background: isActive ? "color-mix(in srgb, var(--color-accent) 8%, transparent)" : "transparent",
-                cursor: isActive ? "default" : "pointer",
-                textAlign: "left",
-                font: "inherit",
-                width: "100%",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                {riskColor && (
-                  <span style={{
-                    width: 6, height: 6, borderRadius: "50%",
-                    background: riskColor, flexShrink: 0,
-                  }} />
-                )}
-                <span style={{
-                  fontSize: 12,
-                  fontFamily: "var(--font-heading)",
-                  fontWeight: 600,
-                  color: isActive ? "var(--color-accent)" : "var(--color-text)",
-                }}>
-                  {v.variantLabel || `Strategy ${i + 1}`}
-                </span>
-              </div>
-              {v.variantNote && (
-                <span style={{ fontSize: 11, color: "color-mix(in srgb, var(--color-text) 55%, transparent)" }}>
-                  {v.variantNote}
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-/** Collapsible strategy row: one-line summary, expandable details. */
-function StrategyRow({ plan, item, defaultOpen }: { plan: TradePlan; item: ThreadItem; defaultOpen?: boolean }) {
-  const [open, setOpen] = useState(defaultOpen ?? false);
-  const risk = riskLabel(plan);
-  const riskColor = risk ? RISK_COLORS[risk] : undefined;
-
-  // Extract unique protocols from legs
-  const protocols = [...new Set(plan.legs.map((l) => l.protocol).filter(Boolean))];
-
-  return (
-    <div
-      style={{
-        border: "1px solid var(--color-divider)",
-        borderRadius: "var(--radius-md)",
-        overflow: "hidden",
-        background: open ? "var(--color-surface)" : "transparent",
-      }}
-    >
-      {/* One-line summary — always visible */}
-      <button
-        onClick={() => setOpen(!open)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          width: "100%",
-          padding: "10px 12px",
-          background: "none",
-          border: "none",
-          cursor: "pointer",
-          font: "inherit",
-          textAlign: "left",
-        }}
-      >
-        {riskColor && (
-          <span style={{
-            width: 8, height: 8, borderRadius: "50%",
-            background: riskColor, flexShrink: 0,
-          }} />
-        )}
-        <span style={{
-          flex: 1,
-          fontSize: 13,
-          fontFamily: "var(--font-heading)",
-          fontWeight: 600,
-          color: "var(--color-text)",
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}>
-          {plan.variantLabel || "Strategy"}
-        </span>
-        {risk && (
-          <span style={{
-            fontSize: 10,
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-            color: riskColor,
-            fontWeight: 600,
-            flexShrink: 0,
-          }}>
-            {risk}
-          </span>
-        )}
-        <span style={{
-          fontSize: 11,
-          color: "var(--color-neutral-500)",
-          flexShrink: 0,
-          transform: open ? "rotate(180deg)" : "rotate(0deg)",
-          transition: "transform 0.15s",
-        }}>
-          ▼
-        </span>
-      </button>
-
-      {/* Expandable details */}
-      {open && (
-        <div style={{
-          padding: "0 12px 12px",
-          display: "flex",
-          flexDirection: "column",
-          gap: 10,
-          borderTop: "1px solid var(--color-divider)",
-        }}>
-          {/* Summary */}
-          <p style={{
-            margin: "10px 0 0",
-            fontSize: 12,
-            lineHeight: 1.6,
-            color: "color-mix(in srgb, var(--color-text) 75%, transparent)",
-          }}>
-            {plan.summary}
-          </p>
-
-          {/* Info grid: protocols, risk */}
-          <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 11 }}>
-            {protocols.length > 0 && (
-              <div>
-                <span className="text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.06em", fontSize: 10 }}>Protocols</span>
-                <div style={{ marginTop: 2, display: "flex", gap: 4, flexWrap: "wrap" }}>
-                  {protocols.map((p) => (
-                    <span key={p} style={{
-                      padding: "1px 6px",
-                      borderRadius: 4,
-                      background: "color-mix(in srgb, var(--color-accent) 10%, transparent)",
-                      fontSize: 11,
-                      color: "var(--color-text)",
-                    }}>
-                      {p}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-            {plan.sizeUsd && plan.sizeUsd > 0 && (
-              <div>
-                <span className="text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.06em", fontSize: 10 }}>Size</span>
-                <div style={{ marginTop: 2 }}>{fmtUsd(plan.sizeUsd)}</div>
-              </div>
-            )}
-            {plan.leverage && (
-              <div>
-                <span className="text-muted" style={{ textTransform: "uppercase", letterSpacing: "0.06em", fontSize: 10 }}>Leverage</span>
-                <div style={{ marginTop: 2 }}>{plan.leverage}x</div>
-              </div>
-            )}
-          </div>
-
-          {/* Risk */}
-          {plan.variantNote && (
-            <div style={{
-              padding: "8px 10px",
-              borderRadius: 6,
-              background: riskColor
-                ? `color-mix(in srgb, ${riskColor} 8%, transparent)`
-                : "color-mix(in srgb, var(--color-text) 5%, transparent)",
-              border: riskColor
-                ? `1px solid color-mix(in srgb, ${riskColor} 20%, transparent)`
-                : "1px solid var(--color-divider)",
-            }}>
-              <span className="text-muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>Risk</span>
-              <p style={{ margin: "2px 0 0", fontSize: 11, lineHeight: 1.5, color: "var(--color-text)" }}>
-                {plan.variantNote}
-              </p>
-            </div>
-          )}
-
-          {/* Legs — execution details */}
-          <StrategyLegs plan={plan} item={item} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** Renders execution legs for a strategy (extracted from PlanCard). */
-function StrategyLegs({ plan, item }: { plan: TradePlan; item: ThreadItem }) {
+/** Renders execution legs for a single strategy. */
+function StrategyLegs({ plan }: { plan: TradePlan }) {
   const { data: prices } = useLivePrices();
   const { chain } = useAccount();
-  const orderStyle: React.CSSProperties = {
-    borderLeft: "2px solid var(--color-accent)",
-    paddingLeft: "var(--space-2)",
-    fontSize: 13,
-  };
+
   const orderAmountDisplay = (order: Order): string =>
     typeof order.amount === "bigint"
       ? `${formatBaseUnits(order.amount, order.decimals ?? 18)} ${order.symbol ?? ""}`
@@ -1607,84 +1256,308 @@ function StrategyLegs({ plan, item }: { plan: TradePlan; item: ThreadItem }) {
   if (plan.legs.length === 0) return null;
 
   return (
-    <div>
-      <span className="text-muted" style={{ fontSize: 10, textTransform: "uppercase", letterSpacing: "0.06em" }}>Execution</span>
-      <div style={{ ...orderStyle, marginTop: 4 }}>
-        {plan.legs.map((leg, i) => {
-          const resolved = resolveOrderForLeg(leg, undefined, prices, chain?.id);
-          const legSide = (leg.side || "").toLowerCase();
-          const isMorpho = /morpho/i.test(leg.protocol || "");
-          const isLidoWithdraw = /lido/i.test(leg.protocol || "") && legSide === "withdraw";
-          const liveVenue =
-            /hyperliquid|extended|ondo|lighter|uniswap/i.test(leg.protocol || "") || isMorpho || isLidoWithdraw;
-          const building = isUnsupported(resolved) && !liveVenue;
-          return (
-            <div key={i} style={{ marginTop: i === 0 ? 0 : "var(--space-2)", opacity: building ? 0.55 : 1 }}>
-              <OrderRow label={leg.side} value={legRowValue(leg)} />
-              <LegRiskBadge leg={leg} />
-              <StakeYieldBadge leg={leg} />
-              {isUnsupported(resolved) ? (
-                /hyperliquid/i.test(leg.protocol || "") ? (
-                  <PerpExecuteButton leg={leg} prices={prices} />
-                ) : /extended/i.test(leg.protocol || "") ? (
-                  <ExtendedPerpExecuteButton leg={leg} prices={prices} />
-                ) : /ondo/i.test(leg.protocol || "") ? (
-                  <LifiPerpExecuteButton leg={leg} prices={prices} provider="ondo" />
-                ) : /lighter/i.test(leg.protocol || "") ? (
-                  <LifiPerpExecuteButton leg={leg} prices={prices} provider="lighter" />
-                ) : /uniswap/i.test(leg.protocol || "") ? (
-                  <SwapExecuteButton leg={leg} prices={prices} />
-                ) : isMorpho ? (
-                  legSide === "withdraw" ? <MorphoWithdrawButton leg={leg} prices={prices} /> : <MorphoExecuteButton leg={leg} prices={prices} />
-                ) : isLidoWithdraw ? (
-                  <LidoUnstakeButton leg={leg} prices={prices} />
-                ) : (
-                  <NotWired venue={protocolLabel(leg.protocol)} reason={resolved.unsupported} />
-                )
-              ) : (
-                <>
-                  <OrderRow label="Amount" value={orderAmountDisplay(resolved)} valueColor="var(--color-accent-700)" />
-                  <ExecuteButton order={resolved} label={`Execute on ${leg.protocol} →`} />
-                </>
-              )}
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {plan.legs.map((leg, i) => {
+        const resolved = resolveOrderForLeg(leg, undefined, prices, chain?.id);
+        const legSide = (leg.side || "").toLowerCase();
+        const isMorpho = /morpho/i.test(leg.protocol || "");
+        const isLido = /lido/i.test(leg.protocol || "");
+        const isLidoWithdraw = isLido && (legSide === "withdraw" || legSide === "unstake");
+        const isLidoStake = isLido && legSide === "stake";
+        const liveVenue =
+          /hyperliquid|extended|ondo|lighter|uniswap/i.test(leg.protocol || "") || isMorpho || isLidoWithdraw || isLidoStake;
+        const building = isUnsupported(resolved) && !liveVenue;
+        return (
+          <div key={i} className="leg-card" style={{ opacity: building ? 0.55 : 1 }}>
+            <div className="leg-card__header">
+              <span className="leg-card__side">{leg.side}</span>
+              <span className="leg-card__detail">{legRowValue(leg)}</span>
             </div>
-          );
-        })}
-        {plan.legs.some((l) => l.note) && (
-          <OrderRow label="Note" value={plan.legs.map((l) => l.note).filter(Boolean).join(" · ")} />
-        )}
-      </div>
+            <LegRiskBadge leg={leg} />
+            <StakeYieldBadge leg={leg} />
+            {isUnsupported(resolved) ? (
+              /hyperliquid/i.test(leg.protocol || "") ? (
+                <PerpExecuteButton leg={leg} prices={prices} />
+              ) : /extended/i.test(leg.protocol || "") ? (
+                <ExtendedPerpExecuteButton leg={leg} prices={prices} />
+              ) : /ondo/i.test(leg.protocol || "") ? (
+                <LifiPerpExecuteButton leg={leg} prices={prices} provider="ondo" />
+              ) : /lighter/i.test(leg.protocol || "") ? (
+                <LifiPerpExecuteButton leg={leg} prices={prices} provider="lighter" />
+              ) : /uniswap/i.test(leg.protocol || "") ? (
+                <SwapExecuteButton leg={leg} prices={prices} />
+              ) : isMorpho ? (
+                legSide === "withdraw" ? <MorphoWithdrawButton leg={leg} prices={prices} /> : <MorphoExecuteButton leg={leg} prices={prices} />
+              ) : isLidoWithdraw ? (
+                <LidoUnstakeButton leg={leg} prices={prices} />
+              ) : (
+                <NotWired venue={protocolLabel(leg.protocol)} reason={resolved.unsupported} />
+              )
+            ) : (
+              <>
+                <OrderRow label="Amount" value={orderAmountDisplay(resolved)} valueColor="var(--color-accent-700)" />
+                <ExecuteButton order={resolved} label={`Execute on ${leg.protocol} →`} />
+              </>
+            )}
+            {leg.note && (
+              <span className="text-muted" style={{ fontSize: 10 }}>{leg.note}</span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
+/** Individual strategy card — collapsed (preview) or expanded (full details). */
+function StrategyCard({ plan, item, isActive, onClick }: {
+  plan: TradePlan;
+  item: ThreadItem;
+  isActive: boolean;
+  onClick: () => void;
+}) {
+  const risk = riskLabel(plan);
+  const riskColor = risk ? RISK_COLORS[risk] : undefined;
+  const protocols = [...new Set(plan.legs.map((l) => l.protocol).filter(Boolean))];
+
+  return (
+    <div
+      className={`strategy-card${isActive ? " strategy-card--active" : ""}`}
+      onClick={isActive ? undefined : onClick}
+      role={isActive ? undefined : "button"}
+      tabIndex={isActive ? undefined : 0}
+      onKeyDown={isActive ? undefined : (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
+    >
+      {/* Risk-colored top bar */}
+      <div
+        className="strategy-card__risk-bar"
+        style={{ background: riskColor || "var(--color-divider)" }}
+      />
+
+      {/* Header */}
+      <div className="strategy-card__header">
+        <span className="strategy-card__name">
+          {plan.variantLabel || "Strategy"}
+        </span>
+        {risk && (
+          <span
+            className="strategy-card__risk-label"
+            style={{
+              color: riskColor,
+              background: risk ? RISK_BG[risk] : undefined,
+            }}
+          >
+            {risk}
+          </span>
+        )}
+      </div>
+
+      {/* Body */}
+      <div className="strategy-card__body">
+        <p className="strategy-card__summary">{plan.summary}</p>
+
+        {/* Protocol pills */}
+        {protocols.length > 0 && (
+          <div className="strategy-card__protocols">
+            {protocols.map((p) => (
+              <span key={p} className="protocol-pill">{p}</span>
+            ))}
+          </div>
+        )}
+
+        {/* Meta */}
+        <div className="strategy-card__meta">
+          {plan.legs.length > 0 && <span>{plan.legs.length} leg{plan.legs.length > 1 ? "s" : ""}</span>}
+          {plan.sizeUsd && plan.sizeUsd > 0 && <span>{fmtUsd(plan.sizeUsd)}</span>}
+          {plan.leverage && <span>{plan.leverage}x</span>}
+        </div>
+      </div>
+
+      {/* Expanded details when active */}
+      {isActive && (
+        <div className="strategy-card__exec">
+          {/* Risk note */}
+          {plan.variantNote && (
+            <div
+              className="risk-note"
+              style={{
+                background: risk ? RISK_BG[risk] : "color-mix(in srgb, var(--color-text) 4%, transparent)",
+                border: `1px solid ${risk ? RISK_BORDER[risk] : "var(--color-divider)"}`,
+              }}
+            >
+              <div className="risk-note__label" style={{ color: riskColor || "var(--color-neutral-500)" }}>
+                {riskColor && <span style={{ width: 5, height: 5, borderRadius: "50%", background: riskColor }} />}
+                {risk || "Note"}
+              </div>
+              <span style={{ color: "var(--color-text)" }}>{plan.variantNote}</span>
+            </div>
+          )}
+
+          {/* Yield search */}
+          {plan.intent === "yieldSearch" && (
+            <YieldFinderCard asset={plan.asset ?? "USDC"} sizeUsd={plan.sizeUsd ?? 10000} />
+          )}
+
+          {/* Execution legs */}
+          <StrategyLegs plan={plan} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Intent label for the AI understanding line. */
+function intentLabel(intent: string): string {
+  const map: Record<string, string> = {
+    lockYield: "Lock in a fixed yield",
+    betaNeutral: "Delta-neutral points farming",
+    directional: "Directional position",
+    swap: "Token swap",
+    hedge: "Portfolio hedge",
+    supply: "Earn yield via lending",
+    borrow: "Borrow against collateral",
+    repay: "Repay debt",
+    stake: "Liquid staking",
+    restake: "Restaking for extra yield",
+    options: "Options position",
+    bridge: "Cross-chain bridge",
+    transfer: "Direct transfer",
+    withdraw: "Withdraw position",
+    yieldSearch: "Find the best yield",
+  };
+  return map[intent] || "Custom strategy";
+}
+
 export function ThreadCard({ item, onSelectVariant }: { item: ThreadItem; onSelectVariant?: (plan: TradePlan) => void }) {
+  const strategies = item.variants && item.variants.length > 1 ? item.variants : item.plan ? [item.plan] : [];
+  const [activeIdx, setActiveIdx] = useState(() => {
+    if (!item.plan || strategies.length <= 1) return 0;
+    // Default to moderate
+    const moderateIdx = strategies.findIndex((s) => {
+      const r = riskLabel(s);
+      return r === "moderate";
+    });
+    if (moderateIdx >= 0) return moderateIdx;
+    const idx = strategies.indexOf(item.plan);
+    return idx >= 0 ? idx : 0;
+  });
+
   if (!item.plan) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
-        <UserBubble>{item.text}</UserBubble>
-        <p style={{ margin: 0, fontSize: 14, maxWidth: "90%" }}>
-          Describe your goal — yield, exposure, hedge, airdrops — and I&apos;ll design strategies with live rates.
-        </p>
+        <div className="user-bubble"><p>{item.text}</p></div>
+        <div className="ai-bubble">
+          <p className="ai-bubble-text">
+            Describe your goal — yield, exposure, hedge, airdrops — and I&apos;ll design strategies with live rates.
+          </p>
+        </div>
       </div>
     );
   }
 
-  // All strategies to display (variants if available, otherwise just the active plan)
-  const strategies = item.variants && item.variants.length > 1 ? item.variants : [item.plan];
+  const hasMultiple = strategies.length > 1;
+  const activePlan = strategies[activeIdx] || item.plan;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-      <UserBubble>{item.text || "Describe your thesis."}</UserBubble>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {strategies.map((plan, i) => (
-          <StrategyRow
-            key={i}
-            plan={plan}
-            item={item}
-            defaultOpen={strategies.length === 1 || plan === item.plan}
-          />
-        ))}
+      {/* User message */}
+      <div className="user-bubble"><p>{item.text || "Describe your thesis."}</p></div>
+
+      {/* AI response */}
+      <div className="ai-bubble">
+        {/* Understanding line */}
+        <p className="ai-bubble-text">
+          <span style={{
+            fontFamily: "var(--font-heading)",
+            fontWeight: 600,
+            color: "var(--color-accent)",
+            fontSize: 14,
+          }}>
+            {intentLabel(activePlan.intent)}
+          </span>
+          {hasMultiple && (
+            <span style={{ color: "var(--color-neutral-500)", fontSize: 12 }}>
+              {" "}— {strategies.length} strategies designed. Click to explore.
+            </span>
+          )}
+        </p>
+
+        {/* Strategy cards grid */}
+        {hasMultiple ? (
+          <div className="strategy-grid">
+            {strategies.map((plan, i) => (
+              <StrategyCard
+                key={i}
+                plan={plan}
+                item={item}
+                isActive={i === activeIdx}
+                onClick={() => {
+                  setActiveIdx(i);
+                  onSelectVariant?.(plan);
+                }}
+              />
+            ))}
+          </div>
+        ) : (
+          /* Single strategy — always expanded */
+          <div
+            className="strategy-card strategy-card--active"
+            style={{ cursor: "default" }}
+          >
+            <div
+              className="strategy-card__risk-bar"
+              style={{ background: riskLabel(activePlan) ? RISK_COLORS[riskLabel(activePlan)!] : "var(--color-accent)" }}
+            />
+            <div className="strategy-card__header">
+              <span className="strategy-card__name">
+                {activePlan.variantLabel || intentLabel(activePlan.intent)}
+              </span>
+              {(() => {
+                const risk = riskLabel(activePlan);
+                return risk ? (
+                  <span className="strategy-card__risk-label" style={{ color: RISK_COLORS[risk], background: RISK_BG[risk] }}>
+                    {risk}
+                  </span>
+                ) : null;
+              })()}
+            </div>
+            <div className="strategy-card__body">
+              <p className="strategy-card__summary" style={{ WebkitLineClamp: "unset" as unknown as number, overflow: "visible" }}>
+                {activePlan.summary}
+              </p>
+              {(() => {
+                const protocols = [...new Set(activePlan.legs.map((l) => l.protocol).filter(Boolean))];
+                return protocols.length > 0 ? (
+                  <div className="strategy-card__protocols">
+                    {protocols.map((p) => <span key={p} className="protocol-pill">{p}</span>)}
+                  </div>
+                ) : null;
+              })()}
+            </div>
+            <div className="strategy-card__exec">
+              {activePlan.variantNote && (() => {
+                const risk = riskLabel(activePlan);
+                const riskColor = risk ? RISK_COLORS[risk] : undefined;
+                return (
+                  <div className="risk-note" style={{
+                    background: risk ? RISK_BG[risk] : "color-mix(in srgb, var(--color-text) 4%, transparent)",
+                    border: `1px solid ${risk ? RISK_BORDER[risk] : "var(--color-divider)"}`,
+                  }}>
+                    <div className="risk-note__label" style={{ color: riskColor || "var(--color-neutral-500)" }}>
+                      {riskColor && <span style={{ width: 5, height: 5, borderRadius: "50%", background: riskColor }} />}
+                      {risk || "Note"}
+                    </div>
+                    <span style={{ color: "var(--color-text)" }}>{activePlan.variantNote}</span>
+                  </div>
+                );
+              })()}
+              {activePlan.intent === "yieldSearch" && (
+                <YieldFinderCard asset={activePlan.asset ?? "USDC"} sizeUsd={activePlan.sizeUsd ?? 10000} />
+              )}
+              <StrategyLegs plan={activePlan} />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
