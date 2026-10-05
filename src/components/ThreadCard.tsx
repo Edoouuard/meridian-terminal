@@ -38,6 +38,7 @@ import { formatBaseUnits, resolvePriceFromList, usdToTokenAmount, type PriceEntr
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { assessHealthFactorGuardrail } from "@/lib/safety";
 import { recordExecution, type OrderRecordType } from "@/lib/history";
+import { AaveSupplyExecuteButton } from "@/components/AaveSupplyExecuteButton";
 
 /** Map an execution Order type to a coarse history record type. */
 function recordTypeFor(orderType: string): OrderRecordType {
@@ -1298,7 +1299,11 @@ function StrategyLegs({ plan }: { plan: TradePlan }) {
             ) : (
               <>
                 <OrderRow label="Amount" value={orderAmountDisplay(resolved)} valueColor="var(--color-accent-700)" />
-                <ExecuteButton order={resolved} label={`Execute on ${leg.protocol} →`} />
+                {resolved.protocol === "aave" && resolved.type === "supply" ? (
+                  <AaveSupplyExecuteButton order={resolved} label="Supply on Aave →" />
+                ) : (
+                  <ExecuteButton order={resolved} label={`Execute on ${leg.protocol} →`} />
+                )}
               </>
             )}
             {leg.note && (
