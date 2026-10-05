@@ -48,9 +48,14 @@ function inferIntent(legs: TradeLeg[]): TradeIntent {
   if (legs.length === 0) return "unknown";
   const sides = new Set(legs.map((l) => l.side.toLowerCase()));
 
-  // Beta-neutral: both long AND short in the same plan
-  if (sides.has("long") && sides.has("short")) return "betaNeutral";
-  if (sides.has("long") || sides.has("short")) return "directional";
+  // Beta-neutral / delta-neutral: ANY long-side exposure (long perp, spot buy,
+  // supply, stake) paired with a short perp makes the strategy neutral — not
+  // just "Long" + "Short". A basis trade (Buy ETH spot + Short ETH PERP) or a
+  // hedged yield play (Supply ETH on Aave + Short ETH PERP) are both neutral.
+  const hasLongExposure = sides.has("long") || sides.has("buy") || sides.has("supply") || sides.has("stake") || sides.has("swap");
+  const hasShort = sides.has("short");
+  if (hasLongExposure && hasShort) return "betaNeutral";
+  if (sides.has("long") || hasShort) return "directional";
   if (sides.has("stake") || sides.has("restake")) return "stake";
   if (sides.has("swap") || sides.has("buy")) return "swap";
   if (sides.has("supply")) return "supply";
@@ -133,12 +138,28 @@ function strategyToTradePlan(strategy: LLMStrategy): TradePlan & { riskTier: LLM
 /*  Public API                                                         */
 /* ------------------------------------------------------------------ */
 
+/** Serializable portfolio snapshot for the LLM strategy engine. */
+export interface PortfolioContext {
+  /** Total net portfolio value in USD. */
+  netUsd: number;
+  /** Free (idle) wallet balance in USD — tokens sitting in the wallet, not deployed in any protocol. */
+  freeBalanceUsd: number;
+  /** Wallet token holdings. */
+  assets: { symbol: string; venue: string; chain: string; balance: number; usd: number }[];
+  /** Lending/borrowing positions (Aave, Compound, Morpho, Spark). */
+  lendingPositions: { protocol: string; chain: string; collateralUsd: number; debtUsd: number; healthFactor: number | null }[];
+  /** Open Hyperliquid perp positions. */
+  perps: { coin: string; size: number; notional: number; unrealizedPnl: number }[];
+  /** Net ETH delta across all venues (spot + perps). */
+  netDeltaEthTotal: number | null;
+}
+
 /**
  * Async thesis routing via Claude. Produces 3 risk-tiered strategy variants.
  * Falls back to the sync regex parser on any error (network, API key missing,
  * malformed response, etc.) — the app never breaks.
  */
-export async function routeThesisAsync(rawText: string): Promise<ThreadItem> {
+export async function routeThesisAsync(rawText: string, portfolio?: PortfolioContext): Promise<ThreadItem> {
   const text = (rawText ?? "").trim();
   if (!text) return routeThesis(text);
 
@@ -146,7 +167,7 @@ export async function routeThesisAsync(rawText: string): Promise<ThreadItem> {
     const res = await fetch("/api/parse-intent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ thesis: text }),
+      body: JSON.stringify({ thesis: text, portfolio }),
     });
 
     if (!res.ok) {

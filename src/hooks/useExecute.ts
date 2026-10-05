@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { useAccount, useSendTransaction, useWriteContract } from "wagmi";
+import { useAccount, useSendTransaction, useWriteContract, usePublicClient } from "wagmi";
 import { applySender, buildExecution, type ExecutionPlan, type Order } from "@/lib/execution";
 import { mainnet, base, arbitrum, optimism, polygon, avalanche } from "wagmi/chains";
 import { CHAIN_LABEL } from "@/lib/onchain";
@@ -36,6 +36,14 @@ export interface ExecuteState {
 export interface UseExecuteResult extends ExecuteState {
   /** Build a plan from an order and submit it to the wallet (NEVER auto-called — only from an explicit UI click). */
   execute: (order: Order) => Promise<void>;
+  /**
+   * Execute an optional approve step, WAIT for it to be mined on-chain, then
+   * execute the main order. This is required for any flow where the main tx
+   * depends on allowance set by the approve (Morpho deposit, Aave supply,
+   * Uniswap swap, Lido unstake). Without waiting for the approve to be mined,
+   * the main tx reverts because the allowance doesn't exist yet.
+   */
+  executeWithApproval: (approve: Order | null, order: Order) => Promise<void>;
   /** Return to idle and clear data/error. */
   reset: () => void;
 }
@@ -55,6 +63,7 @@ export function useExecute(): UseExecuteResult {
   const { address, isConnected, chain } = useAccount();
   const { writeContractAsync } = useWriteContract();
   const { sendTransactionAsync } = useSendTransaction();
+  const publicClient = usePublicClient();
 
   const [state, setState] = useState<ExecuteState>({ status: "idle" });
   /**
@@ -65,60 +74,112 @@ export function useExecute(): UseExecuteResult {
    */
   const submittingRef = useRef(false);
 
+  /** Validate common preconditions (wallet connected, correct chain). Returns the built+patched plan or sets error state and returns null. */
+  const preparePlan = useCallback(
+    (order: Order): ExecutionPlan | null => {
+      if (!isConnected || !address) {
+        setState({ status: "error", error: new Error("wallet not connected") });
+        return null;
+      }
+      const connectedChainId = chain?.id;
+      if (connectedChainId !== undefined && order.chainId !== connectedChainId) {
+        const label = CHAIN_LABEL[order.chainId] ?? `chain ${order.chainId}`;
+        setState({ status: "error", error: new Error(`Wrong network - switch to ${label} before signing`) });
+        return null;
+      }
+      const built = buildExecution(order);
+      if ("error" in built) {
+        setState({ status: "error", error: new Error(built.error) });
+        return null;
+      }
+      const plan = applySender(built, address);
+      if ("error" in plan) {
+        setState({ status: "error", error: new Error(plan.error) });
+        return null;
+      }
+      return plan;
+    },
+    [address, isConnected, chain],
+  );
+
   const execute = useCallback(
     async (order: Order) => {
-      // ANTI DOUBLE-SUBMISSION: no-op while a submission is in flight. Repeat
-      // clicks never re-sign or re-broadcast. Guard also resets on error.
       if (submittingRef.current) return;
       submittingRef.current = true;
       try {
         setState({ status: "idle" });
-
-        if (!isConnected || !address) {
-          setState({ status: "error", error: new Error("wallet not connected") });
-          return;
-        }
-
-        // CHAIN-MATCH CHECK before building/signing: the order is for a specific
-        // chainId; the wallet must be connected to that exact chain. If not, refuse
-        // to build or sign so we never broadcast an order on the wrong network.
-        const connectedChainId = chain?.id;
-        if (connectedChainId !== undefined && order.chainId !== connectedChainId) {
-          const label = CHAIN_LABEL[order.chainId] ?? `chain ${order.chainId}`;
-          setState({ status: "error", error: new Error(`Wrong network - switch to ${label} before signing`) });
-          return;
-        }
-
-        const built = buildExecution(order);
-        if ("error" in built) {
-          setState({ status: "error", error: new Error(built.error) });
-          return;
-        }
-
-        const plan = applySender(built, address);
-        if ("error" in plan) {
-          setState({ status: "error", error: new Error(plan.error) });
-          return;
-        }
+        const plan = preparePlan(order);
+        if (!plan) return;
 
         setState({ status: "confirming" });
         try {
           const hash = await submitPlan(plan, writeContractAsync, sendTransactionAsync);
           setState({ status: "confirmed", data: hash });
         } catch (err) {
-          // Catches both user signer-rejection (e.g. code 4001) and RPC failures.
           setState({ status: "error", error: err });
         }
       } finally {
         submittingRef.current = false;
       }
     },
-    [address, isConnected, chain, sendTransactionAsync, writeContractAsync],
+    [preparePlan, sendTransactionAsync, writeContractAsync],
+  );
+
+  const executeWithApproval = useCallback(
+    async (approve: Order | null, order: Order) => {
+      if (submittingRef.current) return;
+      submittingRef.current = true;
+      try {
+        setState({ status: "idle" });
+
+        // Step 1: approve (if needed) — sign, broadcast, and WAIT for it to be mined.
+        if (approve) {
+          const approvePlan = preparePlan(approve);
+          if (!approvePlan) return;
+
+          setState({ status: "confirming" });
+          let approveHash: `0x${string}`;
+          try {
+            approveHash = await submitPlan(approvePlan, writeContractAsync, sendTransactionAsync);
+          } catch (err) {
+            setState({ status: "error", error: err });
+            return;
+          }
+
+          // Wait for the approve tx to be mined so the allowance is live on-chain
+          // before we submit the main tx. Without this, the main tx (deposit/swap)
+          // reverts because the allowance doesn't exist yet.
+          if (publicClient) {
+            try {
+              await publicClient.waitForTransactionReceipt({ hash: approveHash });
+            } catch (err) {
+              setState({ status: "error", error: new Error(`Approve tx failed on-chain: ${err instanceof Error ? err.message : String(err)}`) });
+              return;
+            }
+          }
+        }
+
+        // Step 2: main order (deposit/swap/supply) — now that allowance is confirmed on-chain.
+        const mainPlan = preparePlan(order);
+        if (!mainPlan) return;
+
+        setState({ status: "confirming" });
+        try {
+          const hash = await submitPlan(mainPlan, writeContractAsync, sendTransactionAsync);
+          setState({ status: "confirmed", data: hash });
+        } catch (err) {
+          setState({ status: "error", error: err });
+        }
+      } finally {
+        submittingRef.current = false;
+      }
+    },
+    [preparePlan, publicClient, sendTransactionAsync, writeContractAsync],
   );
 
   const reset = useCallback(() => setState({ status: "idle" }), []);
 
-  return { ...state, execute, reset };
+  return { ...state, execute, executeWithApproval, reset };
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */

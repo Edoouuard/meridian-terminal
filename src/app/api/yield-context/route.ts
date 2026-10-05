@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
+import { fetchAaveYieldSummary } from "@/lib/mcp/aave";
 
 /**
  * GET /api/yield-context
  *
  * Aggregates ALL live yield data from every source, fetched fresh each time.
- * No hardcoded rates — everything comes from protocol APIs:
+ * No hardcoded rates — everything comes from protocol APIs + MCP servers:
  *
  * 1. DefiLlama yields → ALL lending/LP pools from protocols Meridian supports
  * 2. DefiLlama yields → ALL ETH liquid staking providers
@@ -12,6 +13,7 @@ import { NextResponse } from "next/server";
  * 4. Hyperliquid API → HLP vault APR
  * 5. Lighter API → ALL public pool APRs
  * 6. Philidor API → ALL risk-scored DeFi vaults (Morpho, Aave, Compound, etc.)
+ * 7. Aave MCP (mcp.aave.com) → Live Aave v3/v4 rates across all chains
  *
  * Returns a text summary for the LLM + structured JSON.
  * Never throws — returns partial data on any individual source failure.
@@ -399,12 +401,13 @@ function buildSummary(ctx: Omit<YieldContext, "summary" | "fetchedAt">): string 
 
 export async function GET() {
   // Fetch ALL sources in parallel — each is independently null-safe
-  const [defiLlama, funding, hlp, lighterVaults, philidor] = await Promise.all([
+  const [defiLlama, funding, hlp, lighterVaults, philidor, aaveMcp] = await Promise.all([
     fetchDefiLlama(),
     fetchFundingRates(),
     fetchHlpVault(),
     fetchLighterVaults(),
     fetchPhilidorVaults(),
+    fetchAaveYieldSummary([1, 8453, 42161, 10, 137, 43114]).catch(() => ""),
   ]);
 
   const vaults: VaultYield[] = [
@@ -421,7 +424,8 @@ export async function GET() {
     fetchedAt: new Date().toISOString(),
     summary: "",
   };
-  ctx.summary = buildSummary(ctx);
+  // Build summary with optional Aave MCP enrichment appended
+  ctx.summary = buildSummary(ctx) + (aaveMcp ? `\n${aaveMcp}` : "");
 
   return NextResponse.json(ctx);
 }

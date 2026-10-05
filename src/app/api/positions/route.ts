@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { fetchAavePositions, type AavePosition } from "@/lib/mcp/aave";
 
 export const revalidate = 30;
 
@@ -136,8 +137,33 @@ export async function GET(request: Request) {
   }
 
   try {
-    const [morpho, vaults] = await Promise.all([fetchMorphoPositions(address), fetchMorphoVaultPositions(address)]);
-    return NextResponse.json({ address, positions: [...morpho], vaults });
+    const [morpho, vaults, aavePositions] = await Promise.all([
+      fetchMorphoPositions(address),
+      fetchMorphoVaultPositions(address),
+      fetchAavePositions(address).catch((): AavePosition[] => []),
+    ]);
+
+    // Convert Aave MCP positions to IndexedLendingPosition format for backward compat
+    const aaveIndexed: IndexedLendingPosition[] = aavePositions.flatMap((p) => {
+      const positions: IndexedLendingPosition[] = [];
+      if (p.totalCollateralUsd > 0 || p.totalDebtUsd > 0) {
+        positions.push({
+          protocol: `Aave v3`,
+          venue: p.chain ?? "MCP",
+          collateralUsd: p.totalCollateralUsd,
+          supplyUsd: p.totalCollateralUsd,
+          borrowUsd: p.totalDebtUsd,
+        });
+      }
+      return positions;
+    });
+
+    return NextResponse.json({
+      address,
+      positions: [...morpho, ...aaveIndexed],
+      vaults,
+      aave: aavePositions, // Also expose raw Aave MCP data for richer UI
+    });
   } catch (e) {
     return NextResponse.json(
       { error: (e as Error).message || "Indexer lookup failed." },
