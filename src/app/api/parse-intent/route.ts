@@ -53,7 +53,9 @@ When the user's portfolio is provided:
 - **Use existing tokens directly**: If user holds ETH and wants a delta-neutral, use their ETH directly (no swap needed). If they hold USDC and want ETH exposure, the first leg is a swap.
 - **Identify risks in existing positions**: Low health factor, over-concentration, unhedged exposure — mention it in variantNote.
 - **Show the full trade path**: Detail EVERY trade step by step with exact amounts from the portfolio. Example: "You hold 5.2 ETH ($12,500) → Stake 3 ETH on Lido ($7,200) → Short 3 ETH PERP on Hyperliquid ($7,200, 1x)".
-- **If wallet is empty or not connected**: Use $10,000 as default budget and detail from scratch (swap stablecoins → buy asset → deploy).
+- **If wallet is not connected** (no portfolio data at all): Use $10,000 as a hypothetical budget on L2 chains (Base, Arbitrum) and detail from scratch. Mention this is a hypothetical example.
+- **If wallet IS connected but free balance is very low** (under $10): Do NOT invent a $10,000 budget. Be honest: "You have $X available. Consider depositing more funds before deploying a strategy." You can still suggest what they COULD do once funded.
+- **If wallet IS connected with a real balance**: Size EVERYTHING from the actual free balance. No exceptions.
 
 ## Available Protocols on Meridian
 
@@ -126,6 +128,26 @@ Each leg must map to exactly one on-chain action. Do not combine multiple action
 When a strategy has offsetting legs (long + short for neutrality), both legs MUST have the same sizeUsd.
 When the user's portfolio is provided, ALWAYS size legs based on their FREE BALANCE (idle wallet tokens), NOT the total portfolio value. A user with $50k total but only $8k free should get legs sized from that $8k.
 When the user gives a total budget, split it sensibly across legs (e.g. $10k total = $10k long + $10k short for neutral, or $7k supply + $3k borrow for a leveraged yield play).
+
+### Rule 7: Gas cost awareness and chain selection (CRITICAL)
+Transaction fees MUST be factored into strategy viability. Approximate gas costs per transaction:
+- **Ethereum L1**: $2-15 per tx (swap ~$8-15, supply/stake ~$3-8, approve ~$2-4)
+- **Base / Arbitrum / Optimism**: $0.01-0.10 per tx
+- **Polygon**: $0.01-0.05 per tx
+- **BNB Chain**: $0.10-0.50 per tx
+
+RULES:
+- If the user's FREE BALANCE is under $100: ONLY suggest L2 chains (Base, Arbitrum, Optimism, Polygon). NEVER suggest Ethereum L1 — the gas fees would eat 10-50% of their capital.
+- If the user's FREE BALANCE is under $500: Prefer L2 chains. Only suggest Ethereum L1 if the strategy is simple (1-2 tx max) and the yield justifies the gas cost.
+- If the user's FREE BALANCE is under $50: Strategies must be MINIMAL — 1-2 legs max, on the cheapest chains (Base, Polygon). Be honest that limited capital restricts options.
+- Total estimated gas cost for ALL legs of a strategy should be under 5% of the deployed capital. If a 4-leg strategy on Ethereum costs ~$40 in gas but the user only has $200, that's 20% — UNACCEPTABLE. Move to L2 or reduce legs.
+- ALWAYS mention the chain in each leg's note (e.g. "on Base" or "on Arbitrum") so the user knows where to execute.
+- When the live data shows the same protocol on multiple chains (e.g. Aave on Ethereum vs Aave on Base), prefer the cheaper chain if APY difference is small (< 1%).
+
+### Rule 8: Minimum viable strategy
+- NEVER suggest a strategy where any single leg's sizeUsd is less than $5. It's not worth the gas.
+- If the user's free balance is $0 or near-zero, say so honestly: "Your wallet has no deployable capital. Deposit funds first."
+- Do NOT invent strategies on $10,000 default budget when the user's wallet shows $30 free. Use THEIR actual balance.
 
 ### Rule 6: Leverage coherence
 - Spot positions (Supply, Stake, Buy, Swap) NEVER have leverage — omit the field.
@@ -375,9 +397,19 @@ function balanceNeutralSizes(legs: LLMLeg[]): LLMLeg[] {
 /** Format a portfolio snapshot into a human-readable string for the LLM. */
 function formatPortfolioContext(portfolio: PortfolioSnapshot | undefined): string {
   if (!portfolio) return "";
+  const freeBalance = Math.round(portfolio.freeBalanceUsd ?? 0);
   const lines: string[] = ["## USER'S CURRENT PORTFOLIO (live, read from wallet)"];
   lines.push(`Total net value: $${Math.round(portfolio.netUsd).toLocaleString()}`);
-  lines.push(`FREE BALANCE (idle tokens in wallet, available to deploy): $${Math.round(portfolio.freeBalanceUsd ?? 0).toLocaleString()}`);
+  lines.push(`FREE BALANCE (idle tokens in wallet, available to deploy): $${freeBalance.toLocaleString()}`);
+
+  // Gas budget guidance based on free balance
+  if (freeBalance < 50) {
+    lines.push(`⚠️ VERY LOW CAPITAL — only suggest minimal strategies on L2 chains (Base, Arbitrum, Polygon). Ethereum L1 gas would consume most of the balance.`);
+  } else if (freeBalance < 100) {
+    lines.push(`⚠️ LOW CAPITAL — prefer L2 chains (Base, Arbitrum). Ethereum L1 gas ($5-15/tx) would be 5-15% of deployable capital.`);
+  } else if (freeBalance < 500) {
+    lines.push(`💡 MODERATE CAPITAL — prefer L2 chains. Ethereum L1 is acceptable only for simple 1-2 tx strategies.`);
+  }
   if (portfolio.netDeltaEthTotal !== null && portfolio.netDeltaEthTotal !== undefined) {
     lines.push(`Net ETH delta (spot + perps): ${portfolio.netDeltaEthTotal.toFixed(4)} ETH`);
   }
