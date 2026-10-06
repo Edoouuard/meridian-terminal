@@ -238,7 +238,7 @@ export function useExecuteOrder(onConfirmed?: () => void): ExecuteOrderFlow {
         let liveBalance: bigint | undefined;
         if (isWalletDebitingAction(orderWithExactAmount)) {
           if (patched.value !== undefined && patched.value > BigInt(0)) {
-            liveBalance = await (client.getBalance as CallAsync)({ address }).catch(() => undefined);
+            liveBalance = await client.getBalance({ address }).catch(() => undefined);
           } else if (orderWithExactAmount.token) {
             liveBalance = await client
               .readContract({ address: orderWithExactAmount.token, abi: ERC20_ABI, functionName: "balanceOf", args: [address] })
