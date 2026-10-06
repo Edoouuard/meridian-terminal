@@ -63,9 +63,15 @@ export {
 export {
   getBestRoute,
   selectBestRoute,
+  findBestRoute,
+  planRoute,
+  buildRouteExecution,
+  checkAllProviders,
+  getAllProviderStatus,
   type RouteProvider,
   type RouteRequest,
   type RouteQuote,
+  type RouteComparison,
   type RouteTx,
 } from "./router";
 

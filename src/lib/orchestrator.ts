@@ -138,7 +138,7 @@ export async function planAction(
         to: "0x0000000000000000000000000000000000000000" as Address, // placeholder, real address from execution plan
         valueUsd: leg.sizeUsd ?? 0,
         chainId: 1, // derived from leg context
-        slippage: routeComparison?.best.slippage,
+        slippage: routeComparison?.slippage,
         dailyVolumeUsd,
         lastTxTimestamp,
       },
