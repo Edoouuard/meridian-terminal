@@ -4,13 +4,16 @@
  * Meridian connects to protocol MCP servers as a DeFi aggregation layer:
  * - Aave MCP (mcp.aave.com): lending positions, rates, tx building
  * - Hyperliquid: funding rates, perp markets, order execution
+ * - deBridge (agents.debridge.com): cross-chain + same-chain swap/bridge routing
+ * - LI.FI (mcp.li.quest): second swap/bridge router — fallback + cross-check
  *
  * This module provides the combined yield/market context for the strategy
- * engine and the execution layer. All data is read-only or unsigned-tx;
- * signing happens exclusively client-side via wagmi.
+ * engine, and the routing layer (mcp/router.ts) that compares deBridge and
+ * LI.FI for any swap/bridge. All data is read-only or unsigned-tx; signing
+ * happens exclusively client-side via wagmi.
  */
 
-export { getMcpClient, callMcpTool, listMcpTools } from "./client";
+export { getMcpClient, callMcpTool, listMcpTools, parseMcpToolResult, type McpTransportKind, type McpClientOptions } from "./client";
 
 export {
   fetchAaveReserves,
@@ -30,6 +33,41 @@ export {
   formatFundingRatesForLLM,
   type HlFundingRate,
 } from "./hyperliquid";
+
+export {
+  fetchDebridgeSupportedChains,
+  searchDebridgeTokens,
+  createDebridgeCrossChainTx,
+  createDebridgeSameChainSwapTx,
+  type DebridgeChain,
+  type DebridgeToken,
+  type DebridgeTxData,
+  type DebridgeCrossChainOrder,
+  type DebridgeCrossChainOrderInput,
+  type DebridgeSameChainSwapInput,
+} from "./debridge";
+
+export {
+  fetchLifiChains,
+  fetchLifiToken,
+  getLifiQuote,
+  getLifiStatus,
+  getLifiAllowance,
+  type LifiChain,
+  type LifiToken,
+  type LifiTxRequest,
+  type LifiQuote,
+  type LifiQuoteInput,
+} from "./lifi";
+
+export {
+  getBestRoute,
+  selectBestRoute,
+  type RouteProvider,
+  type RouteRequest,
+  type RouteQuote,
+  type RouteTx,
+} from "./router";
 
 /**
  * Build the full DeFi market context for the LLM strategy engine.
