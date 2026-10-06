@@ -97,8 +97,11 @@ export function useAaveSupply(onConfirmed?: () => void): AaveSupplyFlow {
   const [supplyHash, setSupplyHash] = useState<`0x${string}` | undefined>(undefined);
   const [needsApproval, setNeedsApproval] = useState<boolean | null>(null);
 
-  const planChainId = plan?.chainId;
-  const publicClient = usePublicClient({ chainId: planChainId });
+  // No chainId passed: every read/write below only ever runs after we've
+  // already gated on connectedChainId === plan.chainId, so the wallet's
+  // default-connected-chain client is always the right one — and unlike a
+  // literal number, it type-checks against wagmi's generated chain union.
+  const publicClient = usePublicClient();
   const busyRef = useRef(false);
 
   const fail = useCallback(
