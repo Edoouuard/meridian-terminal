@@ -39,6 +39,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { assessHealthFactorGuardrail } from "@/lib/safety";
 import { recordExecution, type OrderRecordType } from "@/lib/history";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
+import { BridgeExecuteButton } from "@/components/BridgeExecuteButton";
 
 /** Map an execution Order type to a coarse history record type. */
 function recordTypeFor(orderType: string): OrderRecordType {
@@ -1266,9 +1267,10 @@ function StrategyLegs({ plan }: { plan: TradePlan }) {
         const isMorpho = /morpho/i.test(leg.protocol || "");
         const isLido = /lido/i.test(leg.protocol || "");
         const isLidoWithdraw = isLido && (legSide === "withdraw" || legSide === "unstake");
+        const isBridge = legSide === "bridge";
         const isLidoStake = isLido && legSide === "stake";
         const liveVenue =
-          /hyperliquid|extended|ondo|lighter|uniswap/i.test(leg.protocol || "") || isMorpho || isLidoWithdraw || isLidoStake;
+          /hyperliquid|extended|ondo|lighter|uniswap/i.test(leg.protocol || "") || isMorpho || isLidoWithdraw || isLidoStake || isBridge;
         const building = isUnsupported(resolved) && !liveVenue;
         return (
           <div key={i} className="leg-card" style={{ opacity: building ? 0.55 : 1 }}>
@@ -1293,6 +1295,8 @@ function StrategyLegs({ plan }: { plan: TradePlan }) {
                 legSide === "withdraw" ? <MorphoWithdrawButton leg={leg} prices={prices} /> : <MorphoExecuteButton leg={leg} prices={prices} />
               ) : isLidoWithdraw ? (
                 <LidoUnstakeButton leg={leg} prices={prices} />
+              ) : isBridge ? (
+                <BridgeExecuteButton leg={leg} prices={prices} />
               ) : (
                 <NotWired venue={protocolLabel(leg.protocol)} reason={resolved.unsupported} />
               )
