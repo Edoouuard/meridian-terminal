@@ -8,6 +8,7 @@ import {
   LIDO_REQUEST_WITHDRAWALS_ABI,
   LIDO_WITHDRAWAL_QUEUE_ADDRESS,
 } from "./integrations/lido";
+import { isTrustedDebridgeEntrypoint, isTrustedLifiEntrypoint } from "./mcp/routerAllowlist";
 
 /**
  * Execution layer for Meridian's DeFi terminal.
@@ -27,7 +28,7 @@ import {
  */
 
 export type OrderType = "supply" | "repay" | "borrow" | "withdraw" | "transfer" | "approve" | "stake" | "swap" | "unstake" | "claim";
-export type OrderProtocol = "aave" | "eth" | "erc20" | "lido" | "uniswap" | "morpho" | "compound" | "spark" | "maker" | "weth" | "rocketpool" | "frax";
+export type OrderProtocol = "aave" | "eth" | "erc20" | "lido" | "uniswap" | "morpho" | "compound" | "spark" | "maker" | "weth" | "rocketpool" | "frax" | "debridge" | "lifi";
 
 /**
  * Protocol-agnostic order produced by the trade engine. Carries enough to build a
@@ -64,6 +65,13 @@ export interface Order {
   vaultAddress?: Address;
   /** Lido withdrawal request id for a `claim` order (from getWithdrawalRequests / the request tx). */
   requestId?: bigint;
+  /**
+   * The unsigned transaction quoted by a router (deBridge/LI.FI) for a
+   * `swap` order whose protocol is `"debridge"` or `"lifi"`. `to` is
+   * cross-checked against routerAllowlist.ts before this can ever become a
+   * signable plan — a quote naming any other address is refused outright.
+   */
+  routerTx?: { to: Address; data: `0x${string}`; value?: bigint };
   [k: string]: unknown;
 }
 
@@ -75,8 +83,14 @@ export interface ExecutionPlan {
   abi?: Abi;
   functionName?: string;
   args?: readonly unknown[];
-  /** Native value to send (only for `eth` transfers). */
+  /** Native value to send (only for `eth` transfers, payable calls, or a router's quoted tx). */
   value?: bigint;
+  /**
+   * Raw calldata for a pre-encoded call (a router's quoted tx) — used
+   * instead of `abi`/`functionName`/`args` when the call isn't a typed
+   * contract write Meridian itself encodes.
+   */
+  data?: `0x${string}`;
   /** Index into `args` holding the onBehalfOf/sender placeholder, patched at execution time. */
   senderIndex?: number;
   /**
@@ -871,6 +885,57 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         value: amount.value,
         description: `Stake ${order.amount} ETH via Frax on ${chainLabel} for sfrxETH`,
         riskNote: `Moves real ETH on ${chainLabel} through Frax's minter — mints frxETH and auto-deposits into sfrxETH for yield. sfrxETH accrues staking yield via its exchange rate.`,
+      };
+    }
+
+    case "debridge":
+    case "lifi": {
+      // A router-quoted swap/bridge. Unlike every other protocol branch above,
+      // the destination contract is named by a third party (the quote) rather
+      // than by Meridian's own allowlist — so it is cross-checked against
+      // routerAllowlist.ts here, and refused outright on any mismatch, before
+      // this can ever become a signable plan.
+      const providerLabel = order.protocol === "lifi" ? "LI.FI" : "deBridge";
+      const isTrusted = order.protocol === "lifi" ? isTrustedLifiEntrypoint : isTrustedDebridgeEntrypoint;
+      const token = order.token;
+
+      if (order.type === "approve") {
+        if (!token) return fail(`${providerLabel} approve requires a token address`);
+        const spender = order.spender as Address | undefined;
+        if (!spender) return fail(`${providerLabel} approve requires a spender address`);
+        if (!isTrusted(chainId, spender)) {
+          return fail(`Refusing to approve: ${spender} is not a verified ${providerLabel} entrypoint on ${chainLabel}.`);
+        }
+        const amount = normalizeAmount(order.amount, decimals);
+        if ("error" in amount) return amount;
+        return {
+          chainId,
+          address: token,
+          abi: ERC20_APPROVE_ABI,
+          functionName: "approve",
+          args: [spender, amount.value],
+          description: `Approve ${providerLabel} to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`,
+          riskNote: `Approval lets this verified ${providerLabel} router transfer up to this amount of ${assetLabel}. Confirm before signing.`,
+        };
+      }
+
+      if (order.type !== "swap") {
+        return fail(`${providerLabel} only supports 'swap' (bridge/swap) and 'approve', got '${order.type}'`);
+      }
+      const routerTx = order.routerTx;
+      if (!routerTx) return fail(`${providerLabel} order requires routerTx (the quoted unsigned transaction)`);
+      if (!isTrusted(chainId, routerTx.to)) {
+        return fail(
+          `Refusing to sign: ${routerTx.to} is not a verified ${providerLabel} entrypoint on ${chainLabel}. This quote may be stale — refresh and try again.`,
+        );
+      }
+      return {
+        chainId,
+        address: routerTx.to,
+        data: routerTx.data,
+        value: routerTx.value,
+        description: `Swap/bridge ${order.amount} ${assetLabel} via ${providerLabel} on ${chainLabel}`,
+        riskNote: `Moves real funds on ${chainLabel} through a verified third-party router (${providerLabel}) — the destination contract was checked against Meridian's own allowlist before this plan was built.`,
       };
     }
 
