@@ -242,9 +242,9 @@ async function submitPlan(
       ...(plan.value !== undefined ? { value: plan.value } : {}),
     });
   }
-  if (plan.value !== undefined) {
+  if (plan.value !== undefined || plan.data !== undefined) {
     if (!plan.address) throw new Error("native transfer is missing a recipient (address)");
-    return sendTransactionAsync({ chainId: plan.chainId, to: plan.address, value: plan.value });
+    return sendTransactionAsync({ chainId: plan.chainId, to: plan.address, value: plan.value, data: plan.data });
   }
   throw new Error("execution plan is missing required write fields");
 }
