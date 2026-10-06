@@ -48,6 +48,7 @@ const SIMULATED_PORTFOLIO: LivePortfolio = {
   perpUnrealizedPnl: 0,
   ethPrice: 4180,
   stakingConcentrationPct: 53.5,
+  refetchPortfolio: async () => {},
 };
 
 type Status = "good" | "warning" | "serious";
