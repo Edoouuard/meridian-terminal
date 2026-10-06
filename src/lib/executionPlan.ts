@@ -1,21 +1,24 @@
 import type { Address } from "viem";
+import type { Order } from "./execution";
 
 /**
  * executionPlan.ts — versioned plan schema + explicit state machine for
- * Meridian's first production execution flow (USDC -> Aave v3 supply, same
- * chain). Pure and offline: every function here only reads its inputs and
- * the current time — live reads (balance, allowance, connected
- * wallet/chain) are the caller's job (see useAaveSupply.ts).
+ * Meridian's validated execution flow (any order `execution.ts`'s
+ * `buildExecution` supports — Aave/Spark/Compound/Morpho/Maker/Lido/WETH/
+ * Rocket Pool/Frax/Uniswap/deBridge/LI.FI/transfers). Pure and offline:
+ * every function here only reads its inputs and the current time — live
+ * reads (balance, allowance, connected wallet/chain) are the caller's job
+ * (see hooks/useExecuteOrder.ts).
  *
- * A plan is a frozen snapshot: wallet, chain, asset and amount are fixed at
- * creation time and the plan expires after PLAN_TTL_MS, so a stale plan can
- * never be signed long after the balance/allowance it was built from changed.
+ * A plan is a frozen snapshot: wallet and order are fixed at creation time
+ * and the plan expires after PLAN_TTL_MS, so a stale plan can never be
+ * signed long after the balance/allowance/quote it was built from changed.
  */
 
 export const EXECUTION_PLAN_VERSION = 1;
 export const PLAN_TTL_MS = 10 * 60 * 1000; // 10 minutes
 
-/** Non-failure states of the supply flow, in the order they're expected to occur. */
+/** Non-failure states of the execution flow, in the order they're expected to occur. */
 export type ExecutionState =
   | "DRAFT"
   | "VALIDATING"
@@ -41,10 +44,10 @@ export type FailureState =
   | "RPC_ERROR"
   | "CONFIRMATION_TIMEOUT";
 
-export type SupplyFlowState = ExecutionState | FailureState;
+export type OrderFlowState = ExecutionState | FailureState;
 
 /** True once a state is terminal (either CONFIRMED or any failure) — no further transitions happen. */
-export function isTerminalState(state: SupplyFlowState): boolean {
+export function isTerminalState(state: OrderFlowState): boolean {
   return state === "CONFIRMED" || isFailureState(state);
 }
 
@@ -62,24 +65,55 @@ const FAILURE_STATES: ReadonlySet<FailureState> = new Set<FailureState>([
   "CONFIRMATION_TIMEOUT",
 ]);
 
-export function isFailureState(state: SupplyFlowState): state is FailureState {
+export function isFailureState(state: OrderFlowState): state is FailureState {
   return (FAILURE_STATES as ReadonlySet<string>).has(state);
 }
 
-/** A frozen, versioned snapshot of a single USDC -> Aave v3 supply action. */
-export interface AaveSupplyPlan {
+/**
+ * Protocol+type combos that debit the connected wallet's native or token
+ * balance before the call can succeed. Every (protocol, type) pair
+ * `buildExecution` supports that spends a wallet-held balance appears here
+ * exactly once; the rest (borrow, every protocol-side withdraw, claim)
+ * RECEIVE funds instead and need no pre-signature balance check. Explicit
+ * on purpose — inferring "debit vs. receive" structurally from the built
+ * plan is ambiguous (e.g. WETH unwrap spends WETH but sets neither a
+ * native `value` nor an approval, unlike every other token-spending call).
+ */
+const WALLET_DEBITING_ACTIONS: ReadonlySet<string> = new Set([
+  "aave:supply",
+  "aave:repay",
+  "spark:supply",
+  "spark:repay",
+  "compound:supply",
+  "compound:repay",
+  "morpho:supply",
+  "maker:supply",
+  "lido:stake",
+  "lido:unstake",
+  "weth:supply", // wrap: spends native ETH
+  "weth:withdraw", // unwrap: spends WETH
+  "rocketpool:stake",
+  "frax:stake",
+  "uniswap:swap",
+  "debridge:swap",
+  "lifi:swap",
+  "eth:transfer",
+  "erc20:transfer",
+]);
+
+/** True when signing `order` requires the wallet to already hold the amount it spends. */
+export function isWalletDebitingAction(order: Pick<Order, "protocol" | "type">): boolean {
+  return WALLET_DEBITING_ACTIONS.has(`${order.protocol}:${order.type}`);
+}
+
+/** A frozen, versioned snapshot of a single order, ready to be validated/simulated/signed. */
+export interface OrderPlan {
   version: typeof EXECUTION_PLAN_VERSION;
   planId: string;
   createdAt: number;
   expiresAt: number;
   walletAddress: Address;
-  chainId: number;
-  protocol: "aave";
-  token: Address;
-  symbol: string;
-  decimals: number;
-  /** Exact base-unit amount to supply (never human units — avoids any ambiguity at signing time). */
-  amount: bigint;
+  order: Order;
 }
 
 /** Random plan id — prefers crypto.randomUUID, falls back to a timestamp + random suffix. */
@@ -89,42 +123,35 @@ export function makePlanId(): string {
   return `plan-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export function createAaveSupplyPlan(input: {
-  walletAddress: Address;
-  chainId: number;
-  token: Address;
-  symbol: string;
-  decimals: number;
-  amount: bigint;
-  now?: number;
-}): AaveSupplyPlan {
-  const now = input.now ?? Date.now();
+export function createOrderPlan(walletAddress: Address, order: Order, now: number = Date.now()): OrderPlan {
   return {
     version: EXECUTION_PLAN_VERSION,
     planId: makePlanId(),
     createdAt: now,
     expiresAt: now + PLAN_TTL_MS,
-    walletAddress: input.walletAddress,
-    chainId: input.chainId,
-    protocol: "aave",
-    token: input.token,
-    symbol: input.symbol,
-    decimals: input.decimals,
-    amount: input.amount,
+    walletAddress,
+    order,
   };
 }
 
-export function isPlanExpired(plan: AaveSupplyPlan, now: number = Date.now()): boolean {
+/** Accepts anything carrying an `expiresAt` — both `OrderPlan` and any future plan shape satisfy this structurally. */
+export function isPlanExpired(plan: { expiresAt: number }, now: number = Date.now()): boolean {
   return now >= plan.expiresAt;
 }
 
-export interface ValidationContext {
+export interface OrderValidationContext {
   /** The wallet actually connected right now (undefined when disconnected). */
   connectedAddress: Address | undefined;
   /** The chain the wallet is actually connected to right now. */
   connectedChainId: number | undefined;
-  /** Live USDC balance (base units) for `plan.walletAddress` on `plan.chainId`. */
-  usdcBalance: bigint | undefined;
+  /**
+   * Live balance (base units) for the asset `order` would debit — native
+   * balance when the built plan sends `value`, ERC20 balance of
+   * `order.token` otherwise. Only read/required when
+   * `isWalletDebitingAction(order)` is true; pass `undefined` otherwise
+   * (the check is skipped, never silently passed).
+   */
+  liveBalance?: bigint;
   now?: number;
 }
 
@@ -133,10 +160,10 @@ export type ValidationResult = { ok: true } | { ok: false; state: FailureState; 
 /**
  * Pure precondition check run before a plan may move from VALIDATING to
  * SIMULATING: wallet still connected and matching, correct chain, not
- * expired, sufficient live balance. Never touches the network — the caller
- * supplies every live read.
+ * expired, and — only for a wallet-debiting order type — sufficient live
+ * balance. Never touches the network — the caller supplies every live read.
  */
-export function validateAaveSupplyPlan(plan: AaveSupplyPlan, ctx: ValidationContext): ValidationResult {
+export function validateOrderPlan(plan: OrderPlan, ctx: OrderValidationContext): ValidationResult {
   if (!ctx.connectedAddress) {
     return { ok: false, state: "WRONG_CHAIN", message: "Wallet not connected." };
   }
@@ -147,17 +174,20 @@ export function validateAaveSupplyPlan(plan: AaveSupplyPlan, ctx: ValidationCont
       message: "The connected wallet changed since this plan was created — refresh and try again.",
     };
   }
-  if (ctx.connectedChainId !== plan.chainId) {
-    return { ok: false, state: "WRONG_CHAIN", message: `Wrong network — switch to chain ${plan.chainId} before signing.` };
+  if (ctx.connectedChainId !== plan.order.chainId) {
+    return { ok: false, state: "WRONG_CHAIN", message: `Wrong network — switch to chain ${plan.order.chainId} before signing.` };
   }
   if (isPlanExpired(plan, ctx.now)) {
     return { ok: false, state: "PLAN_EXPIRED", message: "This plan has expired — refresh the amount and try again." };
   }
-  if (ctx.usdcBalance === undefined) {
-    return { ok: false, state: "RPC_ERROR" as FailureState, message: "Could not read your USDC balance — try again." };
-  }
-  if (ctx.usdcBalance < plan.amount) {
-    return { ok: false, state: "INSUFFICIENT_BALANCE", message: "Insufficient USDC balance for this amount." };
+  if (isWalletDebitingAction(plan.order)) {
+    if (ctx.liveBalance === undefined) {
+      return { ok: false, state: "RPC_ERROR", message: "Could not read your live balance — try again." };
+    }
+    const amount = typeof plan.order.amount === "bigint" ? plan.order.amount : undefined;
+    if (amount !== undefined && ctx.liveBalance < amount) {
+      return { ok: false, state: "INSUFFICIENT_BALANCE", message: "Insufficient balance for this amount." };
+    }
   }
   return { ok: true };
 }
@@ -165,8 +195,8 @@ export function validateAaveSupplyPlan(plan: AaveSupplyPlan, ctx: ValidationCont
 /**
  * Classify a thrown error (wallet rejection, RPC failure, on-chain revert,
  * confirmation timeout) into one of the fixed failure states. `phase`
- * distinguishes an approval-step failure from a supply-step failure so the
- * UI can say exactly which signature failed.
+ * distinguishes an approval-step failure from a main-order-step failure so
+ * the UI can say exactly which signature failed.
  */
 export function classifyExecutionError(err: unknown, phase: "approval" | "supply"): { state: FailureState; message: string } {
   const raw = err instanceof Error ? err.message : String(err);
@@ -197,11 +227,17 @@ export function classifyExecutionError(err: unknown, phase: "approval" | "supply
 /**
  * Structured, secret-free log line for one state transition. Never includes
  * private keys, signatures, or raw wallet-provider payloads — only plan
- * metadata, the state, and (once available) a public tx hash.
+ * metadata, the state, and (once available) a public tx hash. Accepts any
+ * `{planId, chainId, symbol?}`-shaped value (including `null`), so both
+ * `OrderPlan`'s own order and a caller-built adapter object work.
  */
-export function logTransition(plan: AaveSupplyPlan | null, state: SupplyFlowState, extra?: Record<string, unknown>): void {
+export function logTransition(
+  plan: { planId: string; chainId: number; symbol?: string } | null,
+  state: OrderFlowState,
+  extra?: Record<string, unknown>,
+): void {
   // eslint-disable-next-line no-console
-  console.info("[aave-supply]", {
+  console.info("[execute-order]", {
     planId: plan?.planId,
     chainId: plan?.chainId,
     symbol: plan?.symbol,
