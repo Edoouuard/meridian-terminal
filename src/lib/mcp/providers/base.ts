@@ -5,7 +5,7 @@
  * Paymaster (gasless tx), smart wallet detection, Base-native DeFi
  * primitives (Aerodrome, Moonwell, etc.), and onramp support.
  *
- * Base MCP endpoint: https://mcp.base.org/sse (or env override).
+ * Base MCP endpoint: https://mcp.base.org (Streamable HTTP, requires auth).
  */
 
 import { callMcpTool } from "../client";
@@ -17,7 +17,7 @@ import type {
 } from "../types";
 import type { Address } from "viem";
 
-const BASE_MCP_URL = process.env.BASE_MCP_URL || "https://mcp.base.org/sse";
+const BASE_MCP_URL = process.env.BASE_MCP_URL || "https://mcp.base.org";
 const PROVIDER_ID: McpProviderId = "base";
 const SERVER_NAME = "base";
 const BASE_CHAIN_ID = 8453;
@@ -35,7 +35,8 @@ let lastHealthCheck: McpProviderStatus = {
 export async function checkHealth(): Promise<McpProviderStatus> {
   const start = Date.now();
   try {
-    await callMcpTool(BASE_MCP_URL, SERVER_NAME, "ping", {}, 5000);
+    // Base MCP requires auth — just try connecting to verify it's up
+    await callMcpTool(BASE_MCP_URL, SERVER_NAME, "resolve_name", { name: "base.eth" }, 8000);
     lastHealthCheck = {
       id: PROVIDER_ID,
       name: "Base",

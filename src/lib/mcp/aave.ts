@@ -2,21 +2,24 @@
  * mcp/aave.ts — Aave MCP integration.
  *
  * Connects to Aave's official MCP server (mcp.aave.com) for:
- * - Multi-chain position reads (supply, borrow, health factor, rewards)
- * - Live reserve data (APY, caps, risk parameters)
- * - Transaction building (supply, borrow, repay, withdraw — unsigned)
+ * - Multi-chain market data (APY, caps, risk parameters)
+ * - User positions (supply, borrow, health factor)
+ * - Transaction building (prepare_action — unsigned)
  * - Health factor simulation (preview_action)
+ *
+ * Endpoint: https://mcp.aave.com (Streamable HTTP, no /sse suffix).
+ *
+ * Key tools: get_markets, get_user_positions, get_user_summary,
+ *            preview_action, prepare_action, get_reserve_details,
+ *            get_wallet_balances, get_chains
  *
  * The MCP server is NON-CUSTODIAL — it builds transactions but never signs.
  * All tx data returned here must be signed client-side via wagmi.
- *
- * Fallback: if the MCP server is unreachable, functions return null/empty
- * so the app falls back to its existing hardcoded ABI paths.
  */
 
 import { callMcpTool } from "./client";
 
-const AAVE_MCP_URL = process.env.AAVE_MCP_URL || "https://mcp.aave.com/sse";
+const AAVE_MCP_URL = process.env.AAVE_MCP_URL || "https://mcp.aave.com";
 const SERVER_NAME = "aave";
 
 // ─── Types ───────────────────────────────────────────────────────────
@@ -60,15 +63,23 @@ export interface AaveTxData {
 // ─── Read operations ─────────────────────────────────────────────────
 
 /**
- * Fetch all Aave reserves (markets) with live rates for a given chain.
- * Returns empty array on MCP failure (app falls back to DefiLlama data).
+ * Fetch all Aave markets with live rates for a given chain.
+ * Uses the new `get_markets` tool (replaces `get_reserves`).
  */
 export async function fetchAaveReserves(chainId: number): Promise<AaveReserve[]> {
   try {
-    const result = await callMcpTool(AAVE_MCP_URL, SERVER_NAME, "get_reserves", {
+    const result = await callMcpTool(AAVE_MCP_URL, SERVER_NAME, "get_markets", {
       chainId,
     });
-    return parseToolResult<AaveReserve[]>(result) ?? [];
+    // get_markets returns a different shape — normalize to AaveReserve[]
+    const parsed = parseToolResult<{
+      reserves?: AaveReserve[];
+      markets?: AaveReserve[];
+    } | AaveReserve[]>(result);
+
+    if (!parsed) return [];
+    if (Array.isArray(parsed)) return parsed;
+    return parsed.reserves ?? parsed.markets ?? [];
   } catch (err) {
     console.warn("[mcp/aave] fetchAaveReserves failed:", err);
     return [];
@@ -77,14 +88,14 @@ export async function fetchAaveReserves(chainId: number): Promise<AaveReserve[]>
 
 /**
  * Fetch a user's Aave positions across all chains (or a specific chain).
- * Returns empty array on MCP failure.
+ * Uses `get_user_positions` tool.
  */
 export async function fetchAavePositions(
   userAddress: string,
   chainId?: number,
 ): Promise<AavePosition[]> {
   try {
-    const args: Record<string, unknown> = { userAddress };
+    const args: Record<string, unknown> = { user: userAddress };
     if (chainId) args.chainId = chainId;
     const result = await callMcpTool(AAVE_MCP_URL, SERVER_NAME, "get_user_positions", args);
     return parseToolResult<AavePosition[]>(result) ?? [];
@@ -96,7 +107,7 @@ export async function fetchAavePositions(
 
 /**
  * Preview how an action would affect the user's health factor.
- * Returns null on MCP failure.
+ * Uses `preview_action` tool.
  */
 export async function previewAaveAction(
   userAddress: string,
@@ -107,10 +118,10 @@ export async function previewAaveAction(
 ): Promise<AaveActionPreview | null> {
   try {
     const result = await callMcpTool(AAVE_MCP_URL, SERVER_NAME, "preview_action", {
-      userAddress,
+      sender: userAddress,
       chainId,
       action,
-      asset,
+      token: asset,
       amount,
     });
     return parseToolResult<AaveActionPreview>(result);
@@ -124,7 +135,7 @@ export async function previewAaveAction(
 
 /**
  * Build an unsigned Aave transaction via the MCP server.
- * Returns null on failure — the app falls back to its local ABI builder.
+ * Uses the unified `prepare_action` tool (replaces prepare_supply/borrow/etc).
  */
 export async function buildAaveTransaction(
   userAddress: string,
@@ -134,11 +145,11 @@ export async function buildAaveTransaction(
   amount: string,
 ): Promise<AaveTxData | null> {
   try {
-    const toolName = `prepare_${action}`;
-    const result = await callMcpTool(AAVE_MCP_URL, SERVER_NAME, toolName, {
-      userAddress,
+    const result = await callMcpTool(AAVE_MCP_URL, SERVER_NAME, "prepare_action", {
+      sender: userAddress,
       chainId,
-      asset,
+      action,
+      token: asset,
       amount,
     });
     return parseToolResult<AaveTxData>(result);
@@ -182,37 +193,19 @@ export async function fetchAaveYieldSummary(chainIds: number[]): Promise<string>
 // ─── Helpers ─────────────────────────────────────────────────────────
 
 const CHAIN_NAMES: Record<number, string> = {
-  1: "Ethereum",
-  10: "Optimism",
-  137: "Polygon",
-  42161: "Arbitrum",
-  43114: "Avalanche",
-  8453: "Base",
-  100: "Gnosis",
-  534352: "Scroll",
-  56: "BNB Chain",
-  324: "zkSync Era",
-  59144: "Linea",
-  5000: "Mantle",
-  1088: "Metis",
-  250: "Fantom",
-  146: "Sonic",
-  42220: "Celo",
+  1: "Ethereum", 10: "Optimism", 137: "Polygon", 42161: "Arbitrum",
+  43114: "Avalanche", 8453: "Base", 100: "Gnosis", 534352: "Scroll",
+  56: "BNB Chain", 324: "zkSync Era", 59144: "Linea", 5000: "Mantle",
+  1088: "Metis", 250: "Fantom", 146: "Sonic", 42220: "Celo",
 };
 
-/** Parse MCP tool result content into typed data. */
 function parseToolResult<T>(content: unknown): T | null {
   if (!content) return null;
-  // MCP returns content as an array of content blocks
   if (Array.isArray(content)) {
     for (const block of content) {
       if (block && typeof block === "object" && "type" in block) {
         if (block.type === "text" && "text" in block) {
-          try {
-            return JSON.parse(block.text as string) as T;
-          } catch {
-            return null;
-          }
+          try { return JSON.parse(block.text as string) as T; } catch { return null; }
         }
       }
     }

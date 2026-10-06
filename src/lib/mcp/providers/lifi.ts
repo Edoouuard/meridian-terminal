@@ -6,7 +6,16 @@
  * competitive routing as a fallback when deBridge is down or
  * when comparing quotes for best execution.
  *
- * LI.FI MCP endpoint: https://mcp.li.fi/sse (or env override).
+ * LI.FI MCP endpoint: https://mcp.li.quest/mcp (Streamable HTTP).
+ *
+ * Available tools (25):
+ *   - health-check, get-chains, get-tokens, get-token, get-token-balance,
+ *     get-token-balances, get-native-token-balance, get-allowance,
+ *     get-quote, get-quote-with-calls, get-routes, get-status,
+ *     get-step-transaction, get-connections, get-tools,
+ *     get-chain-by-id, get-chain-by-name, get-gas-prices, get-gas-suggestion,
+ *     get-earn-chains, get-earn-protocols, get-earn-vaults, get-earn-vault,
+ *     get-earn-portfolio, test-api-key
  */
 
 import { callMcpTool } from "../client";
@@ -21,7 +30,7 @@ import type {
 } from "../types";
 import type { Address } from "viem";
 
-const LIFI_MCP_URL = process.env.LIFI_MCP_URL || "https://mcp.li.fi/sse";
+const LIFI_MCP_URL = process.env.LIFI_MCP_URL || "https://mcp.li.quest/mcp";
 const PROVIDER_ID: McpProviderId = "lifi";
 const SERVER_NAME = "lifi";
 
@@ -38,7 +47,7 @@ let lastHealthCheck: McpProviderStatus = {
 export async function checkHealth(): Promise<McpProviderStatus> {
   const start = Date.now();
   try {
-    await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "ping", {}, 5000);
+    await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "health-check", {}, 8000);
     lastHealthCheck = {
       id: PROVIDER_ID,
       name: "LI.FI",
@@ -112,14 +121,14 @@ interface LiFiQuoteRaw {
  */
 export async function getQuote(request: RouteRequest): Promise<RouteQuote | null> {
   try {
-    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get_quote", {
-      fromChain: request.fromChainId,
-      toChain: request.toChainId,
+    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-quote", {
+      fromChain: String(request.fromChainId),
+      toChain: String(request.toChainId),
       fromToken: request.fromToken,
       toToken: request.toToken,
       fromAmount: request.fromAmount,
       fromAddress: request.userAddress,
-      slippage: request.slippage ?? 0.005,
+      slippage: String(request.slippage ?? 0.005),
     });
 
     const raw = parseResult<LiFiQuoteRaw>(result);
@@ -179,66 +188,55 @@ export async function getQuote(request: RouteRequest): Promise<RouteQuote | null
 
 /**
  * Build the unsigned transaction(s) to execute a LI.FI route.
- * LI.FI typically returns the tx in the quote itself, but we call
- * a dedicated build endpoint for fresh data.
+ * LI.FI typically returns the tx in the quote itself.
  */
 export async function buildTransaction(
   request: RouteRequest,
   quoteData: LiFiQuoteRaw,
 ): Promise<RouteExecution | null> {
   try {
-    // LI.FI embeds tx in the quote — use it if fresh, otherwise re-fetch
+    // LI.FI embeds tx in the quote — use it if available
     if (quoteData.transactionRequest) {
       const tx = quoteData.transactionRequest;
       return {
         provider: PROVIDER_ID,
-        transactions: [
-          {
+        transactions: [{
+          to: tx.to as Address,
+          data: tx.data as `0x${string}`,
+          value: tx.value ?? "0",
+          chainId: tx.chainId ?? request.fromChainId,
+          gasLimit: tx.gasLimit,
+        }],
+        approvals: [],
+      };
+    }
+
+    // If no embedded tx, use get-step-transaction
+    if (quoteData.includedSteps?.length > 0) {
+      const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-step-transaction", {
+        step: quoteData.includedSteps[0],
+      });
+      const txData = parseResult<{
+        transactionRequest: { to: string; data: string; value: string; gasLimit: string; chainId: number };
+      }>(result);
+      if (txData?.transactionRequest) {
+        const tx = txData.transactionRequest;
+        return {
+          provider: PROVIDER_ID,
+          transactions: [{
             to: tx.to as Address,
             data: tx.data as `0x${string}`,
             value: tx.value ?? "0",
             chainId: tx.chainId ?? request.fromChainId,
             gasLimit: tx.gasLimit,
-          },
-        ],
-        approvals: [],
-      };
+          }],
+          approvals: [],
+        };
+      }
     }
 
-    // Re-fetch with build step
-    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "build_tx", {
-      routeId: quoteData.id,
-      fromAddress: request.userAddress,
-    });
-
-    const txData = parseResult<{
-      transactionRequest: { to: string; data: string; value: string; gasLimit: string; chainId: number };
-      approvalRequest?: { to: string; data: string; value: string; chainId: number };
-    }>(result);
-
-    if (!txData?.transactionRequest) return null;
-
-    const transactions: UnsignedTx[] = [
-      {
-        to: txData.transactionRequest.to as Address,
-        data: txData.transactionRequest.data as `0x${string}`,
-        value: txData.transactionRequest.value ?? "0",
-        chainId: txData.transactionRequest.chainId ?? request.fromChainId,
-        gasLimit: txData.transactionRequest.gasLimit,
-      },
-    ];
-
-    const approvals: UnsignedTx[] = [];
-    if (txData.approvalRequest) {
-      approvals.push({
-        to: txData.approvalRequest.to as Address,
-        data: txData.approvalRequest.data as `0x${string}`,
-        value: "0",
-        chainId: txData.approvalRequest.chainId ?? request.fromChainId,
-      });
-    }
-
-    return { provider: PROVIDER_ID, transactions, approvals };
+    // Last resort: re-quote via REST
+    return buildTransactionViaRest(request, quoteData);
   } catch (err) {
     console.warn("[lifi] buildTransaction failed:", err);
     return null;
@@ -254,13 +252,14 @@ export interface LiFiRouteStatus {
   receiving?: { txHash: string; chainId: number };
 }
 
-export async function getRouteStatus(txHash: string, fromChainId: number): Promise<LiFiRouteStatus | null> {
+export async function getRouteStatus(txHash: string, fromChainId: number, toChainId?: number): Promise<LiFiRouteStatus | null> {
   try {
-    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get_status", {
+    const args: Record<string, unknown> = {
       txHash,
-      bridge: "any",
-      fromChain: fromChainId,
-    });
+      fromChain: String(fromChainId),
+    };
+    if (toChainId) args.toChain = String(toChainId);
+    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-status", args);
     return parseResult<LiFiRouteStatus>(result);
   } catch (err) {
     console.warn("[lifi] getRouteStatus failed:", err);
@@ -271,9 +270,8 @@ export async function getRouteStatus(txHash: string, fromChainId: number): Promi
 // ─── Supported chains ────────────────────────────────────────────────
 
 export async function getSupportedChains(): Promise<{ id: number; name: string }[]> {
-  // Try MCP first, fall back to REST API
   try {
-    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get_chains", {});
+    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-chains", {});
     const chains = parseResult<{ id: number; name: string }[]>(result);
     if (chains && chains.length > 0) return chains;
   } catch { /* fall through to REST */ }
@@ -303,14 +301,10 @@ export interface LiFiToken {
   priceUSD?: string;
 }
 
-/**
- * Resolve tokens on a given chain. Useful for finding the correct
- * token address when building bridge/swap requests.
- */
 export async function getTokens(chainId: number): Promise<LiFiToken[]> {
   try {
-    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get_tokens", {
-      chains: [chainId],
+    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-tokens", {
+      chains: [String(chainId)],
     });
     const data = parseResult<{ tokens: Record<string, LiFiToken[]> }>(result);
     return data?.tokens?.[String(chainId)] ?? [];
@@ -329,22 +323,98 @@ export async function getTokens(chainId: number): Promise<LiFiToken[]> {
   }
 }
 
-/**
- * Find a specific token by symbol on a chain.
- */
 export async function findToken(symbol: string, chainId: number): Promise<LiFiToken | null> {
+  // Try MCP get-token first (more targeted)
+  try {
+    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-token", {
+      chain: String(chainId),
+      token: symbol,
+    });
+    const token = parseResult<LiFiToken>(result);
+    if (token) return token;
+  } catch { /* fallback */ }
+
   const tokens = await getTokens(chainId);
   const needle = symbol.trim().toUpperCase();
   return tokens.find((t) => t.symbol.toUpperCase() === needle) ?? null;
 }
 
-// ─── Same-chain swap (LI.FI as DEX aggregator) ──────────────────────
+// ─── Earn / Yield (new LI.FI tools) ────────────────────────────────
 
-/**
- * Get a same-chain swap quote from LI.FI. LI.FI aggregates 30+ DEXes
- * (1inch, Paraswap, 0x, etc.) so it often beats a single Uniswap pool.
- * Same interface as cross-chain getQuote but with fromChainId === toChainId.
- */
+export interface LiFiEarnVault {
+  address: string;
+  chainId: number;
+  protocol: string;
+  asset: string;
+  apy: number;
+  tvl: number;
+  tags: string[];
+}
+
+export async function getEarnVaults(opts?: {
+  asset?: string;
+  chainId?: number;
+  protocol?: string;
+  limit?: number;
+}): Promise<LiFiEarnVault[]> {
+  try {
+    const args: Record<string, unknown> = {};
+    if (opts?.asset) args.asset = opts.asset;
+    if (opts?.chainId) args.chainId = String(opts.chainId);
+    if (opts?.protocol) args.protocol = opts.protocol;
+    if (opts?.limit) args.limit = opts.limit;
+    args.sortBy = "apy";
+    args.sortDirection = "desc";
+    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-earn-vaults", args);
+    return parseResult<LiFiEarnVault[]>(result) ?? [];
+  } catch (err) {
+    console.warn("[lifi] getEarnVaults failed:", err);
+    return [];
+  }
+}
+
+export async function getEarnPortfolio(walletAddress: string): Promise<unknown> {
+  try {
+    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-earn-portfolio", {
+      walletAddress,
+    });
+    return parseResult<unknown>(result);
+  } catch (err) {
+    console.warn("[lifi] getEarnPortfolio failed:", err);
+    return null;
+  }
+}
+
+// ─── Token balances (replaces part of Haiku) ────────────────────────
+
+export async function getTokenBalances(walletAddress: string, chainId: number, tokenAddresses: string[]): Promise<unknown> {
+  try {
+    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-token-balances", {
+      walletAddress,
+      chain: String(chainId),
+      tokenAddresses,
+    });
+    return parseResult<unknown>(result);
+  } catch (err) {
+    console.warn("[lifi] getTokenBalances failed:", err);
+    return null;
+  }
+}
+
+export async function getNativeBalance(address: string, chainId: number): Promise<string | null> {
+  try {
+    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-native-token-balance", {
+      address,
+      chain: String(chainId),
+    });
+    return parseResult<string>(result);
+  } catch {
+    return null;
+  }
+}
+
+// ─── Same-chain swap alias ──────────────────────────────────────────
+
 export { getQuote as getSwapQuote };
 
 // ─── REST API fallback ───────────────────────────────────────────────
@@ -355,10 +425,6 @@ const LIFI_HEADERS: Record<string, string> = {
   ...(LIFI_API_KEY ? { "x-lifi-api-key": LIFI_API_KEY } : {}),
 };
 
-/**
- * REST API fallback for quotes when the MCP SSE server is unreachable.
- * Uses the same LI.FI v1 API directly.
- */
 export async function getQuoteViaRest(request: RouteRequest): Promise<RouteQuote | null> {
   try {
     const params = new URLSearchParams({
@@ -428,23 +494,16 @@ export async function getQuoteViaRest(request: RouteRequest): Promise<RouteQuote
   }
 }
 
-/**
- * Enhanced getQuote: tries MCP first, falls back to REST API.
- */
 export async function getQuoteWithFallback(request: RouteRequest): Promise<RouteQuote | null> {
   const mcpQuote = await getQuote(request);
   if (mcpQuote) return mcpQuote;
   return getQuoteViaRest(request);
 }
 
-/**
- * REST API fallback for building transactions.
- */
 export async function buildTransactionViaRest(
   request: RouteRequest,
   quoteData: LiFiQuoteRaw,
 ): Promise<RouteExecution | null> {
-  // LI.FI embeds the tx in the quote response
   if (quoteData.transactionRequest) {
     const tx = quoteData.transactionRequest;
     return {
@@ -460,7 +519,6 @@ export async function buildTransactionViaRest(
     };
   }
 
-  // If no embedded tx, re-quote via REST to get one
   try {
     const params = new URLSearchParams({
       fromChain: String(request.fromChainId),
@@ -499,9 +557,6 @@ export async function buildTransactionViaRest(
   }
 }
 
-/**
- * Enhanced buildTransaction: tries MCP first, falls back to REST API.
- */
 export async function buildTransactionWithFallback(
   request: RouteRequest,
   quoteData: LiFiQuoteRaw,
@@ -511,9 +566,6 @@ export async function buildTransactionWithFallback(
   return buildTransactionViaRest(request, quoteData);
 }
 
-/**
- * REST API fallback for route status tracking.
- */
 export async function getRouteStatusViaRest(
   txHash: string,
   fromChainId: number,
@@ -536,15 +588,12 @@ export async function getRouteStatusViaRest(
   }
 }
 
-/**
- * Enhanced status tracking: tries MCP first, falls back to REST.
- */
 export async function getRouteStatusWithFallback(
   txHash: string,
   fromChainId: number,
   toChainId?: number,
 ): Promise<LiFiRouteStatus | null> {
-  const mcpResult = await getRouteStatus(txHash, fromChainId);
+  const mcpResult = await getRouteStatus(txHash, fromChainId, toChainId);
   if (mcpResult && mcpResult.status !== "NOT_FOUND") return mcpResult;
   if (toChainId) return getRouteStatusViaRest(txHash, fromChainId, toChainId);
   return mcpResult;

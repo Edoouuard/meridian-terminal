@@ -12,7 +12,9 @@
 
 import { callMcpTool } from "./client";
 
-const HL_MCP_URL = process.env.HYPERLIQUID_MCP_URL || "https://mcp.hyperliquid.xyz/sse";
+// Hyperliquid doesn't have a hosted MCP server — using REST API only.
+// MCP fallback kept as optional env override if a community server appears.
+const HL_MCP_URL = process.env.HYPERLIQUID_MCP_URL || "";
 const SERVER_NAME = "hyperliquid";
 
 // Use the public REST API as primary (more reliable than MCP SSE for serverless)
@@ -108,10 +110,10 @@ export async function fetchFundingRates(): Promise<HlFundingRate[]> {
  * MCP-specific features like account data that needs auth).
  */
 export async function fetchFundingRatesMcp(): Promise<HlFundingRate[]> {
+  if (!HL_MCP_URL) return [];
   try {
     const result = await callMcpTool(HL_MCP_URL, SERVER_NAME, "get_funding_rates", {});
     if (!result) return [];
-    // Parse MCP result
     if (Array.isArray(result)) {
       for (const block of result) {
         if (block && typeof block === "object" && "type" in block && block.type === "text") {
