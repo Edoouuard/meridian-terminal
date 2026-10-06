@@ -1,13 +1,26 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import { useAccount, useSendTransaction, useWriteContract, usePublicClient } from "wagmi";
+import { useAccount, useSendTransaction, useWriteContract, usePublicClient, useSwitchChain } from "wagmi";
+import { useQueryClient } from "@tanstack/react-query";
+import type { Address } from "viem";
 import { applySender, buildExecution, type ExecutionPlan, type Order } from "@/lib/execution";
 import { mainnet, base, arbitrum, optimism, polygon, avalanche, bsc, gnosis, scroll, zkSync, linea, mantle, metis, fantom, sonic, celo } from "wagmi/chains";
-import { CHAIN_LABEL } from "@/lib/onchain";
+import { CHAIN_LABEL, ERC20_ABI, ERC20_ALLOWANCE_ABI } from "@/lib/onchain";
 import { needsAllowanceReset } from "@/lib/integrations/usdt";
+import { normalizeAmount } from "@/lib/execution";
+import { formatBaseUnits } from "@/lib/quote";
 
-export type ExecuteStatus = "idle" | "confirming" | "confirmed" | "error";
+export type ExecuteStatus =
+  | "idle"
+  | "validating"
+  | "simulating"
+  | "ready"
+  | "approving"
+  | "confirming"
+  | "waiting_receipt"
+  | "confirmed"
+  | "error";
 
 /**
  * Build a block-explorer tx URL for a chain id + tx hash, for surfacing a
@@ -47,11 +60,9 @@ export interface UseExecuteResult extends ExecuteState {
   /** Build a plan from an order and submit it to the wallet (NEVER auto-called — only from an explicit UI click). */
   execute: (order: Order) => Promise<void>;
   /**
-   * Execute an optional approve step, WAIT for it to be mined on-chain, then
-   * execute the main order. This is required for any flow where the main tx
-   * depends on allowance set by the approve (Morpho deposit, Aave supply,
-   * Uniswap swap, Lido unstake). Without waiting for the approve to be mined,
-   * the main tx reverts because the allowance doesn't exist yet.
+   * Validate, check balance/allowance, simulate, then execute an optional
+   * approve step + the main order. Waits for on-chain receipt before reporting
+   * confirmed. Skips the approve when the existing allowance is sufficient.
    */
   executeWithApproval: (approve: Order | null, order: Order) => Promise<void>;
   /** Return to idle and clear data/error. */
@@ -59,42 +70,40 @@ export interface UseExecuteResult extends ExecuteState {
 }
 
 /**
- * Real wagmi write harness. Reads the connected account, refuses to execute when
- * disconnected, converts the order into a plan, patches the onBehalfOf sender,
- * then submits via useWriteContract (Aave) or useSendTransaction (native ETH).
- * Uses the promise-returning `*Async` variants so we own the
- * idle → confirming → confirmed / error state machine ourselves.
+ * Real wagmi write harness with full pre-sign validation:
  *
- * SAFETY: `execute` is only ever invoked by an explicit UI click. Nothing here
- * auto-submits; we never simulate — the wallet itself must sign and broadcast.
- * The ABI/args are validated by `buildExecution` (pure) before any write.
+ * 1. Wallet connected + correct chain (auto-switch offered)
+ * 2. Token balance check (rejects insufficient balance before signing)
+ * 3. Allowance check (skips approve when existing allowance covers the amount)
+ * 4. Transaction simulation via publicClient.simulateContract
+ * 5. Wallet signature (writeContractAsync / sendTransactionAsync)
+ * 6. Receipt confirmation (waitForTransactionReceipt)
+ * 7. Portfolio cache invalidation after confirmed receipt
+ *
+ * State machine:
+ *   idle → validating → simulating → ready → approving? → confirming
+ *        → waiting_receipt → confirmed
+ *   Any step can → error
+ *
+ * SAFETY: execution only ever happens on an explicit UI click. Nothing
+ * auto-submits. The idempotency guard prevents double-signing.
  */
 export function useExecute(): UseExecuteResult {
   const { address, isConnected, chain } = useAccount();
   const { writeContractAsync } = useWriteContract();
   const { sendTransactionAsync } = useSendTransaction();
+  const { switchChainAsync } = useSwitchChain();
   const publicClient = usePublicClient();
+  const queryClient = useQueryClient();
 
   const [state, setState] = useState<ExecuteState>({ status: "idle" });
-  /**
-   * Idempotency guard: once a submission is in flight (or already confirmed),
-   * any further call to `execute` is a no-op. A double-click / rapid re-click can
-   * therefore never fire a second signature or a second broadcast. Reset only
-   * via `reset`. Also guards against React 18 double-invocation of the callback.
-   */
   const submittingRef = useRef(false);
 
-  /** Validate common preconditions (wallet connected, correct chain). Returns the built+patched plan or sets error state and returns null. */
+  /** Build + patch a plan from an order. Returns null and sets error state on failure. */
   const preparePlan = useCallback(
     (order: Order): ExecutionPlan | null => {
       if (!isConnected || !address) {
         setState({ status: "error", error: new Error("wallet not connected") });
-        return null;
-      }
-      const connectedChainId = chain?.id;
-      if (connectedChainId !== undefined && order.chainId !== connectedChainId) {
-        const label = CHAIN_LABEL[order.chainId] ?? `chain ${order.chainId}`;
-        setState({ status: "error", error: new Error(`Wrong network - switch to ${label} before signing`) });
         return null;
       }
       const built = buildExecution(order);
@@ -109,8 +118,163 @@ export function useExecute(): UseExecuteResult {
       }
       return plan;
     },
-    [address, isConnected, chain],
+    [address, isConnected],
   );
+
+  /**
+   * Check that the wallet is on the correct chain. Auto-switches if possible.
+   * Returns true if ready, false if error was set.
+   */
+  const ensureChain = useCallback(
+    async (order: Order): Promise<boolean> => {
+      const connectedChainId = chain?.id;
+      if (connectedChainId !== undefined && order.chainId !== connectedChainId) {
+        try {
+          await switchChainAsync({ chainId: order.chainId as Parameters<typeof switchChainAsync>[0]["chainId"] });
+          return true;
+        } catch {
+          const label = CHAIN_LABEL[order.chainId] ?? `chain ${order.chainId}`;
+          setState({ status: "error", error: new Error(`Switch to ${label} to continue`) });
+          return false;
+        }
+      }
+      return true;
+    },
+    [chain, switchChainAsync],
+  );
+
+  /**
+   * Read the on-chain ERC20 balance of the token for the connected wallet.
+   * For native value transfers (ETH), checks native balance instead.
+   * Returns the balance in base units, or null on read failure.
+   */
+  const readTokenBalance = useCallback(
+    async (order: Order): Promise<bigint | null> => {
+      if (!publicClient || !address) return null;
+      // Native transfer — check native balance
+      if (order.protocol === "eth" && order.type === "transfer") {
+        try {
+          return await publicClient.getBalance({ address });
+        } catch {
+          return null;
+        }
+      }
+      // Payable calls (Lido stake, Rocket Pool, Frax, WETH wrap) — check native balance for value
+      if (order.type === "stake" || (order.protocol === "weth" && order.type === "supply")) {
+        try {
+          return await publicClient.getBalance({ address });
+        } catch {
+          return null;
+        }
+      }
+      // ERC20 — read balanceOf
+      if (!order.token) return null;
+      try {
+        const result = await publicClient.readContract({
+          address: order.token,
+          abi: ERC20_ABI,
+          functionName: "balanceOf",
+          args: [address],
+        });
+        return result as bigint;
+      } catch {
+        return null;
+      }
+    },
+    [publicClient, address],
+  );
+
+  /**
+   * Read the on-chain ERC20 allowance for a token+spender pair.
+   * Returns the allowance in base units, or null on read failure.
+   */
+  const readAllowance = useCallback(
+    async (token: Address, spender: Address): Promise<bigint | null> => {
+      if (!publicClient || !address) return null;
+      try {
+        const result = await publicClient.readContract({
+          address: token,
+          abi: ERC20_ALLOWANCE_ABI,
+          functionName: "allowance",
+          args: [address, spender],
+        });
+        return result as bigint;
+      } catch {
+        return null;
+      }
+    },
+    [publicClient, address],
+  );
+
+  /**
+   * Simulate a contract call via the public client. Returns true if simulation
+   * succeeds, false if it reverts. For native-value-only plans (no ABI),
+   * simulation is skipped (nothing to simulate).
+   */
+  const simulatePlan = useCallback(
+    async (plan: ExecutionPlan): Promise<{ ok: boolean; error?: string }> => {
+      if (!publicClient || !address) return { ok: true };
+      // Native transfer — no contract to simulate
+      if (!plan.abi || !plan.functionName || !plan.args) return { ok: true };
+      if (!plan.address) return { ok: true };
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const simParams: any = {
+          account: address,
+          address: plan.address,
+          abi: plan.abi,
+          functionName: plan.functionName,
+          args: [...plan.args],
+        };
+        if (plan.value !== undefined) simParams.value = plan.value;
+        await (publicClient as any).simulateContract(simParams);
+        return { ok: true };
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // Extract a readable revert reason if present
+        const revertMatch = /reverted with reason string '([^']+)'/.exec(msg)
+          ?? /reason="([^"]+)"/.exec(msg)
+          ?? /Error: ([A-Z_]+)\(/.exec(msg);
+        const reason = revertMatch?.[1] ?? msg;
+        return { ok: false, error: `Simulation failed: ${reason}` };
+      }
+    },
+    [publicClient, address],
+  );
+
+  /**
+   * Resolve the required order amount in base units for balance comparison.
+   */
+  function resolveOrderAmount(order: Order): bigint | null {
+    if (typeof order.amount === "bigint") return order.amount;
+    if (typeof order.amount === "string") {
+      const result = normalizeAmount(order.amount, order.decimals ?? 18);
+      if ("value" in result) return result.value;
+    }
+    return null;
+  }
+
+  /**
+   * Determine the spender address from an approve order's built plan.
+   * For Aave: the pool. For Uniswap: the router. For Morpho: the vault.
+   */
+  function resolveSpenderFromApprove(approveOrder: Order): Address | null {
+    const built = buildExecution(approveOrder);
+    if ("error" in built) return null;
+    // For approve plans, args[0] is the spender
+    if (built.args && built.args.length > 0) return built.args[0] as Address;
+    return null;
+  }
+
+  /** Invalidate wagmi's cached on-chain reads so portfolio refreshes. */
+  const invalidatePortfolio = useCallback(() => {
+    // Wagmi stores useReadContracts/useBalance results under TanStack Query
+    // keys prefixed with "readContracts" and "balance". Invalidating broadly
+    // ensures the portfolio, token balances, and lending positions all refetch.
+    queryClient.invalidateQueries({ queryKey: ["readContracts"] });
+    queryClient.invalidateQueries({ queryKey: ["balance"] });
+    queryClient.invalidateQueries({ queryKey: ["readContract"] });
+  }, [queryClient]);
 
   const execute = useCallback(
     async (order: Order) => {
@@ -124,7 +288,22 @@ export function useExecute(): UseExecuteResult {
         setState({ status: "confirming" });
         try {
           const hash = await submitPlan(plan, writeContractAsync, sendTransactionAsync);
+          // Wait for on-chain receipt
+          setState({ status: "waiting_receipt", data: hash });
+          if (publicClient) {
+            try {
+              const receipt = await publicClient.waitForTransactionReceipt({ hash });
+              if (receipt.status === "reverted") {
+                setState({ status: "error", data: hash, error: new Error("Transaction reverted on-chain") });
+                return;
+              }
+            } catch (err) {
+              setState({ status: "error", data: hash, error: new Error(`Receipt failed: ${err instanceof Error ? err.message : String(err)}`) });
+              return;
+            }
+          }
           setState({ status: "confirmed", data: hash });
+          invalidatePortfolio();
         } catch (err) {
           setState({ status: "error", error: err });
         }
@@ -132,7 +311,7 @@ export function useExecute(): UseExecuteResult {
         submittingRef.current = false;
       }
     },
-    [preparePlan, sendTransactionAsync, writeContractAsync],
+    [preparePlan, sendTransactionAsync, writeContractAsync, publicClient, invalidatePortfolio],
   );
 
   const executeWithApproval = useCallback(
@@ -140,35 +319,74 @@ export function useExecute(): UseExecuteResult {
       if (submittingRef.current) return;
       submittingRef.current = true;
       try {
-        setState({ status: "idle" });
+        setState({ status: "validating" });
 
-        // Step 1: approve (if needed) — sign, broadcast, and WAIT for it to be mined.
-        // USDT quirk: its approve() reverts if the current allowance is > 0.
-        // We must first approve(spender, 0) and wait for it to mine, then
-        // approve(spender, amount). This is harmless for standard ERC20s but
-        // required for USDT on every chain.
-        if (approve) {
-          // Step 1a: for USDT-like tokens, reset allowance to 0 first.
+        // ── 1. Ensure correct chain ──────────────────────────────────
+        if (!(await ensureChain(order))) return;
+
+        // ── 2. Balance check ─────────────────────────────────────────
+        const requiredAmount = resolveOrderAmount(order);
+        if (requiredAmount !== null) {
+          const balance = await readTokenBalance(order);
+          if (balance !== null && balance < requiredAmount) {
+            const decimals = order.decimals ?? 18;
+              const humanBalance = formatBaseUnits(balance, decimals);
+            const humanRequired = formatBaseUnits(requiredAmount, decimals);
+            setState({
+              status: "error",
+              error: new Error(
+                `Insufficient ${order.symbol ?? "token"} balance: you have ${humanBalance} but need ${humanRequired}`,
+              ),
+            });
+            return;
+          }
+        }
+
+        // ── 3. Allowance check (skip approve if sufficient) ──────────
+        let needsApprove = !!approve;
+        if (approve && approve.token && requiredAmount !== null) {
+          const spender = resolveSpenderFromApprove(approve);
+          if (spender) {
+            const currentAllowance = await readAllowance(approve.token, spender);
+            if (currentAllowance !== null && currentAllowance >= requiredAmount) {
+              needsApprove = false; // existing allowance covers the amount
+            }
+          }
+        }
+
+        // ── 4. Build and simulate the main plan ──────────────────────
+        setState({ status: "simulating" });
+        const mainPlan = preparePlan(order);
+        if (!mainPlan) return;
+
+        const simResult = await simulatePlan(mainPlan);
+        if (!simResult.ok) {
+          setState({ status: "error", error: new Error(simResult.error ?? "Transaction simulation failed") });
+          return;
+        }
+
+        // ── 5. Approve (if needed) ───────────────────────────────────
+        if (needsApprove && approve) {
+          setState({ status: "approving" });
+
+          // USDT quirk: reset allowance to 0 first if current > 0
           if (needsAllowanceReset(approve.token) && publicClient) {
             const resetOrder: Order = { ...approve, amount: BigInt(0) };
             const resetPlan = preparePlan(resetOrder);
-            if (!resetPlan) return;
-
-            setState({ status: "confirming" });
-            try {
-              const resetHash = await submitPlan(resetPlan, writeContractAsync, sendTransactionAsync);
-              await publicClient.waitForTransactionReceipt({ hash: resetHash });
-            } catch (err) {
-              // If the reset fails (e.g. allowance was already 0), continue —
-              // the actual approve below will either succeed or give its own error.
+            if (resetPlan) {
+              try {
+                const resetHash = await submitPlan(resetPlan, writeContractAsync, sendTransactionAsync);
+                await publicClient.waitForTransactionReceipt({ hash: resetHash });
+              } catch {
+                // If the reset fails (allowance was already 0), continue
+              }
             }
           }
 
-          // Step 1b: set the actual allowance.
+          // Set the actual allowance
           const approvePlan = preparePlan(approve);
           if (!approvePlan) return;
 
-          setState({ status: "confirming" });
           let approveHash: `0x${string}`;
           try {
             approveHash = await submitPlan(approvePlan, writeContractAsync, sendTransactionAsync);
@@ -177,35 +395,61 @@ export function useExecute(): UseExecuteResult {
             return;
           }
 
-          // Wait for the approve tx to be mined so the allowance is live on-chain
-          // before we submit the main tx. Without this, the main tx (deposit/swap)
-          // reverts because the allowance doesn't exist yet.
+          // Wait for the approve to be mined
           if (publicClient) {
             try {
-              await publicClient.waitForTransactionReceipt({ hash: approveHash });
+              const receipt = await publicClient.waitForTransactionReceipt({ hash: approveHash });
+              if (receipt.status === "reverted") {
+                setState({ status: "error", error: new Error("Approval transaction reverted on-chain") });
+                return;
+              }
             } catch (err) {
-              setState({ status: "error", error: new Error(`Approve tx failed on-chain: ${err instanceof Error ? err.message : String(err)}`) });
+              setState({ status: "error", error: new Error(`Approve tx failed: ${err instanceof Error ? err.message : String(err)}`) });
               return;
             }
           }
         }
 
-        // Step 2: main order (deposit/swap/supply) — now that allowance is confirmed on-chain.
-        const mainPlan = preparePlan(order);
-        if (!mainPlan) return;
-
+        // ── 6. Main transaction ──────────────────────────────────────
         setState({ status: "confirming" });
+        // Re-prepare plan in case chain state changed during approval
+        const finalPlan = preparePlan(order);
+        if (!finalPlan) return;
+
+        let hash: `0x${string}`;
         try {
-          const hash = await submitPlan(mainPlan, writeContractAsync, sendTransactionAsync);
-          setState({ status: "confirmed", data: hash });
+          hash = await submitPlan(finalPlan, writeContractAsync, sendTransactionAsync);
         } catch (err) {
           setState({ status: "error", error: err });
+          return;
         }
+
+        // ── 7. Wait for on-chain receipt ─────────────────────────────
+        setState({ status: "waiting_receipt", data: hash });
+        if (publicClient) {
+          try {
+            const receipt = await publicClient.waitForTransactionReceipt({ hash });
+            if (receipt.status === "reverted") {
+              setState({ status: "error", data: hash, error: new Error("Transaction reverted on-chain") });
+              return;
+            }
+          } catch (err) {
+            setState({ status: "error", data: hash, error: new Error(`Confirmation failed: ${err instanceof Error ? err.message : String(err)}`) });
+            return;
+          }
+        }
+
+        // ── 8. Confirmed + refresh portfolio ─────────────────────────
+        setState({ status: "confirmed", data: hash });
+        invalidatePortfolio();
       } finally {
         submittingRef.current = false;
       }
     },
-    [preparePlan, publicClient, sendTransactionAsync, writeContractAsync],
+    [
+      preparePlan, ensureChain, readTokenBalance, readAllowance, simulatePlan,
+      publicClient, writeContractAsync, sendTransactionAsync, invalidatePortfolio,
+    ],
   );
 
   const reset = useCallback(() => setState({ status: "idle" }), []);
@@ -214,17 +458,6 @@ export function useExecute(): UseExecuteResult {
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
-/**
- * Route a finished plan to the right wagmi call:
- *   - a plan with an ABI (Aave, Lido's payable `submit`, ...) is a contract
- *     write — `value` rides along when the call is itself payable (Lido).
- *   - a plan with no ABI but a `value` is a plain native transfer.
- *
- * The plan's runtime ABI is intentionally cleared to `any` here: `buildExecution`
- * guarantees abi/functionName/args are a self-consistent set, but wagmi's
- * compile-time literal typing can't know values that arrived from a serializable
- * plan, so we bypass its per-literal narrowing once (the plan is already validated).
- */
 type WriteAsync = (args: any) => Promise<`0x${string}`>;
 
 async function submitPlan(

@@ -8,6 +8,8 @@ import {
   usdToTokenAmount,
 } from "@/lib/quote";
 
+export type { PriceEntry } from "@/lib/quote";
+
 /**
  * assetMap.ts — maps a parsed TradePlan leg to a concrete, wallet-executable
  * `Order` for `buildExecution` (the wagmi "hand"), and — just as important —
@@ -57,6 +59,8 @@ export const EXECUTABLE_VENUES: { venue: string; side: string; orderType: Order[
   { venue: "WETH", side: "Unwrap", orderType: "withdraw", protocol: "weth" },
   { venue: "L1", side: "Transfer", orderType: "transfer", protocol: "eth" },
   { venue: "ERC20", side: "Transfer", orderType: "transfer", protocol: "erc20" },
+  { venue: "deBridge", side: "Bridge", orderType: "swap", protocol: "debridge" },
+  { venue: "LI.FI", side: "Swap", orderType: "swap", protocol: "lifi" },
 ];
 
 /** Human-readable venue label for a protocol display string (e.g. "Hyperliquid"). */
@@ -543,6 +547,33 @@ export function resolveOrderForLeg(
     };
   }
 
+  // --- LI.FI DEX aggregator swap (executed via /api/swap) ------------------
+  // Like bridge legs, the actual unsigned tx is fetched at execute-time by the
+  // UI from /api/swap — this order carries the token info for display.
+  if (protocol === "lifi" || protocol === "li.fi") {
+    if (side !== "swap" && side !== "buy") {
+      return { unsupported: `LI.FI ${leg.side || "action"} is not wired yet.` };
+    }
+    const symbol = bareSymbol(leg.asset);
+    const token = findToken(symbol, resolveChainId);
+    if (!token) {
+      return { unsupported: `LI.FI: "${symbol}" has no tracked address on this chain.` };
+    }
+    const quote = quoteFor(token.symbol, token.decimals);
+    if (!quote) {
+      return { unsupported: `No live price for ${token.symbol} — cannot size this order safely.` };
+    }
+    return {
+      type: "swap",
+      protocol: "lifi" as Order["protocol"],
+      symbol: token.symbol,
+      token: token.address,
+      amount: quote.amountBase,
+      chainId: resolveChainId,
+      decimals: token.decimals,
+    };
+  }
+
   // --- Directional / hedge / beta-neutral / options perps ------------------
   // Perp venues have dedicated execute buttons in ThreadCard that bypass
   // resolveOrderForLeg entirely (EIP-712/StarkEx/LiFi signing flows).
@@ -579,7 +610,40 @@ export function resolveOrderForLeg(
       return { unsupported: "EigenLayer restaking not wired for live execution yet" };
     case "bridge":
     case "cross-chain":
-      return { unsupported: "Cross-chain bridging not wired for live execution yet" };
+    case "debridge": {
+      // Bridge legs are executed via the deBridge MCP routing layer.
+      // The actual unsigned tx is fetched at execute-time by BridgeExecuteButton
+      // from /api/bridge — this order is a placeholder that carries the token
+      // info and amount so the UI can display the leg and trigger the flow.
+      const bridgeSymbol = bareSymbol(leg.asset);
+      const bridgeToken = findToken(bridgeSymbol, resolveChainId);
+      if (leg.sizeUsd) {
+        const bQuote = quoteFor(bridgeToken?.symbol ?? bridgeSymbol, bridgeToken?.decimals ?? 18);
+        if (!bQuote) {
+          return { unsupported: `No live price for ${bridgeSymbol} — cannot size this bridge order.` };
+        }
+        return {
+          type: "swap",
+          protocol: "debridge" as Order["protocol"],
+          symbol: bridgeToken?.symbol ?? bridgeSymbol,
+          token: bridgeToken?.address,
+          amount: bQuote.amountBase,
+          chainId: resolveChainId,
+          decimals: bridgeToken?.decimals ?? 18,
+          bridgeNote: leg.note,
+        } as Order;
+      }
+      return {
+        type: "swap",
+        protocol: "debridge" as Order["protocol"],
+        symbol: bridgeToken?.symbol ?? bridgeSymbol,
+        token: bridgeToken?.address,
+        amount: "0",
+        chainId: resolveChainId,
+        decimals: bridgeToken?.decimals ?? 18,
+        bridgeNote: leg.note,
+      } as Order;
+    }
     default:
       return { unsupported: `${venue} is not wired for live execution yet` };
   }

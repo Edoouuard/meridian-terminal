@@ -282,6 +282,8 @@ const PROTOCOL_PATTERNS: Array<[RegExp, string]> = [
   [/\bbalancer\b|\bbal\b/i, "Balancer"],
   [/\bexpress\b/i, "Express"],
   [/\bsolana\b/i, "Solana"],
+  [/\bde\s*bridge\b|\bdln\b/i, "deBridge"],
+  [/\bli\.?fi\b|\blifi\b/i, "LI.FI"],
 ];
 
 function parseProtocol(text: string): string | undefined {
@@ -395,6 +397,40 @@ export function planToThreadType(plan: TradePlan): ThreadType {
   }
 }
 
+/** Chain name patterns for bridge destination parsing. */
+const CHAIN_PATTERNS: Array<[RegExp, string]> = [
+  [/\barbitrum\b/i, "Arbitrum"],
+  [/\bbase\b/i, "Base"],
+  [/\boptimism\b/i, "Optimism"],
+  [/\bpolygon\b|\bmatic\b/i, "Polygon"],
+  [/\bavalanche\b|\bavax\b/i, "Avalanche"],
+  [/\bbnb\s*chain\b|\bbsc\b/i, "BNB Chain"],
+  [/\bgnosis\b|\bxdai\b/i, "Gnosis"],
+  [/\bscroll\b/i, "Scroll"],
+  [/\bzk\s*sync\b/i, "zkSync Era"],
+  [/\blinea\b/i, "Linea"],
+  [/\bmantle\b/i, "Mantle"],
+  [/\bmetis\b/i, "Metis"],
+  [/\bfantom\b|\bftm\b/i, "Fantom"],
+  [/\bsonic\b/i, "Sonic"],
+  [/\bcelo\b/i, "Celo"],
+  [/\bethereum\b|\bmainnet\b/i, "Ethereum"],
+];
+
+/** Extract the destination chain name from a bridge thesis, if mentioned. */
+function parseBridgeDestination(text: string): string | undefined {
+  // Look for "to <chain>" or "onto <chain>" patterns first
+  for (const [re, name] of CHAIN_PATTERNS) {
+    const pattern = new RegExp(`(?:to|onto|on)\\s+${re.source}`, "i");
+    if (pattern.test(text)) return name;
+  }
+  // Fallback: any chain mention (excluding "from <chain>")
+  for (const [re, name] of CHAIN_PATTERNS) {
+    if (re.test(text) && !new RegExp(`from\\s+${re.source}`, "i").test(text)) return name;
+  }
+  return undefined;
+}
+
 /**
  * Parse a free-form thesis into a structured TradePlan. Pure, offline, and
  * total: any input (including garbage) resolves to a TradePlan.
@@ -466,8 +502,9 @@ export function parseThesis(rawText: string): TradePlan {
     case "swap": {
       const from = swap?.from ?? assets[0] ?? "USDC";
       const to = swap?.to ?? "stETH";
-      legs = [{ side: "Swap", asset: `${from} → ${to}`, protocol: protocol ?? "Uniswap", sizeUsd: size }];
-      summary = `Swap ~${fmtUsd(size ?? 0)} ${from} into ${to} via ${protocol ?? "Uniswap"} at minimal estimated slippage.`;
+      const swapProto = protocol ?? "Uniswap";
+      legs = [{ side: "Swap", asset: `${from} → ${to}`, protocol: swapProto, sizeUsd: size }];
+      summary = `Swap ~${fmtUsd(size ?? 0)} ${from} into ${to} via ${swapProto}${swapProto === "LI.FI" ? " (DEX aggregator, best rate across 30+ DEXes)" : ""} at minimal estimated slippage.`;
       break;
     }
     case "hedge": {
@@ -515,8 +552,10 @@ export function parseThesis(rawText: string): TradePlan {
       break;
     }
     case "bridge": {
-      legs = [{ side: "Bridge", asset: base, protocol: protocol ?? "Cross-chain", sizeUsd: size }];
-      summary = `Bridge ~${fmtUsd(size ?? 0)} ${base}${protocol ? ` via ${protocol}` : " to another chain"}.`;
+      const dstChain = parseBridgeDestination(t);
+      const bridgeNote = dstChain ? `→ ${dstChain}` : "cross-chain";
+      legs = [{ side: "Bridge", asset: base, protocol: protocol ?? "deBridge", sizeUsd: size, note: bridgeNote }];
+      summary = `Bridge ~${fmtUsd(size ?? 0)} ${base} ${dstChain ? `to ${dstChain}` : "cross-chain"} via deBridge DLN (best route across deBridge + LI.FI).`;
       break;
     }
     case "yieldSearch": {
@@ -730,6 +769,31 @@ export function parseThesisVariants(rawText: string): TradePlan[] {
         variantNote: STAKING_PROTOCOL_NOTE[p],
       }));
     }
+  }
+
+  // Swap: offer Uniswap (direct) vs LI.FI (DEX aggregator) when no protocol was named.
+  if (base.intent === "swap" && (base.protocol === undefined || base.protocol === "Uniswap" || base.protocol === "LI.FI")) {
+    const leg = base.legs[0];
+    const size = base.sizeUsd ?? 0;
+    // Extract from/to from the leg asset ("USDC → ETH")
+    const assetParts = (leg?.asset ?? "").split("→").map((s) => s.trim());
+    const from = assetParts[0] || "USDC";
+    const to = assetParts[1] || "ETH";
+    const swapVenues = ["Uniswap", "LI.FI"] as const;
+    const swapNote: Record<string, string> = {
+      Uniswap: "Direct on-chain Uniswap v3 quote with live slippage estimation.",
+      "LI.FI": "DEX aggregator comparing 30+ DEXes (1inch, Paraswap, 0x, CowSwap, etc.) for the best rate.",
+    };
+    const named = (swapVenues as readonly string[]).includes(leg.protocol) ? leg.protocol : undefined;
+    const ordered = named ? [named, ...swapVenues.filter((p) => p !== named)] : [...swapVenues];
+    return ordered.map((p) => ({
+      ...base,
+      protocol: p,
+      legs: [{ ...leg, protocol: p }],
+      summary: `Swap ~${fmtUsd(size)} ${from} into ${to} via ${p} at minimal estimated slippage.`,
+      variantLabel: p,
+      variantNote: swapNote[p],
+    }));
   }
 
   // DAI supply: add Maker DSR as a variant alongside lending protocols.

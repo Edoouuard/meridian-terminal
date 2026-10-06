@@ -315,6 +315,19 @@ export const ERC20_ABI = [
   },
 ] as const;
 
+export const ERC20_ALLOWANCE_ABI = [
+  {
+    type: "function",
+    name: "allowance",
+    stateMutability: "view",
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "spender", type: "address" },
+    ],
+    outputs: [{ name: "", type: "uint256" }],
+  },
+] as const;
+
 /** Aave v3 Pool.getUserAccountData — base-currency amounts are USD with 8 decimals on every chain listed above. */
 export const AAVE_POOL_ABI = [
   {

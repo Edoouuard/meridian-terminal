@@ -81,6 +81,10 @@ Use these when user wants passive yield with protocol exposure.
 
 ### Spot / Swaps
 - **Uniswap v3**: any ERC20 pair. Live quoting + slippage protection.
+- **LI.FI**: DEX aggregator comparing 30+ DEXes (1inch, Paraswap, 0x, CowSwap, etc.) for the best swap rate. Same-chain swaps only. Use protocol "LI.FI" for aggregated swaps.
+
+### Cross-chain Bridge
+- **deBridge**: bridge any token between chains (Ethereum, Base, Arbitrum, Optimism, Polygon, Avalanche, BNB Chain, etc.). Use side "Bridge" with protocol "deBridge". The routing layer compares deBridge DLN and LI.FI and picks the best rate automatically. Estimated delivery: 1-3 minutes.
 
 ### Not Yet Live (mark "not yet live" in note if used)
 - **Pendle**: fixed yield via PT tokens
@@ -154,7 +158,7 @@ Before returning your JSON, verify each strategy against this checklist:
 
 side: exactly one of: "Supply", "Borrow", "Repay", "Withdraw", "Long", "Short", "Swap", "Stake", "Bridge", "Transfer", "Restake", "Buy"
 asset: token symbol. Perps: "ETH PERP". Swaps: "USDC → ETH". Staking: output token "stETH".
-protocol: exactly one of: "Aave", "Compound", "Lido", "Hyperliquid", "Extended", "Ondo", "Lighter", "Uniswap", "Morpho", "Pendle", "EigenLayer", "Wallet"
+protocol: exactly one of: "Aave", "Compound", "Lido", "Hyperliquid", "Extended", "Ondo", "Lighter", "Uniswap", "LI.FI", "Morpho", "Pendle", "EigenLayer", "Wallet", "deBridge"
 sizeUsd: integer USD value.
 leverage: only for Long/Short legs. Integer.
 note: MUST include the exact live rate from data (e.g. "Currently 4.23% APY", "Funding +12.3% annualized").

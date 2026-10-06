@@ -40,14 +40,14 @@ describe("execution — normalizeAmount", () => {
   });
 
   it("rejects negative / malformed / over-precision strings", () => {
-    expect(normalizeAmount("-5", 6).error).toContain("not a valid");
-    expect(normalizeAmount("abc", 6).error).toContain("not a valid");
+    expect((normalizeAmount("-5", 6) as { error: string }).error).toContain("not a valid");
+    expect((normalizeAmount("abc", 6) as { error: string }).error).toContain("not a valid");
     // 7 fraction digits exceeds 6-decimal token precision
-    expect(normalizeAmount("1.0000001", 6).error).toContain("exceeds the 6-decimal precision");
+    expect((normalizeAmount("1.0000001", 6) as { error: string }).error).toContain("exceeds the 6-decimal precision");
   });
 
   it("rejects invalid decimals", () => {
-    expect(normalizeAmount("1", -1).error).toContain("invalid token decimals");
+    expect((normalizeAmount("1", -1) as { error: string }).error).toContain("invalid token decimals");
   });
 });
 

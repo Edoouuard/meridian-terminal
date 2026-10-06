@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useAccount, useSendTransaction, useWriteContract, usePublicClient, useSwitchChain } from "wagmi";
+import { useQueryClient } from "@tanstack/react-query";
 import { applySender, buildExecution, type ExecutionPlan, type Order } from "@/lib/execution";
 import { approveOrderFor } from "@/lib/assetMap";
 import { needsAllowanceReset } from "@/lib/integrations/usdt";
@@ -72,6 +73,7 @@ export function useStrategyExecutor(): UseStrategyExecutorResult {
   const { sendTransactionAsync } = useSendTransaction();
   const { switchChainAsync } = useSwitchChain();
   const publicClient = usePublicClient();
+  const queryClient = useQueryClient();
 
   const [progress, setProgress] = useState<StrategyProgress>({
     status: "idle",
@@ -226,9 +228,13 @@ export function useStrategyExecutor(): UseStrategyExecutorResult {
       if (!cancelledRef.current) {
         setProgress((prev) => ({ ...prev, status: hasError ? "error" : "completed" }));
       }
+      // Invalidate portfolio cache so balances refresh after execution
+      queryClient.invalidateQueries({ queryKey: ["readContracts"] });
+      queryClient.invalidateQueries({ queryKey: ["balance"] });
+      queryClient.invalidateQueries({ queryKey: ["readContract"] });
       runningRef.current = false;
     },
-    [address, isConnected, chain, switchChainAsync, publicClient, writeContractAsync, sendTransactionAsync, updateLeg],
+    [address, isConnected, chain, switchChainAsync, publicClient, writeContractAsync, sendTransactionAsync, updateLeg, queryClient],
   );
 
   const cancel = useCallback(() => {
