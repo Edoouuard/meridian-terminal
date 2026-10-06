@@ -61,6 +61,15 @@ export interface AaveSupplyFlow {
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type WriteAsync = (args: any) => Promise<`0x${string}`>;
+/**
+ * A dynamically-typed ExecutionPlan's `abi` is viem's broad `Abi` type, not a
+ * literal `as const` ABI — passing it straight into `simulateContract`'s
+ * heavily overloaded generic signature makes TS try to enumerate every
+ * possible function/args combination and fail with "union type too complex
+ * to represent". Same fix as `WriteAsync` above: erase the generic once,
+ * here, rather than at every call site.
+ */
+type SimulateAsync = (args: any) => Promise<unknown>;
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 /**
@@ -222,7 +231,7 @@ export function useAaveSupply(onConfirmed?: () => void): AaveSupplyFlow {
             return;
           }
           try {
-            await client.simulateContract({
+            await (client.simulateContract as SimulateAsync)({
               account: address,
               address: approveBuilt.address!,
               abi: approveBuilt.abi!,
@@ -245,7 +254,7 @@ export function useAaveSupply(onConfirmed?: () => void): AaveSupplyFlow {
             return;
           }
           try {
-            await client.simulateContract({
+            await (client.simulateContract as SimulateAsync)({
               account: address,
               address: patched.address!,
               abi: patched.abi!,
@@ -372,7 +381,7 @@ export function useAaveSupply(onConfirmed?: () => void): AaveSupplyFlow {
           return;
         }
         try {
-          await client.simulateContract({
+          await (client.simulateContract as SimulateAsync)({
             account: address,
             address: patchedForSim.address!,
             abi: patchedForSim.abi!,
