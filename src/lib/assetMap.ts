@@ -672,5 +672,20 @@ export function approveOrderFor(order: Order): Order | null {
       spender: order.spender,
     };
   }
+  // deBridge/LI.FI router swap: approve the SAME verified entrypoint the
+  // quote will call (routerTx.to) — never a generic default, since that
+  // address is chosen per-quote rather than fixed per protocol.
+  if ((order.protocol === "debridge" || order.protocol === "lifi") && order.type === "swap" && order.token && order.routerTx) {
+    return {
+      type: "approve",
+      protocol: order.protocol,
+      token: order.token,
+      symbol: order.symbol,
+      amount: order.amount,
+      chainId: order.chainId,
+      decimals: order.decimals,
+      spender: order.routerTx.to,
+    };
+  }
   return null;
 }

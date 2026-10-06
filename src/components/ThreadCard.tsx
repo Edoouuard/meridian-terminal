@@ -38,7 +38,8 @@ import { formatBaseUnits, resolvePriceFromList, usdToTokenAmount, type PriceEntr
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { assessHealthFactorGuardrail } from "@/lib/safety";
 import { recordExecution, type OrderRecordType } from "@/lib/history";
-import { AaveSupplyExecuteButton } from "@/components/AaveSupplyExecuteButton";
+import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
+import { BridgeExecuteButton } from "@/components/BridgeExecuteButton";
 
 /** Map an execution Order type to a coarse history record type. */
 function recordTypeFor(orderType: string): OrderRecordType {
@@ -760,7 +761,7 @@ function SwapExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry
         value={`${formatBaseUnits(amountOutMinimum, tokenOut.decimals)} ${tokenOut.symbol}`}
         valueColor="var(--color-accent-700)"
       />
-      <ExecuteButton order={order} label="Swap on Uniswap →" />
+      <ValidatedExecuteButton order={order} label="Swap on Uniswap →" />
     </>
   );
 }
@@ -842,7 +843,7 @@ function MorphoExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEnt
     <>
       <OrderRow label="Vault" value={vault.name} />
       <OrderRow label="Risk" value={`${vault.riskTier} · ${vault.riskScore.toFixed(1)}/10 (Philidor)`} valueColor={RISK_TIER_COLOR[vault.riskTier]} />
-      <ExecuteButton order={order} label="Deposit on Morpho →" />
+      <ValidatedExecuteButton order={order} label="Deposit on Morpho →" />
     </>
   );
 }
@@ -912,7 +913,7 @@ function MorphoWithdrawButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEn
         label="Withdrawing"
         value={`${formatBaseUnits(amountBase, position.assetDecimals)} of ${formatBaseUnits(positionAssets, position.assetDecimals)} ${symbol}`}
       />
-      <ExecuteButton order={order} label="Withdraw from Morpho →" />
+      <ValidatedExecuteButton order={order} label="Withdraw from Morpho →" />
     </>
   );
 }
@@ -972,7 +973,7 @@ function LidoUnstakeButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry
         label="Requesting"
         value={`${formatBaseUnits(amountBase, 18)} of ${formatBaseUnits(positionWei, 18)} stETH`}
       />
-      <ExecuteButton order={order} label="Request withdrawal on Lido →" />
+      <ValidatedExecuteButton order={order} label="Request withdrawal on Lido →" />
     </>
   );
 }
@@ -1084,7 +1085,7 @@ function YieldOptionRow({ option, asset, sizeUsd }: { option: MergedYieldOption;
         isMorpho ? (
           <MorphoExecuteButton leg={leg} prices={prices} />
         ) : (
-          <ExecuteButton order={resolved as Order} label={`Execute on ${option.protocol} →`} />
+          <ValidatedExecuteButton order={resolved as Order} label={`Execute on ${option.protocol} →`} />
         )
       ) : (
         <NotWired
@@ -1266,9 +1267,10 @@ function StrategyLegs({ plan }: { plan: TradePlan }) {
         const isMorpho = /morpho/i.test(leg.protocol || "");
         const isLido = /lido/i.test(leg.protocol || "");
         const isLidoWithdraw = isLido && (legSide === "withdraw" || legSide === "unstake");
+        const isBridge = legSide === "bridge";
         const isLidoStake = isLido && legSide === "stake";
         const liveVenue =
-          /hyperliquid|extended|ondo|lighter|uniswap/i.test(leg.protocol || "") || isMorpho || isLidoWithdraw || isLidoStake;
+          /hyperliquid|extended|ondo|lighter|uniswap/i.test(leg.protocol || "") || isMorpho || isLidoWithdraw || isLidoStake || isBridge;
         const building = isUnsupported(resolved) && !liveVenue;
         return (
           <div key={i} className="leg-card" style={{ opacity: building ? 0.55 : 1 }}>
@@ -1293,17 +1295,15 @@ function StrategyLegs({ plan }: { plan: TradePlan }) {
                 legSide === "withdraw" ? <MorphoWithdrawButton leg={leg} prices={prices} /> : <MorphoExecuteButton leg={leg} prices={prices} />
               ) : isLidoWithdraw ? (
                 <LidoUnstakeButton leg={leg} prices={prices} />
+              ) : isBridge ? (
+                <BridgeExecuteButton leg={leg} prices={prices} />
               ) : (
                 <NotWired venue={protocolLabel(leg.protocol)} reason={resolved.unsupported} />
               )
             ) : (
               <>
                 <OrderRow label="Amount" value={orderAmountDisplay(resolved)} valueColor="var(--color-accent-700)" />
-                {resolved.protocol === "aave" && resolved.type === "supply" ? (
-                  <AaveSupplyExecuteButton order={resolved} label="Supply on Aave →" />
-                ) : (
-                  <ExecuteButton order={resolved} label={`Execute on ${leg.protocol} →`} />
-                )}
+                <ValidatedExecuteButton order={resolved} label={`Execute on ${leg.protocol} →`} />
               </>
             )}
             {leg.note && (
