@@ -45,6 +45,15 @@ type WriteAsync = (args: any) => Promise<`0x${string}`>;
  * to represent". Erase the generic once, here, rather than at every call site.
  */
 type SimulateAsync = (args: any) => Promise<unknown>;
+/**
+ * wagmi's `usePublicClient()` is parameterized over the full multi-chain
+ * config (16 chains) — on this project, calling almost any of its methods
+ * with an inline object literal can independently trip the same "union
+ * type too complex to represent" error, not just simulateContract. Same
+ * erasure, applied everywhere a plain client method is called with a
+ * dynamically-shaped plan.
+ */
+type CallAsync = (args: any) => Promise<unknown>;
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 /** Map an Order's type to the coarse history record type (mirrors ThreadCard's own recordTypeFor). */
@@ -229,7 +238,7 @@ export function useExecuteOrder(onConfirmed?: () => void): ExecuteOrderFlow {
         let liveBalance: bigint | undefined;
         if (isWalletDebitingAction(orderWithExactAmount)) {
           if (patched.value !== undefined && patched.value > BigInt(0)) {
-            liveBalance = await client.getBalance({ address }).catch(() => undefined);
+            liveBalance = await (client.getBalance as CallAsync)({ address }).catch(() => undefined);
           } else if (orderWithExactAmount.token) {
             liveBalance = await client
               .readContract({ address: orderWithExactAmount.token, abi: ERC20_ABI, functionName: "balanceOf", args: [address] })
@@ -293,7 +302,7 @@ export function useExecuteOrder(onConfirmed?: () => void): ExecuteOrderFlow {
             } else if (patched.data !== undefined) {
               // Allowance already sufficient for a raw-calldata plan (e.g. a
               // router swap) — eth_call it directly, same as the no-approval path.
-              await client.call({ account: address, to: patched.address, data: patched.data, value: patched.value });
+              await (client.call as CallAsync)({ account: address, to: patched.address, data: patched.data, value: patched.value });
             }
           } catch (err) {
             fail(newPlan, "SIMULATION_FAILED", `${willNeedApproval ? "Approval" : "Transaction"} would fail: ${err instanceof Error ? err.message : String(err)}`);
@@ -315,7 +324,7 @@ export function useExecuteOrder(onConfirmed?: () => void): ExecuteOrderFlow {
               // A raw-calldata plan (a router's quoted swap/bridge tx) has no
               // ABI to simulateContract against — eth_call it directly so a
               // revert is still caught before the wallet ever opens.
-              await client.call({ account: address, to: patched.address, data: patched.data, value: patched.value });
+              await (client.call as CallAsync)({ account: address, to: patched.address, data: patched.data, value: patched.value });
             }
             // A plain native send (no abi, no data) has nothing meaningful to
             // simulate — the wallet's own gas estimation at signing time is
@@ -428,7 +437,7 @@ export function useExecuteOrder(onConfirmed?: () => void): ExecuteOrderFlow {
                 ...(builtPlan.value !== undefined ? { value: builtPlan.value } : {}),
               });
             } else if (builtPlan.data !== undefined) {
-              await client.call({ account: address, to: builtPlan.address, data: builtPlan.data, value: builtPlan.value });
+              await (client.call as CallAsync)({ account: address, to: builtPlan.address, data: builtPlan.data, value: builtPlan.value });
             }
           } catch (err) {
             fail(plan, "SIMULATION_FAILED", `Transaction would fail after approval: ${err instanceof Error ? err.message : String(err)}`);
