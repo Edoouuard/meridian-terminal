@@ -28,7 +28,7 @@ import { isTrustedDebridgeEntrypoint, isTrustedLifiEntrypoint } from "./mcp/rout
  */
 
 export type OrderType = "supply" | "repay" | "borrow" | "withdraw" | "transfer" | "approve" | "stake" | "swap" | "unstake" | "claim";
-export type OrderProtocol = "aave" | "eth" | "erc20" | "lido" | "uniswap" | "morpho" | "compound" | "spark" | "maker" | "weth" | "rocketpool" | "frax" | "debridge" | "lifi";
+export type OrderProtocol = "aave" | "eth" | "erc20" | "lido" | "uniswap" | "morpho" | "compound" | "spark" | "maker" | "weth" | "rocketpool" | "frax" | "debridge" | "lifi" | "hyperliquid" | "extended" | "ondo" | "lighter" | "pendle" | "eigenlayer" | "variational";
 
 /**
  * Protocol-agnostic order produced by the trade engine. Carries enough to build a
@@ -938,6 +938,26 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         riskNote: `Moves real funds on ${chainLabel} through a verified third-party router (${providerLabel}) — the destination contract was checked against Meridian's own allowlist before this plan was built.`,
       };
     }
+
+    // Perp venues: these protocols are executed by dedicated UI components
+    // (PerpExecuteButton, ExtendedPerpExecuteButton, LifiPerpExecuteButton)
+    // that handle signing directly (EIP-712, StarkEx, LI.FI relay).
+    // buildExecution is NOT called for them — but if it is (e.g. via
+    // the generic ExecuteButton fallback), return a descriptive error
+    // instead of "unknown protocol".
+    case "hyperliquid":
+      return fail("Hyperliquid perps use EIP-712 signing — use the dedicated Hyperliquid panel instead.");
+    case "extended":
+      return fail("Extended perps use StarkEx signing — use the dedicated Extended panel instead.");
+    case "ondo":
+    case "lighter":
+      return fail(`${assetLabel} perps on ${String(order.protocol)} use the LI.FI relay — use the dedicated perps panel instead.`);
+    case "variational":
+      return fail("Variational options are not yet wired for live execution.");
+    case "pendle":
+      return fail("Pendle fixed-yield (PT) is not yet wired for live execution.");
+    case "eigenlayer":
+      return fail("EigenLayer restaking is not yet wired for live execution.");
 
     default:
       return fail(`unknown protocol '${String(order.protocol)}'`);
