@@ -187,10 +187,16 @@ function parseSwap(text: string): { from: string; to: string } | undefined {
 
 /** A raw EVM address (checksum case preserved — matched against the original, non-lowercased text). */
 const ADDRESS_RE = /0x[a-fA-F0-9]{40}/;
+/** ENS / Basename pattern (e.g. "vitalik.eth", "jesse.base.eth"). */
+const ENS_RE = /\b([a-z0-9][-a-z0-9]*(?:\.[a-z0-9][-a-z0-9]*)*\.eth)\b/i;
 
 function parseRecipient(text: string): string | undefined {
-  const m = text.match(ADDRESS_RE);
-  return m ? m[0] : undefined;
+  // Raw address takes priority
+  const addr = text.match(ADDRESS_RE);
+  if (addr) return addr[0];
+  // ENS / Basename (resolved async at execute-time via Base MCP)
+  const ens = text.match(ENS_RE);
+  return ens ? ens[1] : undefined;
 }
 
 /**

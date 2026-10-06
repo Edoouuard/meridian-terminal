@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { fetchAaveYieldSummary } from "@/lib/mcp/aave";
+import * as haiku from "@/lib/mcp/providers/haiku";
 
 /**
  * GET /api/yield-context
@@ -401,13 +402,14 @@ function buildSummary(ctx: Omit<YieldContext, "summary" | "fetchedAt">): string 
 
 export async function GET() {
   // Fetch ALL sources in parallel — each is independently null-safe
-  const [defiLlama, funding, hlp, lighterVaults, philidor, aaveMcp] = await Promise.all([
+  const [defiLlama, funding, hlp, lighterVaults, philidor, aaveMcp, haikuYields] = await Promise.all([
     fetchDefiLlama(),
     fetchFundingRates(),
     fetchHlpVault(),
     fetchLighterVaults(),
     fetchPhilidorVaults(),
     fetchAaveYieldSummary([1, 8453, 42161, 10, 137, 43114, 56, 100, 534352, 324, 59144, 5000, 1088, 250, 146, 42220]).catch(() => ""),
+    haiku.fetchYieldOpportunities({ minApy: 1 }).catch(() => []),
   ]);
 
   const vaults: VaultYield[] = [
@@ -415,8 +417,26 @@ export async function GET() {
     ...lighterVaults,
   ].filter((v): v is VaultYield => v !== null);
 
+  // Merge Haiku MCP yield opportunities into lending data (deduplicated)
+  const haikuLending: YieldRow[] = haikuYields
+    .filter((y) => y.apy > 0 && y.tvlUsd > MIN_TVL)
+    .map((y) => ({
+      protocol: y.protocol,
+      asset: y.asset.toUpperCase(),
+      chain: String(y.chainId),
+      apy: y.apy,
+      tvlUsd: y.tvlUsd,
+      kind: y.type,
+    }));
+  // Deduplicate: prefer DefiLlama data (already validated), add Haiku-only entries
+  const existingKeys = new Set(defiLlama.lending.map((r) => `${r.protocol}:${r.asset}:${r.chain}`));
+  const mergedLending = [
+    ...defiLlama.lending,
+    ...haikuLending.filter((r) => !existingKeys.has(`${r.protocol}:${r.asset}:${r.chain}`)),
+  ].sort((a, b) => b.apy - a.apy).slice(0, 60);
+
   const ctx: YieldContext = {
-    lending: defiLlama.lending,
+    lending: mergedLending,
     staking: defiLlama.staking,
     funding,
     vaults,

@@ -176,12 +176,19 @@ export function resolveOrderForLeg(
   // The recipient comes from the thesis itself (leg.to, parsed by tradePlan's
   // "transfer" intent) — falling back to the `address` param only for a
   // caller that already knows the recipient some other way.
+  // Supports ENS/Basename names (e.g. "vitalik.eth") — marked with `ensName`
+  // on the order so the UI resolves them via Base MCP before signing.
   if (protocol === "eth" || side === "transfer") {
-    const recipient = (leg.to as Address | undefined) ?? address;
-    if (!recipient) {
-      return { unsupported: "Send needs a recipient address — include one like 0x1234... in your thesis." };
+    const rawRecipient = leg.to;
+    const isEns = rawRecipient && !rawRecipient.startsWith("0x") && rawRecipient.endsWith(".eth");
+    const recipient = (isEns ? undefined : rawRecipient as Address | undefined) ?? address;
+    if (!recipient && !isEns) {
+      return { unsupported: "Send needs a recipient address — include one like 0x1234... or a .eth name in your thesis." };
     }
     const symbol = bareSymbol(leg.asset) || "ETH";
+
+    // ENS/Basename name to resolve at execute-time via Base MCP
+    const ensExtra = isEns ? { ensName: rawRecipient } : {};
 
     // Native gas token transfer (ETH, BNB, etc.)
     if (symbol === "ETH" || symbol === "BNB" || symbol === "AVAX" || symbol === "MATIC" || symbol === "FTM") {
@@ -194,6 +201,7 @@ export function resolveOrderForLeg(
           chainId: resolveChainId,
           decimals: 18,
           to: recipient,
+          ...ensExtra,
         };
       }
       const quote = quoteFor(symbol, 18);
@@ -208,6 +216,7 @@ export function resolveOrderForLeg(
         chainId: resolveChainId,
         decimals: 18,
         to: recipient,
+        ...ensExtra,
       };
     }
 
@@ -226,6 +235,7 @@ export function resolveOrderForLeg(
         chainId: resolveChainId,
         decimals: token.decimals,
         to: recipient,
+        ...ensExtra,
       } as Order;
     }
     const erc20Quote = quoteFor(token.symbol, token.decimals);
@@ -241,6 +251,7 @@ export function resolveOrderForLeg(
       chainId: resolveChainId,
       decimals: token.decimals,
       to: recipient,
+      ...ensExtra,
     } as Order;
   }
 

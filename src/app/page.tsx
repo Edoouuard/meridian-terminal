@@ -14,7 +14,9 @@ import { LifiPerpsConnectPanel } from "@/components/LifiPerpsConnectPanel";
 import { LidoWithdrawalsPanel } from "@/components/LidoWithdrawalsPanel";
 import { VaultRiskPanel } from "@/components/VaultRiskPanel";
 import { SolanaPanel } from "@/components/SolanaPanel";
+import { McpStatusPanel } from "@/components/McpStatusPanel";
 import { LiveAsset, LivePortfolio, useLivePortfolio } from "@/hooks/useLivePortfolio";
+import { useHaikuPortfolio } from "@/hooks/useHaikuPortfolio";
 import { NewsFeed } from "@/components/NewsFeed";
 import { CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
 import { routeThesis, type TradePlan } from "@/lib/routeThesis";
@@ -84,15 +86,27 @@ export default function TerminalApp() {
 
   const { isConnected } = useAccount();
   const live = useLivePortfolio();
+  const haikuData = useHaikuPortfolio();
 
-  const displayPortfolioValue = isConnected ? live.netUsd : PORTFOLIO_VALUE;
+  // Merge Haiku MCP data into portfolio value when available
+  const haikuExtraUsd = haikuData.totalBalancesUsd + haikuData.totalPositionsUsd;
+  const displayPortfolioValue = isConnected ? live.netUsd + haikuExtraUsd : PORTFOLIO_VALUE;
 
+  // Build live positions from on-chain data + Haiku MCP enrichment
   const livePositions = [
     ...live.assets.map((a) => ({ asset: a.symbol, venue: `${a.venue} · ${a.chain}`, amount: formatAssetAmount(a) })),
     ...live.aavePositions.flatMap((p) => [
       ...(p.collateralUsd > 0 ? [{ asset: `${p.protocol} supply`, venue: p.chain, amount: fmtUsd(p.collateralUsd) }] : []),
       ...(p.debtUsd > 0 ? [{ asset: `${p.protocol} borrow`, venue: p.chain, amount: "-" + fmtUsd(p.debtUsd) }] : []),
     ]),
+    // Haiku MCP: DeFi positions from protocols not tracked by wagmi multicall
+    ...haikuData.positions
+      .filter((p) => p.depositedUsd > 1)
+      .map((p) => ({
+        asset: `${p.protocol} ${p.type}`,
+        venue: `${p.asset} · chain ${p.chainId}`,
+        amount: fmtUsd(p.depositedUsd),
+      })),
   ];
   const displayPositions = isConnected ? livePositions : POSITIONS;
   const displayAllocation = isConnected ? buildLiveAllocation(live) : ALLOCATION;
@@ -272,6 +286,7 @@ export default function TerminalApp() {
           )}
           {leftTab === "venues" && (
             <>
+              <McpStatusPanel />
               <HyperliquidPanel />
               <ExtendedConnectPanel />
               <LifiPerpsConnectPanel provider="ondo" />
