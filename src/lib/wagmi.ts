@@ -19,12 +19,11 @@ import {
 } from "wagmi/chains";
 import { injected, walletConnect } from "wagmi/connectors";
 
-function rpc(envKey: string) {
-  const url = typeof window === "undefined"
-    ? process.env[envKey]
-    : (globalThis as Record<string, unknown>)[envKey] as string | undefined;
-  return http(url || undefined);
-}
+// Next.js only inlines NEXT_PUBLIC_* values into the browser bundle when they
+// are written out literally (process.env.NEXT_PUBLIC_X) — a dynamic lookup
+// like process.env[key] is undefined client-side. Keep these literal.
+// An unset value falls back to the chain's public RPC.
+const rpc = (url: string | undefined) => http(url || undefined);
 
 const connectors = [
   injected(),
@@ -54,11 +53,11 @@ export const wagmiConfig = createConfig({
   ],
   connectors,
   transports: {
-    [mainnet.id]: rpc("NEXT_PUBLIC_RPC_ETHEREUM"),
-    [base.id]: rpc("NEXT_PUBLIC_RPC_BASE"),
-    [arbitrum.id]: rpc("NEXT_PUBLIC_RPC_ARBITRUM"),
-    [optimism.id]: rpc("NEXT_PUBLIC_RPC_OPTIMISM"),
-    [polygon.id]: rpc("NEXT_PUBLIC_RPC_POLYGON"),
+    [mainnet.id]: rpc(process.env.NEXT_PUBLIC_RPC_ETHEREUM),
+    [base.id]: rpc(process.env.NEXT_PUBLIC_RPC_BASE),
+    [arbitrum.id]: rpc(process.env.NEXT_PUBLIC_RPC_ARBITRUM),
+    [optimism.id]: rpc(process.env.NEXT_PUBLIC_RPC_OPTIMISM),
+    [polygon.id]: rpc(process.env.NEXT_PUBLIC_RPC_POLYGON),
     [avalanche.id]: http(),
     [bsc.id]: http(),
     [gnosis.id]: http(),
