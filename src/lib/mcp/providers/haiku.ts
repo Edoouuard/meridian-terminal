@@ -11,6 +11,7 @@
 
 import { callMcpTool, listMcpTools, parseMcpToolResult as parseResult } from "../client";
 import { fetchAavePositions, fetchAaveReserves } from "../aave";
+import { fetchLifiEarnVaults } from "../lifi";
 import type {
   McpProviderId,
   McpProviderStatus,
@@ -162,48 +163,22 @@ export async function fetchYieldOpportunities(opts?: {
 }): Promise<YieldOpportunity[]> {
   const opportunities: YieldOpportunity[] = [];
 
-  // LI.FI earn vaults
-  try {
-    const args: Record<string, unknown> = {
-      sortBy: "apy",
-      sortDirection: "desc",
-      limit: 30,
-    };
-    if (opts?.asset) args.asset = opts.asset;
-    if (opts?.chainIds?.[0]) args.chainId = String(opts.chainIds[0]);
-
-    const result = await callMcpTool(LIFI_MCP_URL, "lifi", "get-earn-vaults", args, { timeoutMs: 10000, headers: LIFI_HEADERS });
-    const vaultsRaw = unwrapPayload(parseResult<unknown>(result));
-    const vaults = (Array.isArray(vaultsRaw)
-      ? vaultsRaw
-      : vaultsRaw && typeof vaultsRaw === "object" && Array.isArray((vaultsRaw as { vaults?: unknown }).vaults)
-        ? (vaultsRaw as { vaults: unknown[] }).vaults
-        : null) as {
-      address: string;
-      chainId: number;
-      protocol?: string;
-      asset?: string;
-      apy?: number;
-      tvl?: number;
-      tags?: string[];
-    }[] | null;
-
-    if (vaults) {
-      for (const v of vaults) {
-        const apy = v.apy ?? 0;
-        if (opts?.minApy && apy < opts.minApy / 100) continue;
-        opportunities.push({
-          protocol: v.protocol ?? "Unknown",
-          chainId: v.chainId,
-          asset: v.asset ?? "?",
-          type: "vault",
-          apy: apy * 100, // normalize to percentage
-          tvlUsd: v.tvl ?? 0,
-        });
-      }
-    }
-  } catch (err) {
-    console.warn("[haiku] LI.FI earn vaults fetch failed:", err);
+  // LI.FI Earn vaults (one query per requested chain, or one global query)
+  const earnQueries = opts?.chainIds?.length ? opts.chainIds.map((chainId) => ({ chainId })) : [{}];
+  const earnResults = await Promise.all(
+    earnQueries.map((q) => fetchLifiEarnVaults({ ...q, asset: opts?.asset, limit: 30 })),
+  );
+  for (const v of earnResults.flat()) {
+    const apyPct = v.apy * 100;
+    if (opts?.minApy && apyPct < opts.minApy) continue;
+    opportunities.push({
+      protocol: v.protocol,
+      chainId: v.chainId,
+      asset: v.asset,
+      type: "vault",
+      apy: apyPct,
+      tvlUsd: v.tvlUsd,
+    });
   }
 
   // Aave v3 markets as yield opportunities (parallel per chain)

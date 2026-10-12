@@ -229,3 +229,107 @@ export async function getLifiQuote(input: LifiQuoteInput): Promise<LifiQuote | n
     return null;
   }
 }
+
+// ─── Earn vaults ─────────────────────────────────────────────────────
+//
+// LI.FI's MCP `get-earn-*` tools are currently broken upstream: they proxy to
+// li.quest/v1/earn/* which 404s ("Cannot GET /v1/earn/vaults", verified
+// 2026-10). The live Earn Data API is https://earn.li.fi/v1/vaults and
+// REQUIRES an `x-lifi-api-key` (free, from the LI.FI Partner Portal). We try
+// the MCP tool first (so an upstream fix is picked up automatically), then
+// the REST API when LIFI_API_KEY is set.
+
+const LIFI_EARN_URL = process.env.LIFI_EARN_URL || "https://earn.li.fi/v1";
+
+export interface LifiEarnVault {
+  address: string;
+  chainId: number;
+  name: string;
+  protocol: string;
+  /** Underlying deposit token symbol(s), "/"-joined for multi-asset vaults. */
+  asset: string;
+  /** Total APY as a fraction (0.0534 = 5.34%). */
+  apy: number;
+  tvlUsd: number;
+  tags: string[];
+  /** Depositable via LI.FI Composer. */
+  isTransactional: boolean;
+}
+
+/** Normalize Earn API `{ data: NormalizedVault[] }` (or a bare array). Pure — exported for tests. */
+export function normalizeLifiEarnVaults(payload: unknown): LifiEarnVault[] {
+  const raw = isRec(payload) && Array.isArray(payload.data) ? payload.data : unwrap(payload);
+  const list = Array.isArray(raw) ? raw : isRec(raw) && Array.isArray(raw.vaults) ? raw.vaults : [];
+  const toNum = (v: unknown): number => {
+    const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+    return Number.isFinite(n) ? n : 0;
+  };
+  return list.flatMap((v): LifiEarnVault[] => {
+    if (!isRec(v) || typeof v.address !== "string") return [];
+    const analytics = isRec(v.analytics) ? v.analytics : {};
+    const apy = isRec(analytics.apy) ? analytics.apy : {};
+    const tvl = isRec(analytics.tvl) ? analytics.tvl : {};
+    const protocol = isRec(v.protocol) ? v.protocol : {};
+    const tokens = Array.isArray(v.underlyingTokens) ? v.underlyingTokens : [];
+    const symbols = tokens.map((t) => (isRec(t) && typeof t.symbol === "string" ? t.symbol : "")).filter(Boolean);
+    return [{
+      address: v.address,
+      chainId: toNum(v.chainId),
+      name: typeof v.name === "string" ? v.name : v.address,
+      protocol: typeof protocol.name === "string" ? protocol.name : "Unknown",
+      asset: symbols.length > 0 ? symbols.join("/") : "?",
+      apy: toNum(apy.total ?? apy.base),
+      tvlUsd: toNum(tvl.usd),
+      tags: Array.isArray(v.tags) ? v.tags.filter((t): t is string => typeof t === "string") : [],
+      isTransactional: v.isTransactional === true,
+    }];
+  });
+}
+
+export interface LifiEarnVaultQuery {
+  asset?: string;
+  chainId?: number;
+  protocol?: string;
+  minTvlUsd?: number;
+  limit?: number;
+}
+
+let warnedMissingEarnKey = false;
+
+/** Earn vaults sorted by APY (desc). Returns [] on failure — never throws. */
+export async function fetchLifiEarnVaults(query: LifiEarnVaultQuery = {}): Promise<LifiEarnVault[]> {
+  const params: Record<string, string> = { sortBy: "apy", sortDirection: "desc", limit: String(query.limit ?? 30) };
+  if (query.asset) params.asset = query.asset;
+  if (query.chainId) params.chainId = String(query.chainId);
+  if (query.protocol) params.protocol = query.protocol;
+
+  try {
+    const vaults = normalizeLifiEarnVaults(parseMcpToolResult<unknown>(await callLifiTool("get-earn-vaults", params)));
+    if (vaults.length > 0) return vaults;
+  } catch {
+    // Expected while LI.FI's MCP earn tools 404 upstream — fall through to REST.
+  }
+
+  const key = process.env.LIFI_API_KEY;
+  if (!key) {
+    if (!warnedMissingEarnKey) {
+      warnedMissingEarnKey = true;
+      console.warn("[mcp/lifi] Earn vaults unavailable: LI.FI's MCP earn tools are down and earn.li.fi requires LIFI_API_KEY");
+    }
+    return [];
+  }
+
+  try {
+    const rest = new URLSearchParams(params);
+    if (query.minTvlUsd) rest.set("minTvlUsd", String(query.minTvlUsd));
+    const res = await fetch(`${LIFI_EARN_URL}/vaults?${rest}`, {
+      signal: AbortSignal.timeout(10_000),
+      headers: { "x-lifi-api-key": key },
+    });
+    if (!res.ok) throw new Error(`earn.li.fi /vaults → HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    return normalizeLifiEarnVaults(await res.json());
+  } catch (err) {
+    console.warn("[mcp/lifi] fetchLifiEarnVaults failed:", err);
+    return [];
+  }
+}

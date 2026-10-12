@@ -6,7 +6,7 @@ import {
   normalizeSupportedChains,
   toDebridgeChainId,
 } from "@/lib/mcp/debridge";
-import { normalizeLifiChains, normalizeLifiQuote } from "@/lib/mcp/lifi";
+import { normalizeLifiChains, normalizeLifiEarnVaults, normalizeLifiQuote } from "@/lib/mcp/lifi";
 import { aaveV3Payload, normalizeAaveMarkets, normalizeAavePositions } from "@/lib/mcp/aave";
 import { isSignableQuote, type RouteQuote } from "@/lib/mcp/router";
 
@@ -136,6 +136,45 @@ describe("mcp/lifi — normalization", () => {
       gasLimit: undefined,
     });
     expect(q?.estimate?.toAmount).toBe("123");
+  });
+});
+
+describe("mcp/lifi — earn vaults", () => {
+  // Shape from LI.FI's documented NormalizedVault schema (docs.li.fi/earn/how-it-works).
+  const vault = {
+    address: "0x7BfA7C4f149E7415b73bdeDfe609237e29CBF34A",
+    network: "base",
+    chainId: 8453,
+    name: "Morpho USDC Vault",
+    protocol: { name: "Morpho", url: "https://morpho.org" },
+    underlyingTokens: [{ address: "0x8335", symbol: "USDC", decimals: 6, weight: 1.0 }],
+    tags: ["stablecoin", "lending"],
+    analytics: { apy: { base: 0.0534, reward: null, total: 0.0534 }, tvl: { usd: "12500000.00" } },
+    isTransactional: true,
+  };
+
+  it("reads { data: NormalizedVault[] } with fractional APY and string TVL", () => {
+    expect(normalizeLifiEarnVaults({ data: [vault], nextCursor: null, total: 1 })).toEqual([
+      {
+        address: "0x7BfA7C4f149E7415b73bdeDfe609237e29CBF34A",
+        chainId: 8453,
+        name: "Morpho USDC Vault",
+        protocol: "Morpho",
+        asset: "USDC",
+        apy: 0.0534,
+        tvlUsd: 12_500_000,
+        tags: ["stablecoin", "lending"],
+        isTransactional: true,
+      },
+    ]);
+  });
+
+  it("joins multi-asset symbols, tolerates missing analytics, skips junk rows", () => {
+    const multi = { ...vault, underlyingTokens: [{ symbol: "WETH" }, { symbol: "USDC" }], analytics: undefined };
+    const [v] = normalizeLifiEarnVaults([multi, null, { nope: 1 }]);
+    expect(v.asset).toBe("WETH/USDC");
+    expect(v.apy).toBe(0);
+    expect(normalizeLifiEarnVaults("error fetching earn vaults: HTTP 404")).toEqual([]);
   });
 });
 

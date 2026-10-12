@@ -19,6 +19,7 @@
  */
 
 import { callMcpTool, parseMcpToolResult as parseResult } from "../client";
+import { fetchLifiEarnVaults, type LifiEarnVault } from "../lifi";
 import type {
   McpProviderId,
   McpProviderStatus,
@@ -350,36 +351,16 @@ export async function findToken(symbol: string, chainId: number): Promise<LiFiTo
 
 // ─── Earn / Yield (new LI.FI tools) ────────────────────────────────
 
-export interface LiFiEarnVault {
-  address: string;
-  chainId: number;
-  protocol: string;
-  asset: string;
-  apy: number;
-  tvl: number;
-  tags: string[];
-}
+export type { LifiEarnVault as LiFiEarnVault } from "../lifi";
 
+/** Earn vaults — see fetchLifiEarnVaults (MCP tool, then earn.li.fi REST with LIFI_API_KEY). */
 export async function getEarnVaults(opts?: {
   asset?: string;
   chainId?: number;
   protocol?: string;
   limit?: number;
-}): Promise<LiFiEarnVault[]> {
-  try {
-    const args: Record<string, unknown> = {};
-    if (opts?.asset) args.asset = opts.asset;
-    if (opts?.chainId) args.chainId = String(opts.chainId);
-    if (opts?.protocol) args.protocol = opts.protocol;
-    if (opts?.limit) args.limit = opts.limit;
-    args.sortBy = "apy";
-    args.sortDirection = "desc";
-    const result = await callLifi("get-earn-vaults", args);
-    return parseResult<LiFiEarnVault[]>(result) ?? [];
-  } catch (err) {
-    console.warn("[lifi] getEarnVaults failed:", err);
-    return [];
-  }
+}): Promise<LifiEarnVault[]> {
+  return fetchLifiEarnVaults(opts);
 }
 
 export async function getEarnPortfolio(walletAddress: string): Promise<unknown> {
