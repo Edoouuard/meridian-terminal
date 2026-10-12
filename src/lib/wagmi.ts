@@ -17,7 +17,21 @@ import {
   sonic,
   zkSync,
 } from "wagmi/chains";
-import { injected } from "wagmi/connectors";
+import { injected, walletConnect } from "wagmi/connectors";
+
+function rpc(envKey: string) {
+  const url = typeof window === "undefined"
+    ? process.env[envKey]
+    : (globalThis as Record<string, unknown>)[envKey] as string | undefined;
+  return http(url || undefined);
+}
+
+const connectors = [
+  injected(),
+  ...(process.env.NEXT_PUBLIC_WC_PROJECT_ID
+    ? [walletConnect({ projectId: process.env.NEXT_PUBLIC_WC_PROJECT_ID })]
+    : []),
+];
 
 export const wagmiConfig = createConfig({
   chains: [
@@ -38,13 +52,13 @@ export const wagmiConfig = createConfig({
     sonic,
     celo,
   ],
-  connectors: [injected()],
+  connectors,
   transports: {
-    [mainnet.id]: http(),
-    [base.id]: http(),
-    [arbitrum.id]: http(),
-    [optimism.id]: http(),
-    [polygon.id]: http(),
+    [mainnet.id]: rpc("NEXT_PUBLIC_RPC_ETHEREUM"),
+    [base.id]: rpc("NEXT_PUBLIC_RPC_BASE"),
+    [arbitrum.id]: rpc("NEXT_PUBLIC_RPC_ARBITRUM"),
+    [optimism.id]: rpc("NEXT_PUBLIC_RPC_OPTIMISM"),
+    [polygon.id]: rpc("NEXT_PUBLIC_RPC_POLYGON"),
     [avalanche.id]: http(),
     [bsc.id]: http(),
     [gnosis.id]: http(),
