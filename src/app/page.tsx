@@ -179,7 +179,7 @@ export default function TerminalApp() {
   ];
 
   return (
-    <div style={{ background: "var(--color-bg)", color: "var(--color-text)", height: "100vh", display: "flex", flexDirection: "column" }}>
+    <div className="app-shell" style={{ background: "var(--color-bg)", color: "var(--color-text)", height: "100vh", display: "flex", flexDirection: "column" }}>
       <TickerBanner />
       <div className="nav" style={{ background: "var(--color-surface)", flex: "none" }}>
         <Link href="/" className="nav-brand" style={{ color: "var(--color-text)" }}>
@@ -194,9 +194,9 @@ export default function TerminalApp() {
         </span>
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "290px 1fr 320px", overflow: "hidden" }}>
+      <div className="app-grid" style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "290px 1fr 320px", overflow: "hidden" }}>
         {/* Portfolio column */}
-        <div className="col-scroll" style={{ minWidth: 0, borderRight: "1px solid var(--color-divider)", padding: "var(--space-4)" }}>
+        <div className="col-scroll app-col-portfolio" style={{ minWidth: 0, borderRight: "1px solid var(--color-divider)", padding: "var(--space-4)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <h6 style={{ color: "var(--color-accent)", margin: 0 }}>Portfolio</h6>
             <span className="text-muted" style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>
@@ -301,7 +301,7 @@ export default function TerminalApp() {
         </div>
 
         {/* Trade column — chat-first layout */}
-        <div style={{ display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0 }}>
+        <div className="app-col-trade" style={{ display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0 }}>
           {/* Scrollable thread area */}
           <div
             ref={scrollContainerRef}
@@ -486,7 +486,7 @@ export default function TerminalApp() {
         </div>
 
         {/* News / Alpha column */}
-        <div className="col-scroll" style={{ minWidth: 0, borderLeft: "1px solid var(--color-divider)", padding: "var(--space-4)" }}>
+        <div className="col-scroll app-col-news" style={{ minWidth: 0, borderLeft: "1px solid var(--color-divider)", padding: "var(--space-4)" }}>
           <NewsFeed />
         </div>
       </div>

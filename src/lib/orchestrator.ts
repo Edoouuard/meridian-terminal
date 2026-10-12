@@ -21,7 +21,7 @@ import type { ThreadItem } from "@/lib/data";
 import type { TradePlan } from "@/lib/tradePlan";
 import type { RouteQuote, RouteRequest, McpProviderStatus } from "./mcp/types";
 import type { PolicyResult, PolicyConfig } from "./policy";
-import type { TxTracker } from "./mcp/types";
+import type { McpProviderId, TxTracker } from "./mcp/types";
 
 import { routeThesisAsync, type PortfolioContext } from "./intentEngine";
 import { findBestRoute, buildRouteExecution, checkAllProviders, getAllProviderStatus, type RouteComparison } from "./mcp/router";
@@ -197,7 +197,7 @@ export function recordExecution(
   return trackTransaction({
     hash,
     chainId: step.chainId,
-    provider: step.provider as any, // provider name from step
+    provider: step.provider as McpProviderId,
     destinationChainId: step.destChainId,
     bridgeOrderId,
   });

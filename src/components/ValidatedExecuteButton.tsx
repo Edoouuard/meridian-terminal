@@ -50,16 +50,14 @@ export function ValidatedExecuteButton({
   const { state, message, builtPlan, approvalHash, mainHash, needsApproval, prepare, confirm, reset } = useExecuteOrder(() => {
     void portfolio.refetchPortfolio();
   });
-  const [dialogOpen, setDialogOpen] = useState(false);
+  // The dialog is open while the plan awaits a signature, until the user
+  // confirms or cancels that specific plan (derived — no state sync effect).
+  const [dismissedPlan, setDismissedPlan] = useState<typeof builtPlan>(null);
+  const dialogOpen = state === "READY_FOR_SIGNATURE" && builtPlan !== dismissedPlan;
 
   useEffect(() => {
     if (state === "CONFIRMED" && mainHash) onConfirmed?.(mainHash);
   }, [state, mainHash, onConfirmed]);
-
-  useEffect(() => {
-    if (state === "READY_FOR_SIGNATURE") setDialogOpen(true);
-    if (state === "DRAFT") setDialogOpen(false);
-  }, [state]);
 
   // Health-factor guardrail for REAL-money borrow/withdraw. On Aave the
   // resulting health factor is simulated by the Aave MCP (preview_action) as
@@ -183,11 +181,11 @@ export function ValidatedExecuteButton({
         guardrail={guardrail}
         confirmDisabled={simulatesHf && previewLoading}
         onConfirm={() => {
-          setDialogOpen(false);
+          setDismissedPlan(builtPlan);
           void confirm();
         }}
         onCancel={() => {
-          setDialogOpen(false);
+          setDismissedPlan(builtPlan);
           reset();
         }}
       />
