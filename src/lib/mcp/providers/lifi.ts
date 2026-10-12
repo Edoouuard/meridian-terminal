@@ -26,7 +26,6 @@ import type {
   RouteRequest,
   RouteExecution,
   RouteStep,
-  UnsignedTx,
 } from "../types";
 import type { Address } from "viem";
 
@@ -272,8 +271,10 @@ export async function getRouteStatus(txHash: string, fromChainId: number, toChai
 export async function getSupportedChains(): Promise<{ id: number; name: string }[]> {
   try {
     const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-chains", {});
-    const chains = parseResult<{ id: number; name: string }[]>(result);
-    if (chains && chains.length > 0) return chains;
+    // The server wraps the list: { chains: [...] }.
+    const parsed = parseResult<{ chains?: { id: number; name: string }[] }>(result);
+    const chains = parsed?.chains ?? [];
+    if (chains.length > 0) return chains.map((c) => ({ id: c.id, name: c.name }));
   } catch { /* fall through to REST */ }
 
   try {
@@ -304,7 +305,7 @@ export interface LiFiToken {
 export async function getTokens(chainId: number): Promise<LiFiToken[]> {
   try {
     const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-tokens", {
-      chains: [String(chainId)],
+      chains: String(chainId),
     });
     const data = parseResult<{ tokens: Record<string, LiFiToken[]> }>(result);
     return data?.tokens?.[String(chainId)] ?? [];
@@ -407,7 +408,8 @@ export async function getNativeBalance(address: string, chainId: number): Promis
       address,
       chain: String(chainId),
     });
-    return parseResult<string>(result);
+    // { address, balance, chainId, decimals, tokenSymbol } — balance in base units.
+    return parseResult<{ balance?: string }>(result)?.balance ?? null;
   } catch {
     return null;
   }

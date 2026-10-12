@@ -38,6 +38,8 @@ export interface McpProviderStatus {
   id: McpProviderId;
   name: string;
   healthy: boolean;
+  /** False when the provider needs credentials that aren't set (it is then skipped, not "down"). */
+  configured?: boolean;
   latencyMs: number | null;
   lastChecked: number;
 }

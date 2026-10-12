@@ -5,10 +5,14 @@
  * Paymaster (gasless tx), smart wallet detection, Base-native DeFi
  * primitives (Aerodrome, Moonwell, etc.), and onramp support.
  *
- * Base MCP endpoint: https://mcp.base.org (Streamable HTTP, requires auth).
+ * Base MCP endpoint: https://mcp.base.org (Streamable HTTP). It is an
+ * OAuth-protected Coinbase agent-wallet server (scopes agent_wallet:*): every
+ * request needs a bearer token obtained through its OAuth flow. Set
+ * BASE_MCP_TOKEN to enable this provider; without it the provider reports
+ * "not configured" and makes no network calls.
  */
 
-import { callMcpTool } from "../client";
+import { callMcpTool, getMcpClient } from "../client";
 import type {
   McpProviderId,
   McpProviderStatus,
@@ -22,25 +26,49 @@ const PROVIDER_ID: McpProviderId = "base";
 const SERVER_NAME = "base";
 const BASE_CHAIN_ID = 8453;
 
+function baseHeaders(): Record<string, string> | null {
+  const token = process.env.BASE_MCP_TOKEN;
+  return token ? { Authorization: `Bearer ${token}` } : null;
+}
+
+export function isConfigured(): boolean {
+  return baseHeaders() !== null;
+}
+
+/** Call a Base MCP tool, or resolve to null without any network call when no token is configured. */
+async function callBase(toolName: string, args: Record<string, unknown>): Promise<unknown> {
+  const headers = baseHeaders();
+  if (!headers) return null;
+  return callMcpTool(BASE_MCP_URL, SERVER_NAME, toolName, args, { headers });
+}
+
 // ─── Health check ────────────────────────────────────────────────────
 
 let lastHealthCheck: McpProviderStatus = {
   id: PROVIDER_ID,
   name: "Base",
   healthy: false,
+  configured: isConfigured(),
   latencyMs: null,
   lastChecked: 0,
 };
 
 export async function checkHealth(): Promise<McpProviderStatus> {
   const start = Date.now();
+  const headers = baseHeaders();
+  if (!headers) {
+    lastHealthCheck = { id: PROVIDER_ID, name: "Base", healthy: false, configured: false, latencyMs: null, lastChecked: Date.now() };
+    return lastHealthCheck;
+  }
   try {
-    // Base MCP requires auth — just try connecting to verify it's up
-    await callMcpTool(BASE_MCP_URL, SERVER_NAME, "resolve_name", { name: "base.eth" }, 8000);
+    // An authenticated tools/list proves the server is up and the token valid.
+    const client = await getMcpClient(BASE_MCP_URL, SERVER_NAME, { headers });
+    await client.listTools(undefined, { timeout: 8000 });
     lastHealthCheck = {
       id: PROVIDER_ID,
       name: "Base",
       healthy: true,
+      configured: true,
       latencyMs: Date.now() - start,
       lastChecked: Date.now(),
     };
@@ -49,6 +77,7 @@ export async function checkHealth(): Promise<McpProviderStatus> {
       id: PROVIDER_ID,
       name: "Base",
       healthy: false,
+      configured: true,
       latencyMs: Date.now() - start,
       lastChecked: Date.now(),
     };
@@ -67,7 +96,7 @@ export function getStatus(): McpProviderStatus {
  */
 export async function resolveName(name: string): Promise<Address | null> {
   try {
-    const result = await callMcpTool(BASE_MCP_URL, SERVER_NAME, "resolve_name", { name });
+    const result = await callBase("resolve_name", { name });
     const data = parseResult<{ address: string }>(result);
     return (data?.address as Address) ?? null;
   } catch (err) {
@@ -81,7 +110,7 @@ export async function resolveName(name: string): Promise<Address | null> {
  */
 export async function reverseName(address: Address): Promise<string | null> {
   try {
-    const result = await callMcpTool(BASE_MCP_URL, SERVER_NAME, "reverse_name", { address });
+    const result = await callBase("reverse_name", { address });
     const data = parseResult<{ name: string }>(result);
     return data?.name ?? null;
   } catch (err) {
@@ -104,7 +133,7 @@ export interface SmartWalletInfo {
  */
 export async function detectSmartWallet(address: Address): Promise<SmartWalletInfo> {
   try {
-    const result = await callMcpTool(BASE_MCP_URL, SERVER_NAME, "detect_smart_wallet", { address });
+    const result = await callBase("detect_smart_wallet", { address });
     return parseResult<SmartWalletInfo>(result) ?? {
       isSmartWallet: false,
       paymasterAvailable: false,
@@ -125,7 +154,7 @@ export async function sponsorTransaction(
 ): Promise<UnsignedTx | null> {
   if (tx.chainId !== BASE_CHAIN_ID) return null;
   try {
-    const result = await callMcpTool(BASE_MCP_URL, SERVER_NAME, "sponsor_transaction", {
+    const result = await callBase("sponsor_transaction", {
       to: tx.to,
       data: tx.data,
       value: tx.value,
@@ -165,7 +194,7 @@ export async function getAerodromePools(opts?: {
   token?: string;
 }): Promise<AerodromePool[]> {
   try {
-    const result = await callMcpTool(BASE_MCP_URL, SERVER_NAME, "get_aerodrome_pools", {
+    const result = await callBase("get_aerodrome_pools", {
       limit: opts?.limit ?? 20,
       ...(opts?.token && { token: opts.token }),
     });
@@ -190,7 +219,7 @@ export interface MoonwellMarket {
 
 export async function getMoonwellMarkets(): Promise<MoonwellMarket[]> {
   try {
-    const result = await callMcpTool(BASE_MCP_URL, SERVER_NAME, "get_moonwell_markets", {});
+    const result = await callBase("get_moonwell_markets", {});
     return parseResult<MoonwellMarket[]>(result) ?? [];
   } catch (err) {
     console.warn("[base] getMoonwellMarkets failed:", err);
@@ -219,7 +248,7 @@ export async function getOnrampQuote(
   cryptoToken: string,
 ): Promise<OnrampQuote | null> {
   try {
-    const result = await callMcpTool(BASE_MCP_URL, SERVER_NAME, "get_onramp_quote", {
+    const result = await callBase("get_onramp_quote", {
       fiatAmount,
       fiatCurrency,
       cryptoToken,

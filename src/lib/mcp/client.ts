@@ -20,23 +20,126 @@ export type McpTransportKind = "http" | "sse" | "auto";
 export interface McpClientOptions {
   /** Which transport to use. "auto" (default) tries HTTP first, falls back to SSE. */
   transport?: McpTransportKind;
-  /** Extra headers to send (e.g. API key). Only supported by HTTP transport. */
+  /** Extra headers to send (e.g. API key or bearer token). */
   headers?: Record<string, string>;
   /** Request timeout in milliseconds. Defaults to 15 000. */
   timeoutMs?: number;
+}
+
+/**
+ * Thrown when the MCP server answered the call but flagged the result as an
+ * error (`isError: true`) — e.g. invalid arguments or an upstream API failure.
+ * The message is the server's own explanation.
+ */
+export class McpToolError extends Error {
+  constructor(public readonly toolName: string, message: string) {
+    super(`[mcp] ${toolName}: ${message}`);
+    this.name = "McpToolError";
+  }
 }
 
 interface McpConnection {
   client: Client;
   transport: StreamableHTTPClientTransport | SSEClientTransport;
   connectedAt: number;
+  /** Set once the transport closed or the connection was evicted — never reuse it. */
+  closed: boolean;
 }
 
-/** Cache of active MCP connections keyed by server URL. */
-const connectionPool = new Map<string, McpConnection>();
+function track(client: Client, transport: StreamableHTTPClientTransport | SSEClientTransport): McpConnection {
+  const conn: McpConnection = { client, transport, connectedAt: Date.now(), closed: false };
+  client.onclose = () => { conn.closed = true; };
+  return conn;
+}
+
+/** Cache of active (or in-flight) MCP connections keyed by server URL + transport + headers. */
+const connectionPool = new Map<string, Promise<McpConnection>>();
 
 /** Max age before reconnecting (5 minutes). */
 const MAX_CONNECTION_AGE_MS = 5 * 60 * 1000;
+const DEFAULT_TIMEOUT_MS = 15_000;
+const CONNECT_TIMEOUT_MS = 10_000;
+
+function poolKey(serverUrl: string, kind: McpTransportKind, headers?: Record<string, string>): string {
+  const headerKey = headers ? Object.keys(headers).sort().map((k) => `${k}=${headers[k]}`).join("&") : "";
+  return `${serverUrl}::${kind}::${headerKey}`;
+}
+
+async function closeQuietly(conn: McpConnection) {
+  try { await conn.transport.close(); } catch { /* ignore */ }
+}
+
+async function openConnection(
+  serverUrl: string,
+  name: string,
+  kind: McpTransportKind,
+  headers?: Record<string, string>,
+): Promise<McpConnection> {
+  const url = new URL(serverUrl);
+  const requestInit = headers ? { headers } : undefined;
+  let httpError: unknown;
+
+  // Try Streamable HTTP (current MCP standard)
+  if (kind === "http" || kind === "auto") {
+    const transport = new StreamableHTTPClientTransport(url, requestInit ? { requestInit } : undefined);
+    const client = new Client({ name: `meridian-${name}`, version: "1.0.0" }, { capabilities: {} });
+    try {
+      await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS });
+      return track(client, transport);
+    } catch (err) {
+      try { await transport.close(); } catch { /* ignore */ }
+      if (kind === "http") throw err;
+      httpError = err;
+    }
+  }
+
+  // Legacy SSE fallback
+  const transport = new SSEClientTransport(url, requestInit ? { requestInit } : undefined);
+  const client = new Client({ name: `meridian-${name}`, version: "1.0.0" }, { capabilities: {} });
+  try {
+    await client.connect(transport, { timeout: CONNECT_TIMEOUT_MS });
+  } catch (err) {
+    try { await transport.close(); } catch { /* ignore */ }
+    // Report the Streamable HTTP failure — it's the primary transport and
+    // usually the more informative error (e.g. a 401 from the server).
+    throw httpError ?? err;
+  }
+  return track(client, transport);
+}
+
+async function getConnection(serverUrl: string, name: string, opts?: McpClientOptions): Promise<McpConnection> {
+  const kind = opts?.transport ?? "auto";
+  const key = poolKey(serverUrl, kind, opts?.headers);
+
+  const pending = connectionPool.get(key);
+  if (pending) {
+    try {
+      const conn = await pending;
+      if (!conn.closed && Date.now() - conn.connectedAt < MAX_CONNECTION_AGE_MS) return conn;
+      if (connectionPool.get(key) === pending) connectionPool.delete(key);
+      void closeQuietly(conn);
+    } catch {
+      // A failed connection attempt was cached — drop it and retry below.
+      if (connectionPool.get(key) === pending) connectionPool.delete(key);
+    }
+  }
+
+  // Share one in-flight connection between concurrent callers.
+  const created = openConnection(serverUrl, name, kind, opts?.headers);
+  connectionPool.set(key, created);
+  try {
+    return await created;
+  } catch (err) {
+    if (connectionPool.get(key) === created) connectionPool.delete(key);
+    throw err;
+  }
+}
+
+/** Mark a connection dead synchronously (the next getConnection opens a fresh one), then close it. */
+function evictConnection(conn: McpConnection) {
+  conn.closed = true;
+  void closeQuietly(conn);
+}
 
 /**
  * Get or create an MCP client connection to a remote server.
@@ -47,55 +150,40 @@ export async function getMcpClient(
   name: string,
   opts?: McpClientOptions,
 ): Promise<Client> {
-  const kind = opts?.transport ?? "auto";
-  const cacheKey = `${serverUrl}::${kind}`;
+  return (await getConnection(serverUrl, name, opts)).client;
+}
 
-  const existing = connectionPool.get(cacheKey);
-  if (existing && Date.now() - existing.connectedAt < MAX_CONNECTION_AGE_MS) {
-    return existing.client;
+function errorText(content: unknown): string {
+  if (Array.isArray(content)) {
+    const texts = content
+      .filter((b): b is { type: "text"; text: string } => !!b && typeof b === "object" && b.type === "text" && typeof b.text === "string")
+      .map((b) => b.text);
+    if (texts.length > 0) return texts.join("\n").slice(0, 500);
   }
+  return "tool returned an error";
+}
 
-  // Close stale connection if any
-  if (existing) {
-    try { await existing.transport.close(); } catch { /* ignore */ }
-    connectionPool.delete(cacheKey);
-  }
+/** MCP SDK error code for a request that exceeded its timeout. */
+const REQUEST_TIMEOUT_CODE = -32001;
 
-  const url = new URL(serverUrl);
-
-  // Try Streamable HTTP (current MCP standard)
-  if (kind === "http" || kind === "auto") {
-    try {
-      const transportInit: Record<string, unknown> = {};
-      if (opts?.headers) {
-        transportInit.requestInit = { headers: opts.headers };
-      }
-      const transport = new StreamableHTTPClientTransport(url, transportInit);
-      const client = new Client({ name: `meridian-${name}`, version: "1.0.0" }, {
-        capabilities: {},
-      });
-      await client.connect(transport);
-      connectionPool.set(cacheKey, { client, transport, connectedAt: Date.now() });
-      return client;
-    } catch {
-      if (kind === "http") throw new Error(`[mcp] HTTP transport failed for ${serverUrl}`);
-      // Fall through to SSE for "auto"
-    }
-  }
-
-  // Legacy SSE fallback
-  const transport = new SSEClientTransport(url);
-  const client = new Client({ name: `meridian-${name}`, version: "1.0.0" }, {
-    capabilities: {},
-  });
-  await client.connect(transport);
-  connectionPool.set(cacheKey, { client, transport, connectedAt: Date.now() });
-  return client;
+/**
+ * Errors that a fresh connection wouldn't fix: tool errors, JSON-RPC errors
+ * from the server (invalid params, unknown tool, …), and timeouts — a slow
+ * call isn't a broken connection, and retrying it would only double the wait.
+ */
+function isNonRetryable(err: unknown): boolean {
+  if (err instanceof McpToolError) return true;
+  const code = (err as { code?: unknown })?.code;
+  return typeof code === "number" && ((code >= -32700 && code <= -32600) || code === REQUEST_TIMEOUT_CODE);
 }
 
 /**
- * Call an MCP tool on a remote server. Returns the tool result content or
- * throws on connection/tool errors.
+ * Call an MCP tool on a remote server. Returns the tool result content.
+ *
+ * Throws on connection failures, timeouts, JSON-RPC errors, and on results
+ * the server flags with `isError` (as `McpToolError`). A broken or expired
+ * connection is dropped and the call retried once on a fresh one; timeouts
+ * and server-side errors are not retried.
  *
  * The 5th argument accepts either a timeout number (ms) or an options object.
  */
@@ -110,18 +198,25 @@ export async function callMcpTool(
     typeof optsOrTimeout === "number"
       ? { timeoutMs: optsOrTimeout }
       : optsOrTimeout ?? {};
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
-  const timeoutMs = opts.timeoutMs ?? 15000;
-  const client = await getMcpClient(serverUrl, serverName, opts);
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const result = await client.callTool({ name: toolName, arguments: args });
-    return result.content;
-  } finally {
-    clearTimeout(timer);
+  for (let attempt = 0; ; attempt++) {
+    const conn = await getConnection(serverUrl, serverName, opts);
+    try {
+      const result = await conn.client.callTool(
+        { name: toolName, arguments: args },
+        undefined,
+        { timeout: timeoutMs },
+      );
+      if (result.isError) throw new McpToolError(toolName, errorText(result.content));
+      return result.content;
+    } catch (err) {
+      if (isNonRetryable(err)) throw err;
+      // Transport-level failure (expired session, dropped connection):
+      // never reuse this connection; retry once on a fresh one.
+      evictConnection(conn);
+      if (attempt >= 1) throw err;
+    }
   }
 }
 
@@ -162,8 +257,7 @@ export async function listMcpTools(serverUrl: string, serverName: string) {
  * Gracefully close all MCP connections (for cleanup).
  */
 export async function closeAllMcpConnections() {
-  for (const [url, conn] of connectionPool.entries()) {
-    try { await conn.transport.close(); } catch { /* ignore */ }
-    connectionPool.delete(url);
-  }
+  const pending = [...connectionPool.values()];
+  connectionPool.clear();
+  await Promise.all(pending.map((p) => p.then(closeQuietly, () => {})));
 }

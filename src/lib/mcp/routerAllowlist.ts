@@ -46,16 +46,31 @@ export const DEBRIDGE_DLN_SOURCE_BY_CHAIN: Record<number, Address> = {
   137: "0xeF4fB24aD0916217251F553c0596F8Edc630EB66", // Polygon
 };
 
+/**
+ * deBridge's "DeBridgeRouter" — the entrypoint deBridge's same-chain swap
+ * (`transaction_same_chain_swap`) targets. Listed next to DlnSource for each
+ * of these chains in deBridge's deployed-contracts table
+ * (docs.debridge.com/dln-details/overview/deployed-contracts, checked 2026-10-12).
+ */
+export const DEBRIDGE_ROUTER_BY_CHAIN: Record<number, Address> = {
+  1: "0x663DC15D3C1aC63ff12E45Ab68FeA3F0a883C251", // Ethereum
+  8453: "0x663DC15D3C1aC63ff12E45Ab68FeA3F0a883C251", // Base
+  42161: "0x663DC15D3C1aC63ff12E45Ab68FeA3F0a883C251", // Arbitrum
+  10: "0x663DC15D3C1aC63ff12E45Ab68FeA3F0a883C251", // Optimism
+  137: "0x663DC15D3C1aC63ff12E45Ab68FeA3F0a883C251", // Polygon
+};
+
 /** True when `address` is the verified LI.FI entrypoint on `chainId`. */
 export function isTrustedLifiEntrypoint(chainId: number, address: string): boolean {
   const trusted = LIFI_DIAMOND_BY_CHAIN[chainId];
   return !!trusted && trusted.toLowerCase() === address.toLowerCase();
 }
 
-/** True when `address` is the verified deBridge entrypoint on `chainId`. */
+/** True when `address` is a verified deBridge entrypoint (DlnSource or DeBridgeRouter) on `chainId`. */
 export function isTrustedDebridgeEntrypoint(chainId: number, address: string): boolean {
-  const trusted = DEBRIDGE_DLN_SOURCE_BY_CHAIN[chainId];
-  return !!trusted && trusted.toLowerCase() === address.toLowerCase();
+  const needle = address.toLowerCase();
+  return [DEBRIDGE_DLN_SOURCE_BY_CHAIN[chainId], DEBRIDGE_ROUTER_BY_CHAIN[chainId]]
+    .some((trusted) => !!trusted && trusted.toLowerCase() === needle);
 }
 
 /** Chains Meridian can route a swap/bridge through at all (either provider verified). */

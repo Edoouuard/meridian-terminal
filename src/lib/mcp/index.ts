@@ -21,10 +21,14 @@ export {
   previewAaveAction,
   buildAaveTransaction,
   fetchAaveYieldSummary,
+  resolveAaveReserve,
+  isAaveReserveSuppliable,
+  isAaveReserveExecutable,
   type AaveReserve,
   type AavePosition,
   type AaveActionPreview,
   type AaveTxData,
+  type AaveTxPlan,
 } from "./aave";
 
 export {

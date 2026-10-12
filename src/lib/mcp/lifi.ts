@@ -70,7 +70,12 @@ export interface LifiQuote {
   transactionRequest: LifiTxRequest | null;
   estimate?: {
     toAmount: string;
+    toAmountMin?: string;
+    toAmountUSD?: string;
     executionDuration: number;
+    approvalAddress?: string;
+    /** Gas costs, priced in the source chain's native token (`token.priceUSD`). */
+    gasCosts?: { amountUSD?: string; token?: { address: string; priceUSD?: string } }[];
   };
   tool?: string;
 }
@@ -81,7 +86,10 @@ export interface LifiQuote {
 export async function fetchLifiChains(): Promise<LifiChain[]> {
   try {
     const result = await callLifiTool("get-chains", {});
-    return parseMcpToolResult<LifiChain[]>(result) ?? [];
+    // The server wraps the list: { chains: [...] }.
+    const parsed = parseMcpToolResult<{ chains?: LifiChain[] } | LifiChain[]>(result);
+    if (Array.isArray(parsed)) return parsed;
+    return parsed?.chains ?? [];
   } catch (err) {
     console.warn("[mcp/lifi] fetchLifiChains failed:", err);
     return [];
@@ -91,7 +99,7 @@ export async function fetchLifiChains(): Promise<LifiChain[]> {
 /** Token metadata (address/decimals/price) for a symbol on a chain. Returns null on failure. */
 export async function fetchLifiToken(chain: string | number, token: string): Promise<LifiToken | null> {
   try {
-    const result = await callLifiTool("get-token", { chain, token });
+    const result = await callLifiTool("get-token", { chain: String(chain), token });
     return parseMcpToolResult<LifiToken>(result);
   } catch (err) {
     console.warn("[mcp/lifi] fetchLifiToken failed:", err);
@@ -105,7 +113,11 @@ export async function getLifiStatus(
   opts?: { bridge?: string; fromChain?: number | string; toChain?: number | string },
 ): Promise<unknown | null> {
   try {
-    const result = await callLifiTool("get-status", { txHash, ...opts });
+    const args: Record<string, string> = { txHash };
+    if (opts?.bridge) args.bridge = opts.bridge;
+    if (opts?.fromChain !== undefined) args.fromChain = String(opts.fromChain);
+    if (opts?.toChain !== undefined) args.toChain = String(opts.toChain);
+    const result = await callLifiTool("get-status", args);
     return parseMcpToolResult<unknown>(result);
   } catch (err) {
     console.warn("[mcp/lifi] getLifiStatus failed:", err);
@@ -121,7 +133,7 @@ export async function getLifiAllowance(input: {
   spenderAddress: string;
 }): Promise<string | null> {
   try {
-    const result = await callLifiTool("get-allowance", input);
+    const result = await callLifiTool("get-allowance", { ...input, chain: String(input.chain) });
     const parsed = parseMcpToolResult<{ allowance?: string } | string>(result);
     if (typeof parsed === "string") return parsed;
     return parsed?.allowance ?? null;
@@ -141,14 +153,15 @@ export async function getLifiAllowance(input: {
 export async function getLifiQuote(input: LifiQuoteInput): Promise<LifiQuote | null> {
   try {
     const result = await callLifiTool("get-quote", {
-      fromChain: input.fromChain,
-      toChain: input.toChain,
+      // Every argument is a string in the server's schema.
+      fromChain: String(input.fromChain),
+      toChain: String(input.toChain),
       fromToken: input.fromToken,
       toToken: input.toToken,
       fromAddress: input.fromAddress,
       fromAmount: input.fromAmount,
       ...(input.toAddress ? { toAddress: input.toAddress } : {}),
-      ...(input.slippage !== undefined ? { slippage: input.slippage } : {}),
+      ...(input.slippage !== undefined ? { slippage: String(input.slippage) } : {}),
     });
     return parseMcpToolResult<LifiQuote>(result);
   } catch (err) {

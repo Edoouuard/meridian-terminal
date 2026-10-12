@@ -9,9 +9,10 @@
  * unsigned `RouteQuote` for the transaction-policy engine + wallet layer.
  */
 
-import { createDebridgeCrossChainTx, createDebridgeSameChainSwapTx, type DebridgeTxData } from "./debridge";
-import { getLifiQuote, type LifiTxRequest } from "./lifi";
-import type { RouteRequest as TypesRouteRequest, McpProviderStatus, RouteQuote as TypesRouteQuote } from "./types";
+import { createDebridgeCrossChainTx, createDebridgeSameChainSwapTx } from "./debridge";
+import { getLifiQuote, type LifiQuote } from "./lifi";
+import { isTrustedDebridgeEntrypoint, isTrustedLifiEntrypoint } from "./routerAllowlist";
+import type { RouteRequest as TypesRouteRequest, McpProviderStatus } from "./types";
 
 export type RouteProvider = "debridge" | "lifi";
 
@@ -39,8 +40,27 @@ export interface RouteQuote {
   tx: RouteTx;
   /** Destination-token amount estimate, in base units, when the provider reports one. */
   toAmountEstimate?: string;
+  /** USD value of toAmountEstimate, as estimated by the provider. */
+  toAmountUsd?: number;
+  /**
+   * Native-token fee the tx charges on top of the swapped amount (base units),
+   * e.g. deBridge's fixed DLN fee. "0" when there is none.
+   */
+  nativeFeeWei?: string;
+  /**
+   * What the user ends up with in USD after native fees (toAmountUsd minus
+   * nativeFeeWei priced in USD). Only set when every input was known.
+   */
+  netUsdEstimate?: number;
   etaSeconds?: number;
+  /** deBridge DLN order id — what /api/bridge?action=status tracks. */
+  orderId?: string;
 }
+
+const NATIVE_TOKEN_ADDRESSES = new Set([
+  "0x0000000000000000000000000000000000000000",
+  "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+]);
 
 /** Parse a base-unit amount string to a bigint, or null when it isn't one — never throws. */
 function toBaseUnits(amount: string | undefined): bigint | null {
@@ -53,100 +73,154 @@ function toBaseUnits(amount: string | undefined): bigint | null {
 }
 
 /**
- * Pick the best quote among already-fetched candidates: whichever reports
- * the higher destination-amount estimate. When estimates aren't comparable
- * (one or more candidates report none, or report something unparseable),
- * fetch order wins instead of guessing — fetch order already prefers
- * deBridge for cross-chain (see getBestRoute). Pure — no network, fully
- * unit-testable.
+ * Pick the best quote among already-fetched candidates.
+ *
+ * When every candidate carries a net USD estimate (output value minus any
+ * native fee charged on top), the highest net value wins — this is the only
+ * comparison that accounts for deBridge's fixed fee. Otherwise the higher
+ * destination-amount estimate wins. When neither is comparable across all
+ * candidates, fetch order wins instead of guessing. Ties keep fetch order.
+ * Pure — no network, fully unit-testable.
  */
 export function selectBestRoute(quotes: RouteQuote[]): { best: RouteQuote | null; alternatives: RouteQuote[] } {
   if (quotes.length === 0) return { best: null, alternatives: [] };
 
-  const withAmounts = quotes.map((q) => ({ quote: q, amount: toBaseUnits(q.toAmountEstimate) }));
-  const comparable = withAmounts.every((w) => w.amount !== null);
-
-  const sorted = comparable
-    ? [...withAmounts]
+  let sorted = quotes;
+  if (quotes.every((q) => typeof q.netUsdEstimate === "number" && Number.isFinite(q.netUsdEstimate))) {
+    sorted = [...quotes].sort((a, b) => b.netUsdEstimate! - a.netUsdEstimate!);
+  } else {
+    const withAmounts = quotes.map((q) => ({ quote: q, amount: toBaseUnits(q.toAmountEstimate) }));
+    if (withAmounts.every((w) => w.amount !== null)) {
+      sorted = [...withAmounts]
         .sort((a, b) => {
           if (a.amount! > b.amount!) return -1;
           if (a.amount! < b.amount!) return 1;
           return 0;
         })
-        .map((w) => w.quote)
-    : quotes;
+        .map((w) => w.quote);
+    }
+  }
 
   return { best: sorted[0], alternatives: sorted.slice(1) };
 }
+
+/** Native fee a tx charges beyond the swapped amount: its value, minus fromAmount when the input itself is native. */
+export function nativeFeeOf(tx: RouteTx, fromTokenAddress: string, fromAmount: string): bigint {
+  const value = toBaseUnits(tx.value) ?? 0n;
+  const spent = NATIVE_TOKEN_ADDRESSES.has(fromTokenAddress.toLowerCase()) ? toBaseUnits(fromAmount) ?? 0n : 0n;
+  return value > spent ? value - spent : 0n;
+}
+
+/** Source-chain native token price in USD, read off a LI.FI quote's gas costs (they're priced in it). */
+function nativePriceFromLifi(quote: LifiQuote | null | undefined): number | null {
+  for (const gas of quote?.estimate?.gasCosts ?? []) {
+    if (gas.token && NATIVE_TOKEN_ADDRESSES.has(gas.token.address.toLowerCase())) {
+      const price = parseFloat(gas.token.priceUSD ?? "");
+      if (Number.isFinite(price) && price > 0) return price;
+    }
+  }
+  return null;
+}
+
+function parseUsd(value: string | number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  const n = typeof value === "number" ? value : parseFloat(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/** Native-token gas tokens on every chain Meridian routes through use 18 decimals. */
+const NATIVE_DECIMALS = 18;
 
 /**
  * Fetch quotes from both routers (whichever apply — a same-chain swap only
  * queries deBridge's same-chain tool plus LI.FI's quote; a cross-chain
  * request queries deBridge's DLN order and LI.FI's quote, in parallel) and
  * return the best one plus the rest as fallbacks. Never signs or broadcasts.
+ *
+ * A quote whose `to` isn't a verified entrypoint (routerAllowlist.ts) is
+ * dropped here — execution would refuse to sign it anyway, so offering it
+ * would only hide a usable alternative.
  */
 export async function getBestRoute(req: RouteRequest): Promise<{ best: RouteQuote | null; alternatives: RouteQuote[] }> {
   const isSameChain = req.fromChainId === req.toChainId;
 
-  const [debridgeResult, lifiResult] = await Promise.allSettled([
-    isSameChain
-      ? createDebridgeSameChainSwapTx({
-          chainId: req.fromChainId,
-          tokenIn: req.fromTokenAddress,
-          tokenOut: req.toTokenAddress,
-          amountIn: req.fromAmount,
-          senderAddress: req.fromAddress,
-          slippageBps: req.slippageBps,
-        })
-      : createDebridgeCrossChainTx({
-          srcChainId: req.fromChainId,
-          srcTokenAddress: req.fromTokenAddress,
-          srcAmount: req.fromAmount,
-          dstChainId: req.toChainId,
-          dstTokenAddress: req.toTokenAddress,
-          senderAddress: req.fromAddress,
-          recipientAddress: req.toAddress,
-          slippageBps: req.slippageBps,
-        }),
-    getLifiQuote({
-      fromChain: req.fromChainId,
-      toChain: req.toChainId,
-      fromToken: req.fromTokenAddress,
-      toToken: req.toTokenAddress,
-      fromAddress: req.fromAddress,
-      fromAmount: req.fromAmount,
-      toAddress: req.toAddress,
-      slippage: req.slippageBps !== undefined ? req.slippageBps / 10000 : undefined,
-    }),
-  ]);
+  const debridgePromise: Promise<RouteQuote | null> = isSameChain
+    ? createDebridgeSameChainSwapTx({
+        chainId: req.fromChainId,
+        tokenIn: req.fromTokenAddress,
+        tokenOut: req.toTokenAddress,
+        amountIn: req.fromAmount,
+        senderAddress: req.fromAddress,
+        recipientAddress: req.toAddress,
+        slippageBps: req.slippageBps,
+      }).then((r) => (r?.tx
+        ? { provider: "debridge", tx: r.tx, toAmountEstimate: r.estimatedAmountOut, toAmountUsd: r.estimatedAmountOutUsd }
+        : null))
+    : createDebridgeCrossChainTx({
+        srcChainId: req.fromChainId,
+        srcTokenAddress: req.fromTokenAddress,
+        srcAmount: req.fromAmount,
+        dstChainId: req.toChainId,
+        dstTokenAddress: req.toTokenAddress,
+        senderAddress: req.fromAddress,
+        recipientAddress: req.toAddress,
+      }).then((r) => (r?.tx
+        ? {
+            provider: "debridge",
+            tx: r.tx,
+            toAmountEstimate: r.estimatedDstAmount,
+            toAmountUsd: r.estimatedDstAmountUsd,
+            etaSeconds: r.estimatedTimeSeconds,
+            orderId: r.orderId,
+          }
+        : null));
 
-  const quotes: RouteQuote[] = [];
+  const lifiPromise = getLifiQuote({
+    fromChain: req.fromChainId,
+    toChain: req.toChainId,
+    fromToken: req.fromTokenAddress,
+    toToken: req.toTokenAddress,
+    fromAddress: req.fromAddress,
+    fromAmount: req.fromAmount,
+    toAddress: req.toAddress,
+    slippage: req.slippageBps !== undefined ? req.slippageBps / 10000 : undefined,
+  });
 
-  if (debridgeResult.status === "fulfilled" && debridgeResult.value) {
-    const value = debridgeResult.value;
-    const tx: DebridgeTxData | null = isSameChain
-      ? (value as DebridgeTxData)
-      : (value as { tx: DebridgeTxData | null }).tx;
-    if (tx) {
-      quotes.push({
-        provider: "debridge",
-        tx,
-        toAmountEstimate: isSameChain ? undefined : (value as { estimatedDstAmount?: string }).estimatedDstAmount,
-        etaSeconds: isSameChain ? undefined : (value as { estimatedTimeSeconds?: number }).estimatedTimeSeconds,
-      });
-    }
-  }
+  const [debridgeResult, lifiResult] = await Promise.allSettled([debridgePromise, lifiPromise]);
+  const lifiQuote = lifiResult.status === "fulfilled" ? lifiResult.value : null;
 
-  if (lifiResult.status === "fulfilled" && lifiResult.value?.transactionRequest) {
-    const value = lifiResult.value;
-    const tx = value.transactionRequest as LifiTxRequest;
-    quotes.push({
+  const candidates: RouteQuote[] = [];
+  if (debridgeResult.status === "fulfilled" && debridgeResult.value) candidates.push(debridgeResult.value);
+  if (lifiQuote?.transactionRequest) {
+    const tx = lifiQuote.transactionRequest;
+    candidates.push({
       provider: "lifi",
-      tx: { to: tx.to, data: tx.data, value: tx.value, chainId: tx.chainId },
-      toAmountEstimate: value.estimate?.toAmount,
-      etaSeconds: value.estimate?.executionDuration,
+      tx: { to: tx.to, data: tx.data, value: tx.value, chainId: tx.chainId ?? req.fromChainId },
+      toAmountEstimate: lifiQuote.estimate?.toAmount,
+      toAmountUsd: parseUsd(lifiQuote.estimate?.toAmountUSD),
+      etaSeconds: lifiQuote.estimate?.executionDuration,
     });
   }
+
+  const nativePrice = nativePriceFromLifi(lifiQuote);
+  const quotes = candidates
+    .filter((q) => {
+      const trusted = q.provider === "lifi" ? isTrustedLifiEntrypoint : isTrustedDebridgeEntrypoint;
+      if (q.tx.chainId !== req.fromChainId || !trusted(req.fromChainId, q.tx.to)) {
+        console.warn(`[mcp/router] dropping ${q.provider} quote: ${q.tx.to} on chain ${q.tx.chainId} is not a verified entrypoint`);
+        return false;
+      }
+      return true;
+    })
+    .map((q) => {
+      const fee = nativeFeeOf(q.tx, req.fromTokenAddress, req.fromAmount);
+      const feeUsd = fee === 0n ? 0 : nativePrice !== null ? (Number(fee) / 10 ** NATIVE_DECIMALS) * nativePrice : undefined;
+      return {
+        ...q,
+        nativeFeeWei: fee.toString(),
+        ...(q.toAmountUsd !== undefined && feeUsd !== undefined ? { netUsdEstimate: q.toAmountUsd - feeUsd } : {}),
+      };
+    });
 
   return selectBestRoute(quotes);
 }
@@ -210,7 +284,7 @@ const providerHealth: Record<string, ProviderHealth> = {
 
 /** Run health checks on both routing providers. */
 export async function checkAllProviders(): Promise<McpProviderStatus[]> {
-  const checks = await Promise.allSettled([
+  await Promise.allSettled([
     (async () => {
       const start = Date.now();
       try {
