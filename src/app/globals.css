@@ -454,28 +454,38 @@ body {
 }
 
 /* — responsive terminal layout —
-   The 3-column terminal grid lives in page.tsx as an inline style
-   (gridTemplateColumns: "290px 1fr 320px") on a container that has no
-   class/id we are allowed to add (page.tsx is owned by another agent and
-   must not be edited). To stack it to one column on narrow screens without
-   touching page.tsx, we target the container by the exact inline
-   grid-template-columns value it serializes to. This is purely additive and
-   only applies below the breakpoint, so desktop rendering is untouched.
-   NOTE: if the page.tsx column widths ever change, update the selector to the
-   new value (or add a stable class to that container). */
+   page.tsx renders the terminal as .app-shell (100vh flex column) wrapping
+   .app-grid (290px | 1fr | 320px). Below 860px the whole page scrolls
+   instead of each column: chat first, then portfolio, then news. */
 @media (max-width: 860px) {
-  div[style*="290px 1fr 320px"] {
-    grid-template-columns: 1fr !important;
-    overflow-y: auto !important;
-    overflow-x: hidden !important;
+  .app-shell {
+    height: auto !important;
+    min-height: 100vh;
+    min-height: 100dvh;
   }
-  /* Drop the vertical dividers between the now-stacked columns. */
-  div[style*="290px 1fr 320px"] > div {
+  .app-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+    overflow: visible !important;
+  }
+  .app-grid > .col-scroll {
+    overflow: visible;
     border-right: 0 !important;
     border-left: 0 !important;
     padding-left: var(--space-3) !important;
     padding-right: var(--space-3) !important;
   }
+  .app-col-trade {
+    order: -1;
+    /* Thread keeps its own scroll so the composer stays on screen. */
+    height: 75vh;
+    height: 75dvh;
+    border-bottom: 1px solid var(--color-divider);
+  }
+  .app-col-trade > .col-scroll {
+    padding-left: var(--space-3) !important;
+    padding-right: var(--space-3) !important;
+  }
+  .app-col-portfolio { border-bottom: 1px solid var(--color-divider); }
 }
 
 /* Strategy cards stack vertically below 860px (single-column layout) */

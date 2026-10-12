@@ -227,6 +227,7 @@ export function useExecute(): UseExecuteResult {
           args: [...plan.args],
         };
         if (plan.value !== undefined) simParams.value = plan.value;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (publicClient as any).simulateContract(simParams);
         return { ok: true };
       } catch (err) {
