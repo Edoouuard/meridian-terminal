@@ -32,7 +32,8 @@ function getEnsClient() {
 }
 
 const BASE_MCP_URL = process.env.BASE_MCP_URL || "";
-const configured = BASE_MCP_URL !== "";
+/** True when BASE_MCP_URL is set — the provider is opt-in (no public hosted Base MCP exists). */
+export const configured = BASE_MCP_URL !== "";
 const PROVIDER_ID: McpProviderId = "base";
 const SERVER_NAME = "base";
 const BASE_CHAIN_ID = 8453;

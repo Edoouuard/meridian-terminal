@@ -1,15 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { checkAllProviders, getAllProviderStatus } from "@/lib/mcp/router";
+import { checkAaveHealth, getAaveStatus } from "@/lib/mcp/aave";
 import * as lifi from "@/lib/mcp/providers/lifi";
-import * as haiku from "@/lib/mcp/providers/haiku";
 import * as baseMcp from "@/lib/mcp/providers/base";
 
 export const revalidate = 60;
 
 /**
- * GET /api/mcp — MCP provider health and status (all 4 providers).
+ * GET /api/mcp — health and status of the MCP servers Meridian actually uses.
  *
- * ?action=health  — Run live health checks on all providers (Haiku, deBridge, LI.FI, Base)
+ * Listed: deBridge + LI.FI (swap/bridge routing) and Aave (markets, positions,
+ * previews). Base appears only when BASE_MCP_URL is set — there is no public
+ * hosted Base MCP. The "portfolio" provider (/api/haiku) is not listed: it is
+ * built on LI.FI + Aave, so it would only duplicate their status.
+ *
+ * ?action=health  — Run live health checks
  * ?action=status  — Return cached status (fast, no network calls)
  * ?action=chains  — Return LI.FI supported chains
  * ?action=tokens&chainId=N — Return LI.FI tokens on a chain
@@ -18,18 +23,17 @@ export async function GET(req: NextRequest) {
   const action = req.nextUrl.searchParams.get("action") ?? "status";
 
   if (action === "health") {
-    const [routeStatuses, haikuStatus, baseStatus] = await Promise.all([
+    const [routeStatuses, aaveStatus, baseStatus] = await Promise.all([
       checkAllProviders(),
-      haiku.checkHealth(),
-      baseMcp.checkHealth(),
+      checkAaveHealth(),
+      baseMcp.configured ? baseMcp.checkHealth() : Promise.resolve(null),
     ]);
-    return NextResponse.json({ providers: [...routeStatuses, haikuStatus, baseStatus] });
+    return NextResponse.json({ providers: [...routeStatuses, aaveStatus, ...(baseStatus ? [baseStatus] : [])] });
   }
 
   if (action === "status") {
-    const routeStatuses = getAllProviderStatus();
     return NextResponse.json({
-      providers: [...routeStatuses, haiku.getStatus(), baseMcp.getStatus()],
+      providers: [...getAllProviderStatus(), getAaveStatus(), ...(baseMcp.configured ? [baseMcp.getStatus()] : [])],
     });
   }
 

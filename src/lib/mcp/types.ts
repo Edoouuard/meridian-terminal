@@ -32,7 +32,7 @@ export const CHAIN_NAMES: Record<number, string> = {
 
 // ─── Provider identification ────────────────────────────────────────
 
-export type McpProviderId = "haiku" | "debridge" | "lifi" | "base";
+export type McpProviderId = "haiku" | "debridge" | "lifi" | "aave" | "base";
 
 export interface McpProviderStatus {
   id: McpProviderId;

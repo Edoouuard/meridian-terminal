@@ -4,8 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 import type { McpProviderStatus } from "@/lib/mcp/types";
 
 /**
- * McpStatusPanel — Shows the live health status of all 4 MCP providers
- * (Haiku, deBridge, LI.FI, Base) in a compact panel.
+ * McpStatusPanel — Shows the live health status of the MCP servers Meridian
+ * uses (deBridge, LI.FI, Aave — plus Base when BASE_MCP_URL is configured).
  */
 export function McpStatusPanel() {
   const { data: providers, isLoading } = useQuery({

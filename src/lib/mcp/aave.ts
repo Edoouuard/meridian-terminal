@@ -21,7 +21,8 @@
  * All tx data returned here must be signed client-side via wagmi.
  */
 
-import { callMcpTool, parseMcpToolResult } from "./client";
+import { callMcpTool, listMcpTools, parseMcpToolResult } from "./client";
+import type { McpProviderStatus } from "./types";
 
 const AAVE_MCP_URL = process.env.AAVE_MCP_URL || "https://mcp.aave.com";
 const SERVER_NAME = "aave";
@@ -62,6 +63,30 @@ export interface AaveTxData {
   data: string;
   value?: string;
   chainId: number;
+}
+
+// ─── Health check ────────────────────────────────────────────────────
+
+let lastHealthCheck: McpProviderStatus = { id: "aave", name: "Aave", healthy: false, latencyMs: null, lastChecked: 0 };
+
+/** Healthy = MCP handshake + tools/list succeed and `get_markets` is advertised. */
+export async function checkAaveHealth(): Promise<McpProviderStatus> {
+  const start = Date.now();
+  let healthy = false;
+  try {
+    const { tools } = await listMcpTools(AAVE_MCP_URL, SERVER_NAME, { timeoutMs: 8000 });
+    healthy = tools.some((t) => t.name === "get_markets");
+    if (!healthy) console.warn("[mcp/aave] MCP is up but does not expose get_markets");
+  } catch (err) {
+    console.warn("[mcp/aave] health check failed:", err);
+  }
+  lastHealthCheck = { id: "aave", name: "Aave", healthy, latencyMs: Date.now() - start, lastChecked: Date.now() };
+  return lastHealthCheck;
+}
+
+/** Cached Aave health (no network call). */
+export function getAaveStatus(): McpProviderStatus {
+  return lastHealthCheck;
 }
 
 // ─── Response helpers ────────────────────────────────────────────────
