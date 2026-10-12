@@ -9,8 +9,9 @@
  * unsigned `RouteQuote` for the transaction-policy engine + wallet layer.
  */
 
-import { createDebridgeCrossChainTx, createDebridgeSameChainSwapTx, type DebridgeTxData } from "./debridge";
-import { getLifiQuote, type LifiTxRequest } from "./lifi";
+import { createDebridgeCrossChainTx, createDebridgeSameChainSwapTx } from "./debridge";
+import { getLifiQuote } from "./lifi";
+import { isTrustedDebridgeEntrypoint, isTrustedLifiEntrypoint } from "./routerAllowlist";
 import type { RouteRequest as TypesRouteRequest, McpProviderStatus, RouteQuote as TypesRouteQuote } from "./types";
 
 export type RouteProvider = "debridge" | "lifi";
@@ -40,6 +41,21 @@ export interface RouteQuote {
   /** Destination-token amount estimate, in base units, when the provider reports one. */
   toAmountEstimate?: string;
   etaSeconds?: number;
+  /** deBridge order id (cross-chain), for status tracking via /api/bridge?action=status. */
+  orderId?: string;
+  /** ERC-20 approval the provider says must be sent before `tx`, when it reports one. */
+  approvalTx?: RouteTx;
+}
+
+/**
+ * True when the quote's `to` is a verified entrypoint (routerAllowlist.ts).
+ * execution.ts refuses to sign anything else, so surfacing such a quote as
+ * "best" would only fail later at signing time — drop it here instead and
+ * let the other provider win.
+ */
+export function isSignableQuote(q: RouteQuote): boolean {
+  const trusted = q.provider === "lifi" ? isTrustedLifiEntrypoint : isTrustedDebridgeEntrypoint;
+  return trusted(q.tx.chainId, q.tx.to);
 }
 
 /** Parse a base-unit amount string to a bigint, or null when it isn't one — never throws. */
@@ -122,33 +138,40 @@ export async function getBestRoute(req: RouteRequest): Promise<{ best: RouteQuot
 
   const quotes: RouteQuote[] = [];
 
-  if (debridgeResult.status === "fulfilled" && debridgeResult.value) {
+  if (debridgeResult.status === "fulfilled" && debridgeResult.value?.tx) {
     const value = debridgeResult.value;
-    const tx: DebridgeTxData | null = isSameChain
-      ? (value as DebridgeTxData)
-      : (value as { tx: DebridgeTxData | null }).tx;
-    if (tx) {
+    if (value.kind === "same-chain") {
+      quotes.push({ provider: "debridge", tx: value.tx!, toAmountEstimate: value.estimatedAmountOut });
+    } else {
       quotes.push({
         provider: "debridge",
-        tx,
-        toAmountEstimate: isSameChain ? undefined : (value as { estimatedDstAmount?: string }).estimatedDstAmount,
-        etaSeconds: isSameChain ? undefined : (value as { estimatedTimeSeconds?: number }).estimatedTimeSeconds,
+        tx: value.tx!,
+        toAmountEstimate: value.estimatedDstAmount,
+        etaSeconds: value.estimatedTimeSeconds,
+        orderId: value.orderId,
+        ...(value.approveTx ? { approvalTx: value.approveTx } : {}),
       });
     }
   }
 
   if (lifiResult.status === "fulfilled" && lifiResult.value?.transactionRequest) {
     const value = lifiResult.value;
-    const tx = value.transactionRequest as LifiTxRequest;
+    const tx = value.transactionRequest!;
     quotes.push({
       provider: "lifi",
-      tx: { to: tx.to, data: tx.data, value: tx.value, chainId: tx.chainId },
-      toAmountEstimate: value.estimate?.toAmount,
+      tx: { to: tx.to, data: tx.data, value: tx.value, chainId: Number.isFinite(tx.chainId) ? tx.chainId : req.fromChainId },
+      toAmountEstimate: value.estimate?.toAmount || undefined,
       etaSeconds: value.estimate?.executionDuration,
     });
   }
 
-  return selectBestRoute(quotes);
+  const signable = quotes.filter((q) => {
+    if (isSignableQuote(q)) return true;
+    console.warn(`[mcp/router] dropping ${q.provider} quote: ${q.tx.to} is not an allowlisted entrypoint on chain ${q.tx.chainId}`);
+    return false;
+  });
+
+  return selectBestRoute(signable);
 }
 
 // ─── Compatibility layer ──────────────────────────────────────────────
@@ -208,43 +231,35 @@ const providerHealth: Record<string, ProviderHealth> = {
   lifi: { id: "lifi", name: "LI.FI", healthy: false, latencyMs: null, lastChecked: 0 },
 };
 
+const DEBRIDGE_MCP_URL = process.env.DEBRIDGE_MCP_URL || "https://agents.debridge.com/mcp";
+const LIFI_MCP_URL = process.env.LIFI_MCP_URL || "https://mcp.li.quest/mcp";
+
+/**
+ * Health = the MCP handshake + tools/list succeed and the tool the router
+ * depends on is advertised. Independent of any payload shape, so a schema
+ * change in a data tool can't make a working server look down (or vice versa).
+ */
+async function probe(id: RouteProvider, name: string, url: string, requiredTool: string, headers?: Record<string, string>): Promise<void> {
+  const start = Date.now();
+  try {
+    const { listMcpTools } = await import("./client");
+    const { tools } = await listMcpTools(url, id, { transport: "http", timeoutMs: 8000, headers });
+    const healthy = tools.some((t) => t.name === requiredTool);
+    if (!healthy) console.warn(`[mcp/router] ${name} MCP is up but does not expose ${requiredTool}`);
+    providerHealth[id] = { id, name, healthy, latencyMs: Date.now() - start, lastChecked: Date.now() };
+  } catch (err) {
+    console.warn(`[mcp/router] ${name} health check failed:`, err);
+    providerHealth[id] = { id, name, healthy: false, latencyMs: Date.now() - start, lastChecked: Date.now() };
+  }
+}
+
 /** Run health checks on both routing providers. */
 export async function checkAllProviders(): Promise<McpProviderStatus[]> {
-  const checks = await Promise.allSettled([
-    (async () => {
-      const start = Date.now();
-      try {
-        const { fetchDebridgeSupportedChains } = await import("./debridge");
-        const chains = await fetchDebridgeSupportedChains();
-        providerHealth.debridge = {
-          id: "debridge", name: "deBridge", healthy: chains.length > 0,
-          latencyMs: Date.now() - start, lastChecked: Date.now(),
-        };
-      } catch {
-        providerHealth.debridge = {
-          id: "debridge", name: "deBridge", healthy: false,
-          latencyMs: Date.now() - start, lastChecked: Date.now(),
-        };
-      }
-    })(),
-    (async () => {
-      const start = Date.now();
-      try {
-        const { fetchLifiChains } = await import("./lifi");
-        const chains = await fetchLifiChains();
-        providerHealth.lifi = {
-          id: "lifi", name: "LI.FI", healthy: chains.length > 0,
-          latencyMs: Date.now() - start, lastChecked: Date.now(),
-        };
-      } catch {
-        providerHealth.lifi = {
-          id: "lifi", name: "LI.FI", healthy: false,
-          latencyMs: Date.now() - start, lastChecked: Date.now(),
-        };
-      }
-    })(),
+  const lifiKey = process.env.LIFI_API_KEY;
+  await Promise.allSettled([
+    probe("debridge", "deBridge", DEBRIDGE_MCP_URL, "create_tx"),
+    probe("lifi", "LI.FI", LIFI_MCP_URL, "get-quote", lifiKey ? { "x-lifi-api-key": lifiKey } : undefined),
   ]);
-
   return getAllProviderStatus();
 }
 

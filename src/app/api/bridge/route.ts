@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { findBestRoute, planRoute, type RouteComparison } from "@/lib/mcp/router";
+import { findBestRoute, planRoute, type RouteComparison, type RouteQuote as RouterQuote } from "@/lib/mcp/router";
 import { getOrderStatus } from "@/lib/mcp/providers/debridge";
 import { getRouteStatusWithFallback } from "@/lib/mcp/providers/lifi";
 import type { RouteRequest } from "@/lib/mcp/types";
@@ -12,8 +12,40 @@ import type { RouteRequest } from "@/lib/mcp/types";
  * sign client-side. Never signs or submits — that happens in the browser.
  *
  * Body: { fromChainId, toChainId, fromToken, toToken, fromAmount, userAddress, slippage? }
- * Response: { comparison, execution } or { error }
+ * Response: { comparison, execution, best, alternatives } or { error }
+ *   - comparison/execution: the shape useBridge consumes (display quote + ordered txs)
+ *   - best/alternatives: the raw router quotes (same as /api/route-quote)
  */
+function toDisplayQuote(q: RouterQuote, req: RouteRequest) {
+  return {
+    provider: q.provider,
+    fromToken: { symbol: req.fromToken, address: req.fromToken, chainId: req.fromChainId },
+    toToken: { symbol: req.toToken, address: req.toToken, chainId: req.toChainId },
+    fromAmount: req.fromAmount,
+    toAmount: q.toAmountEstimate ?? "0",
+    estimatedFeesUsd: 0,
+    estimatedTimeSeconds: q.etaSeconds ?? (req.fromChainId === req.toChainId ? 30 : 120),
+    steps: [{
+      type: req.fromChainId === req.toChainId ? "swap" : "bridge",
+      provider: q.provider === "lifi" ? "LI.FI" : "deBridge",
+      fromToken: req.fromToken,
+      toToken: req.toToken,
+    }],
+    routeData: { orderId: q.orderId },
+  };
+}
+
+function toExecution(q: RouterQuote) {
+  const norm = (tx: { to: string; data: string; value?: string; chainId: number }) => ({
+    to: tx.to, data: tx.data, value: tx.value ?? "0", chainId: tx.chainId,
+  });
+  return {
+    provider: q.provider,
+    transactions: [norm(q.tx)],
+    approvals: q.approvalTx ? [norm(q.approvalTx)] : [],
+  };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -44,7 +76,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    return NextResponse.json(result);
+    const reason = result.alternatives.length > 0
+      ? `Best of ${result.alternatives.length + 1} quotes (deBridge vs LI.FI) by destination amount`
+      : `Only ${result.best.provider === "lifi" ? "LI.FI" : "deBridge"} returned a signable route`;
+    return NextResponse.json({
+      ...result,
+      comparison: {
+        best: toDisplayQuote(result.best, request),
+        alternatives: result.alternatives.map((q) => toDisplayQuote(q, request)),
+        reason,
+      },
+      execution: toExecution(result.best),
+    } satisfies RouteComparison & Record<string, unknown>);
   } catch (err) {
     console.error("[api/bridge] error:", err);
     return NextResponse.json(

@@ -9,7 +9,9 @@
  * Fallback: uses LI.FI REST + Aave MCP for all reads.
  */
 
-import { callMcpTool } from "../client";
+import { callMcpTool, listMcpTools, parseMcpToolResult as parseResult } from "../client";
+import { fetchAavePositions, fetchAaveReserves } from "../aave";
+import { fetchLifiEarnVaults } from "../lifi";
 import type {
   McpProviderId,
   McpProviderStatus,
@@ -23,8 +25,8 @@ import type { Address } from "viem";
 
 const LIFI_MCP_URL = process.env.LIFI_MCP_URL || "https://mcp.li.quest/mcp";
 const AAVE_MCP_URL = process.env.AAVE_MCP_URL || "https://mcp.aave.com";
+const LIFI_HEADERS = process.env.LIFI_API_KEY ? { "x-lifi-api-key": process.env.LIFI_API_KEY } : undefined;
 const PROVIDER_ID: McpProviderId = "haiku";
-const SERVER_NAME = "haiku-via-lifi";
 
 // Major chains for portfolio scanning
 const PORTFOLIO_CHAINS = [1, 10, 56, 137, 8453, 42161, 43114, 324, 59144, 534352];
@@ -42,7 +44,8 @@ let lastHealthCheck: McpProviderStatus = {
 export async function checkHealth(): Promise<McpProviderStatus> {
   const start = Date.now();
   try {
-    await callMcpTool(LIFI_MCP_URL, "lifi", "health-check", {}, 8000);
+    const { tools } = await listMcpTools(LIFI_MCP_URL, "lifi", { timeoutMs: 8000, headers: LIFI_HEADERS });
+    if (!tools.some((t) => t.name === "get-token")) throw new Error("LI.FI MCP does not expose get-token");
     lastHealthCheck = {
       id: PROVIDER_ID,
       name: "Portfolio (LI.FI)",
@@ -81,7 +84,7 @@ export async function fetchBalances(userAddress: Address): Promise<ChainBalance[
         const result = await callMcpTool(LIFI_MCP_URL, "lifi", "get-native-token-balance", {
           address: userAddress,
           chain: String(chainId),
-        }, 8000);
+        }, { timeoutMs: 8000, headers: LIFI_HEADERS });
         return { chainId, result };
       } catch {
         return { chainId, result: null };
@@ -92,7 +95,14 @@ export async function fetchBalances(userAddress: Address): Promise<ChainBalance[
   for (const r of chainResults) {
     if (r.status !== "fulfilled" || !r.value.result) continue;
     const { chainId } = r.value;
-    const parsed = parseResult<{ amount?: string; symbol?: string; decimals?: number; priceUSD?: string }>(r.value.result);
+    const parsed = unwrapPayload(parseResult<unknown>(r.value.result)) as
+      { amount?: string; balance?: string; symbol?: string; decimals?: number; priceUSD?: string; token?: { symbol?: string; decimals?: number; priceUSD?: string } } | null;
+    if (parsed && !parsed.amount && parsed.balance) parsed.amount = parsed.balance;
+    if (parsed?.token) {
+      parsed.symbol ??= parsed.token.symbol;
+      parsed.decimals ??= parsed.token.decimals;
+      parsed.priceUSD ??= parsed.token.priceUSD;
+    }
     if (!parsed?.amount || parsed.amount === "0") continue;
 
     const balance = parsed.amount;
@@ -128,38 +138,19 @@ export async function fetchBalances(userAddress: Address): Promise<ChainBalance[
  * Fetch DeFi positions via Aave MCP (other protocols not available without Haiku).
  */
 export async function fetchPositions(userAddress: Address): Promise<YieldPosition[]> {
-  try {
-    const result = await callMcpTool(AAVE_MCP_URL, "aave", "get_user_positions", {
-      user: userAddress,
-    }, 10000);
-    const positions = parseResult<{
-      chainId: number;
-      supplies?: { symbol: string; balanceUsd: number; apy: number }[];
-      borrows?: { symbol: string; balanceUsd: number; apy: number }[];
-    }[]>(result);
-
-    if (!positions) return [];
-
-    const yieldPositions: YieldPosition[] = [];
-    for (const pos of positions) {
-      for (const s of pos.supplies ?? []) {
-        if (s.balanceUsd > 0.01) {
-          yieldPositions.push({
-            protocol: "Aave",
-            chainId: pos.chainId,
-            type: "lending",
-            asset: s.symbol,
-            depositedUsd: s.balanceUsd,
-            apy: s.apy,
-          });
-        }
-      }
-    }
-    return yieldPositions;
-  } catch (err) {
-    console.warn("[haiku] fetchPositions failed:", err);
-    return [];
-  }
+  const positions = await fetchAavePositions(userAddress);
+  return positions.flatMap((pos) =>
+    pos.supplies
+      .filter((s) => s.balanceUsd > 0.01)
+      .map((s): YieldPosition => ({
+        protocol: "Aave",
+        chainId: pos.chainId,
+        type: "lending",
+        asset: s.symbol,
+        depositedUsd: s.balanceUsd,
+        apy: s.apy * 100,
+      })),
+  );
 }
 
 /**
@@ -172,78 +163,35 @@ export async function fetchYieldOpportunities(opts?: {
 }): Promise<YieldOpportunity[]> {
   const opportunities: YieldOpportunity[] = [];
 
-  // LI.FI earn vaults
-  try {
-    const args: Record<string, unknown> = {
-      sortBy: "apy",
-      sortDirection: "desc",
-      limit: 30,
-    };
-    if (opts?.asset) args.asset = opts.asset;
-    if (opts?.chainIds?.[0]) args.chainId = String(opts.chainIds[0]);
-
-    const result = await callMcpTool(LIFI_MCP_URL, "lifi", "get-earn-vaults", args, 10000);
-    const vaults = parseResult<{
-      address: string;
-      chainId: number;
-      protocol?: string;
-      asset?: string;
-      apy?: number;
-      tvl?: number;
-      tags?: string[];
-    }[]>(result);
-
-    if (vaults) {
-      for (const v of vaults) {
-        const apy = v.apy ?? 0;
-        if (opts?.minApy && apy < opts.minApy / 100) continue;
-        opportunities.push({
-          protocol: v.protocol ?? "Unknown",
-          chainId: v.chainId,
-          asset: v.asset ?? "?",
-          type: "vault",
-          apy: apy * 100, // normalize to percentage
-          tvlUsd: v.tvl ?? 0,
-        });
-      }
-    }
-  } catch (err) {
-    console.warn("[haiku] LI.FI earn vaults fetch failed:", err);
+  // LI.FI Earn vaults (one query per requested chain, or one global query)
+  const earnQueries = opts?.chainIds?.length ? opts.chainIds.map((chainId) => ({ chainId })) : [{}];
+  const earnResults = await Promise.all(
+    earnQueries.map((q) => fetchLifiEarnVaults({ ...q, asset: opts?.asset, limit: 30 })),
+  );
+  for (const v of earnResults.flat()) {
+    const apyPct = v.apy * 100;
+    if (opts?.minApy && apyPct < opts.minApy) continue;
+    opportunities.push({
+      protocol: v.protocol,
+      chainId: v.chainId,
+      asset: v.asset,
+      type: "vault",
+      apy: apyPct,
+      tvlUsd: v.tvlUsd,
+    });
   }
 
-  // Aave markets as yield opportunities
-  try {
-    const result = await callMcpTool(AAVE_MCP_URL, "aave", "get_markets", {}, 10000);
-    const markets = parseResult<{
-      chainId: number;
-      reserves?: {
-        symbol: string;
-        supplyAPY?: number;
-        borrowAPY?: number;
-        totalSupply?: number;
-        ltv?: number;
-      }[];
-    }[]>(result);
-
-    if (markets) {
-      for (const m of markets) {
-        for (const r of m.reserves ?? []) {
-          const apy = (r.supplyAPY ?? 0) * 100;
-          if (opts?.minApy && apy < opts.minApy) continue;
-          opportunities.push({
-            protocol: "Aave",
-            chainId: m.chainId,
-            asset: r.symbol,
-            type: "lending",
-            apy,
-            tvlUsd: r.totalSupply ?? 0,
-          });
-        }
-      }
+  // Aave v3 markets as yield opportunities (parallel per chain)
+  const aaveChains = opts?.chainIds?.length ? opts.chainIds : PORTFOLIO_CHAINS;
+  const symbols = opts?.asset ? [opts.asset] : undefined;
+  const perChain = await Promise.all(aaveChains.map((chainId) => fetchAaveReserves(chainId, symbols)));
+  aaveChains.forEach((chainId, i) => {
+    for (const r of perChain[i]) {
+      const apy = r.supplyAPY * 100;
+      if (opts?.minApy && apy < opts.minApy) continue;
+      opportunities.push({ protocol: "Aave", chainId, asset: r.symbol, type: "lending", apy, tvlUsd: r.totalSupply });
     }
-  } catch (err) {
-    console.warn("[haiku] Aave markets fetch failed:", err);
-  }
+  });
 
   return opportunities.sort((a, b) => b.apy - a.apy);
 }
@@ -256,15 +204,15 @@ export async function resolveToken(symbol: string, chainId: number): Promise<Tok
     const result = await callMcpTool(LIFI_MCP_URL, "lifi", "get-token", {
       chain: String(chainId),
       token: symbol,
-    }, 8000);
-    const token = parseResult<{
+    }, { timeoutMs: 8000, headers: LIFI_HEADERS });
+    const token = unwrapPayload(parseResult<unknown>(result)) as {
       address: string;
       symbol: string;
       decimals: number;
       name: string;
       priceUSD?: string;
-    }>(result);
-    if (!token) return null;
+    } | null;
+    if (!token?.address) return null;
     return {
       address: token.address as Address,
       symbol: token.symbol,
@@ -303,31 +251,32 @@ export async function fetchTradeHistory(
   opts?: { chainId?: number; limit?: number },
 ): Promise<TradeRecord[]> {
   try {
-    const args: Record<string, unknown> = { user: userAddress };
-    if (opts?.chainId) args.chainId = opts.chainId;
+    const args: Record<string, unknown> = { user: userAddress, version: "v3", chainId: opts?.chainId ?? 1 };
     const result = await callMcpTool(AAVE_MCP_URL, "aave", "get_user_activity", args, 10000);
-    const activities = parseResult<{
-      txHash: string;
-      chainId: number;
-      timestamp: number;
-      action: string;
-      reserve?: string;
-      amount?: string;
-      amountUSD?: number;
-    }[]>(result);
+    const parsed = parseResult<{ data?: { v3?: { items?: Record<string, unknown>[] } } }>(result);
+    const items = parsed?.data?.v3?.items ?? [];
 
-    if (!activities) return [];
+    const val = (v: unknown, key: "value" | "usd"): string | undefined => {
+      if (typeof v === "string" || typeof v === "number") return key === "value" ? String(v) : undefined;
+      if (v && typeof v === "object" && key in v) return String((v as Record<string, unknown>)[key]);
+      return undefined;
+    };
 
-    return activities.slice(0, opts?.limit ?? 50).map((a) => ({
-      txHash: a.txHash,
-      chainId: a.chainId,
-      timestamp: a.timestamp,
-      action: a.action,
-      protocol: "Aave",
-      tokenIn: a.reserve ?? "?",
-      amountIn: a.amount ?? "0",
-      valueUsd: a.amountUSD ?? 0,
-    }));
+    return items.slice(0, opts?.limit ?? 50).map((a) => {
+      const reserve = a.reserve as { symbol?: string } | undefined;
+      const amount = a.amount ?? a.collateral ?? a.debt;
+      const ts = a.timestamp;
+      return {
+        txHash: String(a.txHash ?? ""),
+        chainId: Number(a.chainId ?? opts?.chainId ?? 1),
+        timestamp: typeof ts === "number" ? ts : Math.floor(new Date(String(ts)).getTime() / 1000) || 0,
+        action: String(a.__typename ?? "activity").replace(/^User|Transaction$/g, ""),
+        protocol: "Aave",
+        tokenIn: reserve?.symbol ?? "?",
+        amountIn: val(amount, "value") ?? "0",
+        valueUsd: Number(val(amount, "usd") ?? 0) || 0,
+      };
+    });
   } catch (err) {
     console.warn("[haiku] fetchTradeHistory failed:", err);
     return [];
@@ -343,20 +292,13 @@ const CHAIN_NAMES: Record<number, string> = {
   42220: "Celo", 43114: "Avalanche", 59144: "Linea", 534352: "Scroll",
 };
 
-function parseResult<T>(content: unknown): T | null {
-  if (!content) return null;
-  if (Array.isArray(content)) {
-    for (const block of content) {
-      if (block && typeof block === "object" && "type" in block) {
-        if (block.type === "text" && "text" in block) {
-          try { return JSON.parse(block.text as string) as T; } catch { return null; }
-        }
-      }
-    }
-    return null;
+/** LI.FI/Aave MCP payloads may be wrapped as { data } / { result }; unwrap one level. */
+function unwrapPayload(v: unknown): unknown {
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    const o = v as Record<string, unknown>;
+    if (o.data !== undefined && typeof o.data === "object") return o.data;
+    if (o.result !== undefined && typeof o.result === "object") return o.result;
   }
-  if (typeof content === "string") {
-    try { return JSON.parse(content) as T; } catch { return null; }
-  }
-  return content as T;
+  return v;
 }
+

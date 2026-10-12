@@ -18,7 +18,8 @@
  *     get-earn-portfolio, test-api-key
  */
 
-import { callMcpTool } from "../client";
+import { callMcpTool, parseMcpToolResult as parseResult } from "../client";
+import { fetchLifiEarnVaults, type LifiEarnVault } from "../lifi";
 import type {
   McpProviderId,
   McpProviderStatus,
@@ -34,6 +35,15 @@ const LIFI_MCP_URL = process.env.LIFI_MCP_URL || "https://mcp.li.quest/mcp";
 const PROVIDER_ID: McpProviderId = "lifi";
 const SERVER_NAME = "lifi";
 
+/** Every LI.FI MCP call carries the API key when one is configured (raises the rate limit). */
+function callLifi(toolName: string, args: Record<string, unknown>, timeoutMs?: number): Promise<unknown> {
+  const key = process.env.LIFI_API_KEY;
+  return callMcpTool(LIFI_MCP_URL, SERVER_NAME, toolName, args, {
+    timeoutMs,
+    headers: key ? { "x-lifi-api-key": key } : undefined,
+  });
+}
+
 // ─── Health check ────────────────────────────────────────────────────
 
 let lastHealthCheck: McpProviderStatus = {
@@ -47,7 +57,7 @@ let lastHealthCheck: McpProviderStatus = {
 export async function checkHealth(): Promise<McpProviderStatus> {
   const start = Date.now();
   try {
-    await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "health-check", {}, 8000);
+    await callLifi("health-check", {}, 8000);
     lastHealthCheck = {
       id: PROVIDER_ID,
       name: "LI.FI",
@@ -121,7 +131,7 @@ interface LiFiQuoteRaw {
  */
 export async function getQuote(request: RouteRequest): Promise<RouteQuote | null> {
   try {
-    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-quote", {
+    const result = await callLifi("get-quote", {
       fromChain: String(request.fromChainId),
       toChain: String(request.toChainId),
       fromToken: request.fromToken,
@@ -213,7 +223,7 @@ export async function buildTransaction(
 
     // If no embedded tx, use get-step-transaction
     if (quoteData.includedSteps?.length > 0) {
-      const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-step-transaction", {
+      const result = await callLifi("get-step-transaction", {
         step: quoteData.includedSteps[0],
       });
       const txData = parseResult<{
@@ -259,7 +269,7 @@ export async function getRouteStatus(txHash: string, fromChainId: number, toChai
       fromChain: String(fromChainId),
     };
     if (toChainId) args.toChain = String(toChainId);
-    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-status", args);
+    const result = await callLifi("get-status", args);
     return parseResult<LiFiRouteStatus>(result);
   } catch (err) {
     console.warn("[lifi] getRouteStatus failed:", err);
@@ -271,7 +281,7 @@ export async function getRouteStatus(txHash: string, fromChainId: number, toChai
 
 export async function getSupportedChains(): Promise<{ id: number; name: string }[]> {
   try {
-    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-chains", {});
+    const result = await callLifi("get-chains", {});
     const chains = parseResult<{ id: number; name: string }[]>(result);
     if (chains && chains.length > 0) return chains;
   } catch { /* fall through to REST */ }
@@ -303,7 +313,7 @@ export interface LiFiToken {
 
 export async function getTokens(chainId: number): Promise<LiFiToken[]> {
   try {
-    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-tokens", {
+    const result = await callLifi("get-tokens", {
       chains: [String(chainId)],
     });
     const data = parseResult<{ tokens: Record<string, LiFiToken[]> }>(result);
@@ -326,7 +336,7 @@ export async function getTokens(chainId: number): Promise<LiFiToken[]> {
 export async function findToken(symbol: string, chainId: number): Promise<LiFiToken | null> {
   // Try MCP get-token first (more targeted)
   try {
-    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-token", {
+    const result = await callLifi("get-token", {
       chain: String(chainId),
       token: symbol,
     });
@@ -341,41 +351,21 @@ export async function findToken(symbol: string, chainId: number): Promise<LiFiTo
 
 // ─── Earn / Yield (new LI.FI tools) ────────────────────────────────
 
-export interface LiFiEarnVault {
-  address: string;
-  chainId: number;
-  protocol: string;
-  asset: string;
-  apy: number;
-  tvl: number;
-  tags: string[];
-}
+export type { LifiEarnVault as LiFiEarnVault } from "../lifi";
 
+/** Earn vaults — see fetchLifiEarnVaults (MCP tool, then earn.li.fi REST with LIFI_API_KEY). */
 export async function getEarnVaults(opts?: {
   asset?: string;
   chainId?: number;
   protocol?: string;
   limit?: number;
-}): Promise<LiFiEarnVault[]> {
-  try {
-    const args: Record<string, unknown> = {};
-    if (opts?.asset) args.asset = opts.asset;
-    if (opts?.chainId) args.chainId = String(opts.chainId);
-    if (opts?.protocol) args.protocol = opts.protocol;
-    if (opts?.limit) args.limit = opts.limit;
-    args.sortBy = "apy";
-    args.sortDirection = "desc";
-    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-earn-vaults", args);
-    return parseResult<LiFiEarnVault[]>(result) ?? [];
-  } catch (err) {
-    console.warn("[lifi] getEarnVaults failed:", err);
-    return [];
-  }
+}): Promise<LifiEarnVault[]> {
+  return fetchLifiEarnVaults(opts);
 }
 
 export async function getEarnPortfolio(walletAddress: string): Promise<unknown> {
   try {
-    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-earn-portfolio", {
+    const result = await callLifi("get-earn-portfolio", {
       walletAddress,
     });
     return parseResult<unknown>(result);
@@ -389,7 +379,7 @@ export async function getEarnPortfolio(walletAddress: string): Promise<unknown> 
 
 export async function getTokenBalances(walletAddress: string, chainId: number, tokenAddresses: string[]): Promise<unknown> {
   try {
-    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-token-balances", {
+    const result = await callLifi("get-token-balances", {
       walletAddress,
       chain: String(chainId),
       tokenAddresses,
@@ -403,7 +393,7 @@ export async function getTokenBalances(walletAddress: string, chainId: number, t
 
 export async function getNativeBalance(address: string, chainId: number): Promise<string | null> {
   try {
-    const result = await callMcpTool(LIFI_MCP_URL, SERVER_NAME, "get-native-token-balance", {
+    const result = await callLifi("get-native-token-balance", {
       address,
       chain: String(chainId),
     });
@@ -601,20 +591,3 @@ export async function getRouteStatusWithFallback(
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
-function parseResult<T>(content: unknown): T | null {
-  if (!content) return null;
-  if (Array.isArray(content)) {
-    for (const block of content) {
-      if (block && typeof block === "object" && "type" in block) {
-        if (block.type === "text" && "text" in block) {
-          try { return JSON.parse(block.text as string) as T; } catch { return null; }
-        }
-      }
-    }
-    return null;
-  }
-  if (typeof content === "string") {
-    try { return JSON.parse(content) as T; } catch { return null; }
-  }
-  return content as T;
-}

@@ -2,30 +2,31 @@
  * mcp/providers/debridge.ts — deBridge MCP provider.
  *
  * Primary cross-chain router: swap + bridge in a single transaction.
- * deBridge DLN (Deswap Liquidity Network) enables any-to-any token
- * transfers across chains with MEV-protection and guaranteed rates.
+ * deBridge DLN (deBridge Liquidity Network) enables any-to-any token
+ * transfers across chains.
  *
  * deBridge MCP endpoint: https://agents.debridge.com/mcp (Streamable HTTP).
  *
- * Available tools:
- *   - get_instructions
- *   - search_tokens(query, chainId?, name?, limit?)
- *   - get_supported_chains
- *   - create_tx(srcChainId, srcChainTokenIn, srcChainTokenInAmount, dstChainId,
- *               dstChainTokenOut, dstChainTokenOutRecipient, srcChainOrderAuthorityAddress,
- *               dstChainOrderAuthorityAddress, ...)
- *   - transaction_same_chain_swap(chainId, tokenIn, tokenInAmount, tokenOut,
- *               tokenOutRecipient, slippage?, senderAddress?, ...)
+ * All MCP calls (argument names/types, deBridge chain IDs, response
+ * normalization, DLN REST fallback) live in ../debridge.ts — this module
+ * only adapts them to the provider-level RouteQuote / RouteExecution shapes,
+ * so there is a single implementation of the deBridge tool contract.
  */
 
-import { callMcpTool } from "../client";
+import { listMcpTools } from "../client";
+import {
+  createDebridgeCrossChainTx,
+  createDebridgeSameChainSwapTx,
+  fetchDebridgeSupportedChains,
+  searchDebridgeTokens,
+  type DebridgeTxData,
+} from "../debridge";
 import type {
   McpProviderId,
   McpProviderStatus,
   RouteQuote,
   RouteRequest,
   RouteExecution,
-  RouteStep,
   UnsignedTx,
 } from "../types";
 import type { Address } from "viem";
@@ -46,24 +47,14 @@ let lastHealthCheck: McpProviderStatus = {
 
 export async function checkHealth(): Promise<McpProviderStatus> {
   const start = Date.now();
+  let healthy = false;
   try {
-    await callMcpTool(DEBRIDGE_MCP_URL, SERVER_NAME, "get_supported_chains", {}, 8000);
-    lastHealthCheck = {
-      id: PROVIDER_ID,
-      name: "deBridge",
-      healthy: true,
-      latencyMs: Date.now() - start,
-      lastChecked: Date.now(),
-    };
-  } catch {
-    lastHealthCheck = {
-      id: PROVIDER_ID,
-      name: "deBridge",
-      healthy: false,
-      latencyMs: Date.now() - start,
-      lastChecked: Date.now(),
-    };
+    const { tools } = await listMcpTools(DEBRIDGE_MCP_URL, SERVER_NAME, { transport: "http", timeoutMs: 8000 });
+    healthy = tools.some((t) => t.name === "create_tx");
+  } catch (err) {
+    console.warn("[debridge] health check failed:", err);
   }
+  lastHealthCheck = { id: PROVIDER_ID, name: "deBridge", healthy, latencyMs: Date.now() - start, lastChecked: Date.now() };
   return lastHealthCheck;
 }
 
@@ -71,22 +62,11 @@ export function getStatus(): McpProviderStatus {
   return lastHealthCheck;
 }
 
-// ─── Supported chains ────────────────────────────────────────────────
+// ─── Supported chains / tokens ───────────────────────────────────────
 
 export async function getSupportedChains(): Promise<number[]> {
-  try {
-    const result = await callMcpTool(DEBRIDGE_MCP_URL, SERVER_NAME, "get_supported_chains", {});
-    const parsed = parseResult<{ chainId: number; chainName: string }[] | number[]>(result);
-    if (!parsed) return [];
-    if (typeof parsed[0] === "number") return parsed as number[];
-    return (parsed as { chainId: number }[]).map((c) => c.chainId);
-  } catch (err) {
-    console.warn("[debridge] getSupportedChains failed:", err);
-    return [];
-  }
+  return (await fetchDebridgeSupportedChains()).map((c) => c.chainId);
 }
-
-// ─── Token search ────────────────────────────────────────────────────
 
 export interface DeBridgeToken {
   address: string;
@@ -97,260 +77,123 @@ export interface DeBridgeToken {
 }
 
 export async function searchTokens(query: string, chainId?: number): Promise<DeBridgeToken[]> {
-  try {
-    const args: Record<string, unknown> = { query };
-    if (chainId) args.chainId = chainId;
-    const result = await callMcpTool(DEBRIDGE_MCP_URL, SERVER_NAME, "search_tokens", args);
-    return parseResult<DeBridgeToken[]>(result) ?? [];
-  } catch (err) {
-    console.warn("[debridge] searchTokens failed:", err);
-    return [];
-  }
+  if (!chainId) return [];
+  return searchDebridgeTokens(chainId, query);
 }
 
-// ─── Quote (cross-chain) ────────────────────────────────────────────
+// ─── Quotes ──────────────────────────────────────────────────────────
 
-interface DeBridgeCreateTxResult {
-  tx?: { to: string; data: string; value: string };
-  estimation?: {
-    srcChainTokenIn?: { amount: string; symbol: string; decimals: number; name: string; address: string };
-    dstChainTokenOut?: { amount: string; symbol: string; decimals: number; name: string; address: string; recommendedAmount?: string };
-    costsDetails?: { feesUsd: number; estimatedGasUsd: number }[];
-  };
-  orderId?: string;
-  estimatedTimeSeconds?: number;
-  fixFee?: string;
+function toUnsigned(tx: DebridgeTxData): UnsignedTx {
+  return { to: tx.to as Address, data: tx.data as `0x${string}`, value: tx.value ?? "0", chainId: tx.chainId };
 }
 
-/**
- * Get a cross-chain swap/bridge quote + tx from deBridge DLN.
- * The new `create_tx` tool returns both quote and unsigned tx in one call.
- */
-export async function getQuote(request: RouteRequest): Promise<RouteQuote | null> {
-  try {
-    const result = await callMcpTool(DEBRIDGE_MCP_URL, SERVER_NAME, "create_tx", {
-      srcChainId: request.fromChainId,
-      srcChainTokenIn: request.fromToken,
-      srcChainTokenInAmount: request.fromAmount,
-      dstChainId: request.toChainId,
-      dstChainTokenOut: request.toToken,
-      dstChainTokenOutRecipient: request.userAddress,
-      srcChainOrderAuthorityAddress: request.userAddress,
-      dstChainOrderAuthorityAddress: request.userAddress,
-    });
-
-    const raw = parseResult<DeBridgeCreateTxResult>(result);
-    if (!raw) return null;
-
-    const est = raw.estimation;
-    const totalFeesUsd = est?.costsDetails?.reduce(
-      (sum, c) => sum + (c.feesUsd ?? 0) + (c.estimatedGasUsd ?? 0),
-      0,
-    ) ?? 0;
-
-    const isCrossChain = request.fromChainId !== request.toChainId;
-
-    const steps: RouteStep[] = [{
+function baseQuote(request: RouteRequest, toAmount: string, routeData: unknown, isCrossChain: boolean, etaSeconds?: number, feesUsd?: number): RouteQuote {
+  return {
+    provider: PROVIDER_ID,
+    fromToken: { address: request.fromToken, symbol: "?", decimals: 18, chainId: request.fromChainId },
+    toToken: { address: request.toToken, symbol: "?", decimals: 18, chainId: request.toChainId },
+    fromAmount: request.fromAmount,
+    toAmount,
+    toAmountUsd: 0, // filled by the router from price feeds
+    estimatedFeesUsd: feesUsd ?? 0,
+    estimatedTimeSeconds: etaSeconds ?? (isCrossChain ? 120 : 30),
+    routeData,
+    steps: [{
       type: isCrossChain ? "bridge" : "swap",
-      provider: "deBridge DLN",
-      fromToken: est?.srcChainTokenIn?.symbol ?? "?",
-      toToken: est?.dstChainTokenOut?.symbol ?? "?",
+      provider: isCrossChain ? "deBridge DLN" : "deBridge",
+      fromToken: request.fromToken,
+      toToken: request.toToken,
       fromChainId: request.fromChainId,
       toChainId: request.toChainId,
-      estimatedTimeSeconds: raw.estimatedTimeSeconds,
-    }];
-
-    return {
-      provider: PROVIDER_ID,
-      fromToken: {
-        address: request.fromToken,
-        symbol: est?.srcChainTokenIn?.symbol ?? "?",
-        decimals: est?.srcChainTokenIn?.decimals ?? 18,
-        chainId: request.fromChainId,
-        name: est?.srcChainTokenIn?.name,
-      },
-      toToken: {
-        address: request.toToken,
-        symbol: est?.dstChainTokenOut?.symbol ?? "?",
-        decimals: est?.dstChainTokenOut?.decimals ?? 18,
-        chainId: request.toChainId,
-        name: est?.dstChainTokenOut?.name,
-      },
-      fromAmount: request.fromAmount,
-      toAmount: est?.dstChainTokenOut?.amount ?? "0",
-      toAmountUsd: 0, // filled by the router from price feeds
-      estimatedFeesUsd: totalFeesUsd,
-      estimatedTimeSeconds: raw.estimatedTimeSeconds ?? (isCrossChain ? 120 : 30),
-      routeData: raw,
-      steps,
-      slippage: request.slippage ?? 0.005,
-    };
-  } catch (err) {
-    console.warn("[debridge] getQuote failed:", err);
-    return null;
-  }
+      estimatedTimeSeconds: etaSeconds,
+    }],
+    slippage: request.slippage ?? 0.005,
+  };
 }
 
-// ─── Same-chain swap ────────────────────────────────────────────────
+/** Get a cross-chain swap/bridge quote + tx from deBridge DLN (create_tx returns both). */
+export async function getQuote(request: RouteRequest): Promise<RouteQuote | null> {
+  if (request.fromChainId === request.toChainId) return getSameChainSwapQuote(request);
+  const order = await createDebridgeCrossChainTx({
+    srcChainId: request.fromChainId,
+    srcTokenAddress: request.fromToken,
+    srcAmount: request.fromAmount,
+    dstChainId: request.toChainId,
+    dstTokenAddress: request.toToken,
+    senderAddress: request.userAddress,
+  });
+  if (!order?.tx) return null;
+  return baseQuote(request, order.estimatedDstAmount ?? "0", order, true, order.estimatedTimeSeconds, order.estimatedFeeUsd);
+}
 
 export async function getSameChainSwapQuote(request: RouteRequest): Promise<RouteQuote | null> {
-  try {
-    const result = await callMcpTool(DEBRIDGE_MCP_URL, SERVER_NAME, "transaction_same_chain_swap", {
-      chainId: request.fromChainId,
-      tokenIn: request.fromToken,
-      tokenInAmount: request.fromAmount,
-      tokenOut: request.toToken,
-      tokenOutRecipient: request.userAddress,
-      senderAddress: request.userAddress,
-      slippage: ((request.slippage ?? 0.005) * 100).toString(), // percent
-    });
-
-    const raw = parseResult<DeBridgeCreateTxResult>(result);
-    if (!raw) return null;
-
-    const est = raw.estimation;
-
-    return {
-      provider: PROVIDER_ID,
-      fromToken: {
-        address: request.fromToken,
-        symbol: est?.srcChainTokenIn?.symbol ?? "?",
-        decimals: est?.srcChainTokenIn?.decimals ?? 18,
-        chainId: request.fromChainId,
-      },
-      toToken: {
-        address: request.toToken,
-        symbol: est?.dstChainTokenOut?.symbol ?? "?",
-        decimals: est?.dstChainTokenOut?.decimals ?? 18,
-        chainId: request.toChainId,
-      },
-      fromAmount: request.fromAmount,
-      toAmount: est?.dstChainTokenOut?.amount ?? "0",
-      toAmountUsd: 0,
-      estimatedFeesUsd: 0,
-      estimatedTimeSeconds: 30,
-      routeData: raw,
-      steps: [{
-        type: "swap",
-        provider: "deBridge",
-        fromToken: est?.srcChainTokenIn?.symbol ?? "?",
-        toToken: est?.dstChainTokenOut?.symbol ?? "?",
-        fromChainId: request.fromChainId,
-        toChainId: request.toChainId,
-      }],
-      slippage: request.slippage ?? 0.005,
-    };
-  } catch (err) {
-    console.warn("[debridge] getSameChainSwapQuote failed:", err);
-    return null;
-  }
+  const swap = await createDebridgeSameChainSwapTx({
+    chainId: request.fromChainId,
+    tokenIn: request.fromToken,
+    tokenOut: request.toToken,
+    amountIn: request.fromAmount,
+    senderAddress: request.userAddress,
+    slippageBps: request.slippage !== undefined ? Math.round(request.slippage * 10000) : undefined,
+  });
+  if (!swap?.tx) return null;
+  return baseQuote(request, swap.estimatedAmountOut ?? "0", swap, false);
 }
 
 // ─── Build transaction ───────────────────────────────────────────────
 
 /**
- * Build the unsigned transaction(s) to execute a deBridge route.
- * With the new API, `create_tx` already returns the tx — we just extract it.
+ * Build the unsigned transaction(s) to execute a deBridge route. The quote
+ * already carries the tx; a fresh one is requested only if it doesn't.
  */
 export async function buildTransaction(
   request: RouteRequest,
-  quoteData: DeBridgeCreateTxResult,
+  quoteData: { tx?: DebridgeTxData | null; approveTx?: DebridgeTxData | null } | null,
 ): Promise<RouteExecution | null> {
-  try {
-    // create_tx already returns the tx in the quote
-    if (quoteData.tx) {
-      return {
-        provider: PROVIDER_ID,
-        transactions: [{
-          to: quoteData.tx.to as Address,
-          data: quoteData.tx.data as `0x${string}`,
-          value: quoteData.tx.value ?? "0",
-          chainId: request.fromChainId,
-        }],
-        approvals: [],
-      };
-    }
-
-    // If no tx in quote, re-call create_tx
-    const result = await callMcpTool(DEBRIDGE_MCP_URL, SERVER_NAME, "create_tx", {
-      srcChainId: request.fromChainId,
-      srcChainTokenIn: request.fromToken,
-      srcChainTokenInAmount: request.fromAmount,
-      dstChainId: request.toChainId,
-      dstChainTokenOut: request.toToken,
-      dstChainTokenOutRecipient: request.userAddress,
-      srcChainOrderAuthorityAddress: request.userAddress,
-      dstChainOrderAuthorityAddress: request.userAddress,
-    });
-
-    const raw = parseResult<DeBridgeCreateTxResult>(result);
-    if (!raw?.tx) return null;
-
-    return {
-      provider: PROVIDER_ID,
-      transactions: [{
-        to: raw.tx.to as Address,
-        data: raw.tx.data as `0x${string}`,
-        value: raw.tx.value ?? "0",
-        chainId: request.fromChainId,
-      }],
-      approvals: [],
-    };
-  } catch (err) {
-    console.warn("[debridge] buildTransaction failed:", err);
-    return null;
+  let data = quoteData;
+  if (!data?.tx) {
+    const fresh = await getQuote(request);
+    data = (fresh?.routeData as typeof quoteData) ?? null;
   }
+  if (!data?.tx) return null;
+  return {
+    provider: PROVIDER_ID,
+    transactions: [toUnsigned(data.tx)],
+    approvals: data.approveTx ? [toUnsigned(data.approveTx)] : [],
+  };
 }
 
 // ─── Order status (cross-chain tracking) ─────────────────────────────
 
 export interface DeBridgeOrderStatus {
   orderId: string;
-  status: "created" | "fulfilled" | "claimable" | "claimed" | "cancelled";
+  /** Raw DLN status: None | Created | Fulfilled | SentUnlock | ClaimedUnlock | Cancelled … */
+  status: string;
+  /** True once funds are delivered on the destination chain. */
+  delivered: boolean;
   srcTxHash?: string;
   dstTxHash?: string;
 }
 
 export async function getOrderStatus(orderId: string): Promise<DeBridgeOrderStatus | null> {
-  // deBridge MCP doesn't have a status tool — use REST API fallback
+  // deBridge MCP has no status tool — use the DLN stats API (per deBridge's monitoring docs).
   try {
-    const res = await fetch(
-      `https://stats-api.dln.trade/api/Orders/${orderId}`,
-      { signal: AbortSignal.timeout(8000) },
-    );
+    const res = await fetch(`https://stats-api.dln.trade/api/Orders/${encodeURIComponent(orderId)}`, {
+      signal: AbortSignal.timeout(8000),
+    });
     if (!res.ok) return null;
     const data = await res.json();
+    const status: string = data.status ?? data.state ?? "None";
+    const hash = (v: unknown): string | undefined =>
+      typeof v === "string" ? v : v && typeof v === "object" && "stringValue" in v ? String((v as { stringValue: unknown }).stringValue) : undefined;
     return {
       orderId,
-      status: data.state ?? "created",
-      srcTxHash: data.creationTxHash,
-      dstTxHash: data.fulfillTxHash,
+      status,
+      delivered: ["Fulfilled", "SentUnlock", "ClaimedUnlock"].includes(status),
+      srcTxHash: hash(data.createdSrcEventMetadata?.transactionHash) ?? hash(data.creationTxHash),
+      dstTxHash: hash(data.fulfilledDstEventMetadata?.transactionHash) ?? hash(data.fulfillTxHash),
     };
   } catch (err) {
     console.warn("[debridge] getOrderStatus failed:", err);
     return null;
   }
-}
-
-// ─── Helpers ─────────────────────────────────────────────────────────
-
-function parseResult<T>(content: unknown): T | null {
-  if (!content) return null;
-  if (Array.isArray(content)) {
-    for (const block of content) {
-      if (block && typeof block === "object" && "type" in block) {
-        if (block.type === "text" && "text" in block) {
-          try { return JSON.parse(block.text as string) as T; } catch {
-            // If it's not JSON, return the text as-is for string results
-            return null;
-          }
-        }
-      }
-    }
-    return null;
-  }
-  if (typeof content === "string") {
-    try { return JSON.parse(content) as T; } catch { return null; }
-  }
-  return content as T;
 }

@@ -32,7 +32,7 @@ export const CHAIN_NAMES: Record<number, string> = {
 
 // ─── Provider identification ────────────────────────────────────────
 
-export type McpProviderId = "haiku" | "debridge" | "lifi" | "base";
+export type McpProviderId = "haiku" | "debridge" | "lifi" | "aave" | "base";
 
 export interface McpProviderStatus {
   id: McpProviderId;
@@ -40,6 +40,8 @@ export interface McpProviderStatus {
   healthy: boolean;
   latencyMs: number | null;
   lastChecked: number;
+  /** False when the provider has no endpoint configured (shown as "not configured", not "offline"). */
+  configured?: boolean;
 }
 
 // ─── Token & asset types ────────────────────────────────────────────

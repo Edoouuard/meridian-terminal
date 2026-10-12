@@ -5,19 +5,35 @@
  * Paymaster (gasless tx), smart wallet detection, Base-native DeFi
  * primitives (Aerodrome, Moonwell, etc.), and onramp support.
  *
- * Base MCP endpoint: https://mcp.base.org (Streamable HTTP, requires auth).
+ * There is NO public hosted Base MCP server: the `base-mcp` package is
+ * archived/deprecated (it was a local stdio server, never hosted at
+ * mcp.base.org). Every MCP-backed call here is therefore opt-in via
+ * BASE_MCP_URL; without it the provider reports "not configured" and returns
+ * empty results immediately instead of hanging on a host that doesn't exist.
+ * Name resolution works regardless, via on-chain ENS (Basenames resolve
+ * through ENS's CCIP-read gateway on mainnet).
  */
 
-import { callMcpTool } from "../client";
+import { callMcpTool, parseMcpToolResult as parseResult } from "../client";
 import type {
   McpProviderId,
   McpProviderStatus,
   TokenInfo,
   UnsignedTx,
 } from "../types";
-import type { Address } from "viem";
+import { createPublicClient, http, type Address } from "viem";
+import { mainnet } from "viem/chains";
+import { normalize } from "viem/ens";
 
-const BASE_MCP_URL = process.env.BASE_MCP_URL || "https://mcp.base.org";
+let ensClient: ReturnType<typeof createPublicClient> | null = null;
+function getEnsClient() {
+  ensClient ??= createPublicClient({ chain: mainnet, transport: http(process.env.MAINNET_RPC_URL || undefined, { timeout: 8000 }) });
+  return ensClient;
+}
+
+const BASE_MCP_URL = process.env.BASE_MCP_URL || "";
+/** True when BASE_MCP_URL is set — the provider is opt-in (no public hosted Base MCP exists). */
+export const configured = BASE_MCP_URL !== "";
 const PROVIDER_ID: McpProviderId = "base";
 const SERVER_NAME = "base";
 const BASE_CHAIN_ID = 8453;
@@ -30,19 +46,25 @@ let lastHealthCheck: McpProviderStatus = {
   healthy: false,
   latencyMs: null,
   lastChecked: 0,
+  configured,
 };
 
 export async function checkHealth(): Promise<McpProviderStatus> {
+  if (!configured) {
+    lastHealthCheck = { id: PROVIDER_ID, name: "Base", healthy: false, latencyMs: null, lastChecked: Date.now(), configured: false };
+    return lastHealthCheck;
+  }
   const start = Date.now();
   try {
-    // Base MCP requires auth — just try connecting to verify it's up
-    await callMcpTool(BASE_MCP_URL, SERVER_NAME, "resolve_name", { name: "base.eth" }, 8000);
+    const { listMcpTools } = await import("../client");
+    await listMcpTools(BASE_MCP_URL, SERVER_NAME, { timeoutMs: 8000 });
     lastHealthCheck = {
       id: PROVIDER_ID,
       name: "Base",
       healthy: true,
       latencyMs: Date.now() - start,
       lastChecked: Date.now(),
+      configured,
     };
   } catch {
     lastHealthCheck = {
@@ -51,6 +73,7 @@ export async function checkHealth(): Promise<McpProviderStatus> {
       healthy: false,
       latencyMs: Date.now() - start,
       lastChecked: Date.now(),
+      configured,
     };
   }
   return lastHealthCheck;
@@ -63,13 +86,11 @@ export function getStatus(): McpProviderStatus {
 // ─── Name resolution ─────────────────────────────────────────────────
 
 /**
- * Resolve a Basename or ENS name to an address on Base.
+ * Resolve a Basename or ENS name to an address (on-chain ENS, CCIP-read for *.base.eth).
  */
 export async function resolveName(name: string): Promise<Address | null> {
   try {
-    const result = await callMcpTool(BASE_MCP_URL, SERVER_NAME, "resolve_name", { name });
-    const data = parseResult<{ address: string }>(result);
-    return (data?.address as Address) ?? null;
+    return (await getEnsClient().getEnsAddress({ name: normalize(name) })) ?? null;
   } catch (err) {
     console.warn("[base] resolveName failed:", err);
     return null;
@@ -77,13 +98,11 @@ export async function resolveName(name: string): Promise<Address | null> {
 }
 
 /**
- * Reverse-resolve an address to a Basename.
+ * Reverse-resolve an address to its primary ENS name.
  */
 export async function reverseName(address: Address): Promise<string | null> {
   try {
-    const result = await callMcpTool(BASE_MCP_URL, SERVER_NAME, "reverse_name", { address });
-    const data = parseResult<{ name: string }>(result);
-    return data?.name ?? null;
+    return (await getEnsClient().getEnsName({ address })) ?? null;
   } catch (err) {
     console.warn("[base] reverseName failed:", err);
     return null;
@@ -103,6 +122,7 @@ export interface SmartWalletInfo {
  * and whether a paymaster is available for gasless transactions.
  */
 export async function detectSmartWallet(address: Address): Promise<SmartWalletInfo> {
+  if (!configured) return { isSmartWallet: false, paymasterAvailable: false };
   try {
     const result = await callMcpTool(BASE_MCP_URL, SERVER_NAME, "detect_smart_wallet", { address });
     return parseResult<SmartWalletInfo>(result) ?? {
@@ -123,6 +143,7 @@ export async function sponsorTransaction(
   tx: UnsignedTx,
   userAddress: Address,
 ): Promise<UnsignedTx | null> {
+  if (!configured) return null;
   if (tx.chainId !== BASE_CHAIN_ID) return null;
   try {
     const result = await callMcpTool(BASE_MCP_URL, SERVER_NAME, "sponsor_transaction", {
@@ -164,6 +185,7 @@ export async function getAerodromePools(opts?: {
   limit?: number;
   token?: string;
 }): Promise<AerodromePool[]> {
+  if (!configured) return [];
   try {
     const result = await callMcpTool(BASE_MCP_URL, SERVER_NAME, "get_aerodrome_pools", {
       limit: opts?.limit ?? 20,
@@ -189,6 +211,7 @@ export interface MoonwellMarket {
 }
 
 export async function getMoonwellMarkets(): Promise<MoonwellMarket[]> {
+  if (!configured) return [];
   try {
     const result = await callMcpTool(BASE_MCP_URL, SERVER_NAME, "get_moonwell_markets", {});
     return parseResult<MoonwellMarket[]>(result) ?? [];
@@ -218,6 +241,7 @@ export async function getOnrampQuote(
   fiatCurrency: string,
   cryptoToken: string,
 ): Promise<OnrampQuote | null> {
+  if (!configured) return null;
   try {
     const result = await callMcpTool(BASE_MCP_URL, SERVER_NAME, "get_onramp_quote", {
       fiatAmount,
@@ -234,20 +258,3 @@ export async function getOnrampQuote(
 
 // ─── Helpers ─────────────────────────────────────────────────────────
 
-function parseResult<T>(content: unknown): T | null {
-  if (!content) return null;
-  if (Array.isArray(content)) {
-    for (const block of content) {
-      if (block && typeof block === "object" && "type" in block) {
-        if (block.type === "text" && "text" in block) {
-          try { return JSON.parse(block.text as string) as T; } catch { return null; }
-        }
-      }
-    }
-    return null;
-  }
-  if (typeof content === "string") {
-    try { return JSON.parse(content) as T; } catch { return null; }
-  }
-  return content as T;
-}
