@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { assetsMentioned, ensureAssetFlow, fitToBudget, normalizeAsset, removeNegativeCarryLoops, stableBudgetsMentioned } from "@/lib/strategyFlow";
 
 /**
  * POST /api/parse-intent
@@ -123,6 +124,9 @@ A "hedge" is meaningless without something to hedge. Either:
 Each leg must map to exactly one on-chain action. Do not combine multiple actions into one leg.
 - "Buy ETH and stake it" = 2 legs: Swap USDC→ETH + Stake ETH on Lido.
 - "Supply USDC and borrow ETH" = 2 legs: Supply USDC on Aave + Borrow ETH on Aave.
+- Asset flow: every Supply / Stake / Bridge leg must spend an asset the user already holds or that an EARLIER leg produced. Holding USDC and supplying GHO requires a "Swap USDC → GHO" leg first; bridging USDC to Base does not give you GHO on Base.
+- Money is spent once: if a leg deploys 3000 USDC, a later leg cannot also bridge or supply those same 3000 USDC. Split the budget across legs instead.
+- Never loop (borrow an asset to re-supply it) when its borrow APY is at or above its supply APY — that loses money.
 
 ### Rule 5: Size consistency and portfolio-based sizing
 When a strategy has offsetting legs (long + short for neutrality), both legs MUST have the same sizeUsd.
@@ -205,6 +209,21 @@ Return ONLY valid JSON (no markdown, no text before/after):
   ]
 }`;
 
+/** Pull the JSON object out of a model reply (bare, or wrapped in code fences); null when there is none. */
+function extractJson(text: string): ({ strategies?: unknown[] } & Record<string, unknown>) | null {
+  if (!text) return null;
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const raw = fenced ? fenced[1] : text;
+  const jsonMatch = raw.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return null;
+  try {
+    const value = JSON.parse(jsonMatch[0]);
+    return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Fetch live yield context from our own aggregator route (server-side internal call). */
 async function fetchYieldContext(baseUrl: string): Promise<string> {
   try {
@@ -241,21 +260,32 @@ interface LLMStrategy {
   legs: LLMLeg[];
 }
 
-const NEUTRAL_KEYWORDS = /neutral|hedge|basis|cash\.and\.carry|funding.*harvest|no directional|market\.neutral/i;
+const NEUTRAL_KEYWORDS = /neutral|hedge|basis|cash.and.carry|funding.*harvest|no directional|market.neutral/i;
+/** Whole neutrality claims to swap for "Directional" when relabeling ("Delta-Neutral", "Hedged" — never a word fragment). */
+const NEUTRAL_CLAIM = /\b(?:(?:delta|market|beta)[-\s]?)?neutral\b|\bhedg(?:e|ed|ing)\b|\bbasis\b|\bcash.and.carry\b/i;
 const SHORT_SIDES = new Set(["short"]);
 const LONG_SIDES = new Set(["long", "buy", "supply", "stake", "swap"]);
 const SPOT_SIDES = new Set(["supply", "stake", "swap", "buy", "bridge", "transfer", "borrow", "repay", "withdraw", "restake"]);
 /** Stablecoins — supplying/swapping these does NOT give long exposure on a volatile asset. */
 const STABLECOINS = new Set(["usdc", "usdt", "dai", "frax", "lusd", "gusd", "tusd", "susd", "pyusd", "eusd", "usdp", "busd"]);
 
-/** Extract the bare underlying asset from a leg (strip PERP suffix, take swap destination). */
+/** Extract the bare underlying asset from a leg (strip PERP suffix, take swap destination, WETH = ETH). */
 function legUnderlying(leg: LLMLeg): string {
   const raw = (leg.asset ?? "").trim();
   // Swap format: "USDC → ETH" → "ETH"
   const arrowMatch = raw.match(/→\s*(.+)$/);
-  if (arrowMatch) return arrowMatch[1].trim().toUpperCase();
-  // Perp format: "ETH PERP" → "ETH"
-  return raw.replace(/\s*(PERP|perpetual)\s*$/i, "").trim().toUpperCase();
+  // Perp format: "ETH PERP" → "ETH" (normalizeAsset strips the suffix and maps WETH → ETH)
+  return normalizeAsset(arrowMatch ? arrowMatch[1] : raw);
+}
+
+/** ETH liquid-staking receipts count as ETH exposure. */
+const ETH_DERIVATIVE = /^(ST|WST|CB|R|WE|EE)ETH$/i;
+
+/** Asset a Swap leg sells ("ETH → USDC" → "ETH"), or null. */
+function legSold(leg: LLMLeg): string | null {
+  if (leg.side.toLowerCase() !== "swap") return null;
+  const m = (leg.asset ?? "").match(/^(.+?)\s*→/);
+  return m ? normalizeAsset(m[1]) : null;
 }
 
 /** Does this leg give actual long exposure on a volatile asset? Stablecoin supply/swap does NOT count. */
@@ -272,7 +302,7 @@ function isRealLongExposure(leg: LLMLeg): boolean {
  * Validate a single LLM-produced strategy for structural coherence.
  * Fixes what can be fixed; relabels what can't.
  */
-function validateAndFixStrategy(strategy: LLMStrategy): LLMStrategy {
+function validateAndFixStrategy(strategy: LLMStrategy, held: Set<string> = new Set()): LLMStrategy {
   const legs = strategy.legs ?? [];
   const nameAndSummary = `${strategy.name} ${strategy.summary}`;
   const claimsNeutral = NEUTRAL_KEYWORDS.test(nameAndSummary);
@@ -295,11 +325,21 @@ function validateAndFixStrategy(strategy: LLMStrategy): LLMStrategy {
     // Direct match: long ETH offsets short ETH
     if (shortAssets.has(underlying)) return true;
     // Derivative match: stETH / wstETH / cbETH / rETH count as ETH exposure
-    if (/^(ST|WST|CB|R)ETH$/i.test(underlying) && shortAssets.has("ETH")) return true;
+    if (ETH_DERIVATIVE.test(underlying) && shortAssets.has("ETH")) return true;
+    // LP match: a WETH-USDC position holds ETH, so a short ETH perp can hedge it
+    const lpTokens = underlying.match(/^([A-Z0-9.]+)\s*[-/]\s*([A-Z0-9.]+)/);
+    if (lpTokens && [lpTokens[1], lpTokens[2]].some((tok) => shortAssets.has(normalizeAsset(tok)))) return true;
     return false;
   });
 
-  const hasMatchingLong = realLongs.length > 0;
+  // The user's own holding is the long when the strategy keeps it: holding
+  // 2 ETH and shorting ETH is neutral — unless a leg sells that ETH.
+  const sold = new Set(legs.map(legSold).filter((a): a is string => a !== null));
+  const heldLong = [...shortAssets].some((asset) =>
+    [...held].some((h) => (h === asset || (asset === "ETH" && ETH_DERIVATIVE.test(h))) && !sold.has(h)),
+  );
+
+  const hasMatchingLong = realLongs.length > 0 || heldLong;
   const hasShort = shortLegs.length > 0;
 
   if (hasMatchingLong && hasShort) {
@@ -307,15 +347,19 @@ function validateAndFixStrategy(strategy: LLMStrategy): LLMStrategy {
     return { ...strategy, legs: balanceNeutralSizes(legs).map(fixSpotLeverage) };
   }
 
-  // Missing the offsetting long — add a spot buy for each unique shorted asset.
-  if (hasShort && !hasMatchingLong) {
+  // Missing the offsetting long — add a spot buy for each unique shorted asset,
+  // paid with a stablecoin the user holds (USDC when holdings are unknown).
+  // When the user holds no stablecoin to buy it with, the strategy can't be
+  // made neutral here: it falls through and is labeled directional instead.
+  const fundingStable = held.size === 0 ? "USDC" : [...held].find((h) => STABLECOINS.has(h.toLowerCase()));
+  if (hasShort && !hasMatchingLong && fundingStable) {
     const addedLegs: LLMLeg[] = [];
     for (const asset of shortAssets) {
       const matchingShorts = shortLegs.filter((l) => legUnderlying(l) === asset);
       const totalShortSize = matchingShorts.reduce((s, l) => s + (l.sizeUsd ?? 10000), 0);
       addedLegs.push({
         side: "Swap",
-        asset: `USDC → ${asset}`,
+        asset: `${fundingStable} → ${asset}`,
         protocol: "Uniswap",
         sizeUsd: totalShortSize,
         note: `Spot long ${asset} to offset short perp — required for delta neutrality.`,
@@ -330,12 +374,12 @@ function validateAndFixStrategy(strategy: LLMStrategy): LLMStrategy {
     };
   }
 
-  if (!hasShort) {
-    // No short legs — relabel as directional.
+  if (!hasShort || !hasMatchingLong) {
+    // No short legs, or a short nothing offsets — relabel as directional.
     return {
       ...strategy,
-      name: strategy.name.replace(NEUTRAL_KEYWORDS, "Directional").trim(),
-      summary: strategy.summary.replace(NEUTRAL_KEYWORDS, "directional"),
+      name: strategy.name.replace(NEUTRAL_CLAIM, "Directional").trim(),
+      summary: strategy.summary.replace(NEUTRAL_CLAIM, "directional"),
       legs: legs.map(fixSpotLeverage),
     };
   }
@@ -346,7 +390,8 @@ function validateAndFixStrategy(strategy: LLMStrategy): LLMStrategy {
 /** Spot/lending sides never carry leverage. */
 function fixSpotLeverage(leg: LLMLeg): LLMLeg {
   if (SPOT_SIDES.has(leg.side.toLowerCase()) && leg.leverage !== undefined) {
-    const { leverage: _, ...rest } = leg;
+    const rest = { ...leg };
+    delete rest.leverage;
     return rest;
   }
   return leg;
@@ -475,8 +520,10 @@ export async function POST(req: NextRequest) {
     const model = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
 
     // Fetch live yield data in parallel with nothing else — it's the only async dep
-    const proto = req.headers.get("x-forwarded-proto") ?? "https";
     const host = req.headers.get("host") ?? "localhost:3000";
+    // A local dev server speaks plain http; behind a proxy, trust its header.
+    const proto = req.headers.get("x-forwarded-proto")
+      ?? (/^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(host) ? "http" : "https");
     const baseUrl = `${proto}://${host}`;
     const yieldContext = await fetchYieldContext(baseUrl);
     const portfolioContext = formatPortfolioContext(portfolio as PortfolioSnapshot | undefined);
@@ -488,59 +535,108 @@ export async function POST(req: NextRequest) {
     sections.push(`User thesis: ${thesis.trim()}`);
     const userMessage = sections.join("\n\n---\n\n");
 
-    const response = await fetch(OPENROUTER_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://meridian-terminal.vercel.app",
-        "X-Title": "Meridian Terminal",
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 4096,
-        temperature: 0.4,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: userMessage },
-        ],
-      }),
-    });
+    // The model occasionally answers in something other than JSON (or with an
+    // empty strategy list) — ask once more before giving up.
+    let parsed: { strategies?: unknown[] } & Record<string, unknown> | null = null;
+    let failure = "Failed to parse model response";
+    for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
+      const response = await fetch(OPENROUTER_URL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://meridian-terminal.vercel.app",
+          "X-Title": "Meridian Terminal",
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 4096,
+          temperature: 0.4,
+          response_format: { type: "json_object" },
+          messages: [
+            { role: "system", content: SYSTEM_PROMPT },
+            { role: "user", content: userMessage },
+          ],
+        }),
+      });
 
-    if (!response.ok) {
-      const errText = await response.text().catch(() => "");
-      console.error(`[parse-intent] OpenRouter ${response.status}:`, errText.slice(0, 500));
-      return NextResponse.json(
-        { error: `OpenRouter error ${response.status}` },
-        { status: 502 },
-      );
+      if (!response.ok) {
+        const errText = await response.text().catch(() => "");
+        console.error(`[parse-intent] OpenRouter ${response.status}:`, errText.slice(0, 500));
+        return NextResponse.json(
+          { error: `OpenRouter error ${response.status}` },
+          { status: 502 },
+        );
+      }
+
+      const completion = await response.json();
+      const text: string = completion.choices?.[0]?.message?.content ?? "";
+      const candidate = extractJson(text);
+      if (!candidate) {
+        console.error(`[parse-intent] attempt ${attempt + 1}: no JSON in response:`, text.slice(0, 300));
+        failure = text ? "Failed to parse model response" : "Empty response from model";
+        continue;
+      }
+      if (!Array.isArray(candidate.strategies) || candidate.strategies.length === 0) {
+        console.error(`[parse-intent] attempt ${attempt + 1}: no strategies in response`);
+        failure = "No strategies in response";
+        continue;
+      }
+      parsed = candidate;
     }
 
-    const completion = await response.json();
-    const text: string = completion.choices?.[0]?.message?.content ?? "";
-
-    if (!text) {
-      return NextResponse.json({ error: "Empty response from model" }, { status: 500 });
+    if (!parsed) {
+      return NextResponse.json({ error: failure }, { status: 500 });
     }
 
-    // Extract JSON — handle bare JSON or wrapped in code fences
-    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-    const raw = fenced ? fenced[1] : text;
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error("[parse-intent] no JSON in response:", text.slice(0, 500));
-      return NextResponse.json({ error: "Failed to parse model response" }, { status: 500 });
+    // What the user holds: the wallet when connected, otherwise what they
+    // named ("I have 5000 USDC"). Drives every check below.
+    const snapshot = portfolio as PortfolioSnapshot | undefined;
+    const walletHoldings = (snapshot?.assets ?? []).filter((a) => a.usd >= 1);
+    const budgets: Record<string, number> = {};
+    let starting: string[];
+    if (walletHoldings.length > 0) {
+      starting = walletHoldings.map((a) => a.symbol);
+      for (const a of walletHoldings) budgets[a.symbol] = (budgets[a.symbol] ?? 0) + a.usd;
+    } else {
+      const known = new Set<string>(["ETH", "USDC", "USDT", "DAI", "WBTC", "BTC", "SOL"]);
+      for (const s of parsed.strategies as LLMStrategy[]) {
+        for (const l of Array.isArray(s.legs) ? s.legs : []) {
+          for (const part of String(l.asset ?? "").split(/→|->/)) known.add(part.trim());
+        }
+      }
+      starting = assetsMentioned(thesis, known);
+      Object.assign(budgets, stableBudgetsMentioned(thesis));
     }
+    const held = new Set(starting.map(normalizeAsset));
 
-    const parsed = JSON.parse(jsonMatch[0]);
+    parsed.strategies = (parsed.strategies as LLMStrategy[]).map((raw) => {
+      // 1. Structural validation: catch strategies that are logically
+      //    incoherent (e.g. labeled "neutral" but only one directional leg).
+      const s = validateAndFixStrategy({ ...raw, legs: Array.isArray(raw.legs) ? raw.legs : [] }, held);
+      // 2. Drop borrow-and-resupply loops that borrow dearer than they earn.
+      const { legs: unlooped, removed } = removeNegativeCarryLoops(s.legs);
+      // 3. Asset flow: every deposit leg must spend an asset the strategy holds
+      //    at that point — insert the swap the model left out (bridging USDC
+      //    then supplying GHO).
+      const { legs: flowed, insertedFor, dropped } = ensureAssetFlow(unlooped, starting);
+      // 4. Budget: no leg may spend money an earlier leg already used.
+      const { legs: fitted, adjustments } = fitToBudget(flowed, budgets);
+      const notes = [...removed, ...dropped, ...adjustments];
+      if (insertedFor.length === 0 && notes.length === 0) return s;
+      return {
+        ...s,
+        legs: fitted,
+        summary: insertedFor.length > 0
+          ? `${s.summary} Includes a swap into ${insertedFor.join(", ")} so every leg is funded.`
+          : s.summary,
+        variantNote: notes.length > 0 ? `${s.variantNote} Adjusted: ${notes.join(" ")}` : s.variantNote,
+      };
+    }).filter((s) => s.legs.length > 0);
 
-    if (!parsed.strategies || !Array.isArray(parsed.strategies) || parsed.strategies.length === 0) {
-      return NextResponse.json({ error: "No strategies in response" }, { status: 500 });
+    if (parsed.strategies.length === 0) {
+      return NextResponse.json({ error: "No strategy fits your available funds" }, { status: 422 });
     }
-
-    // Post-LLM structural validation: catch strategies that are logically
-    // incoherent (e.g. labeled "neutral" but only have one directional leg).
-    parsed.strategies = parsed.strategies.map(validateAndFixStrategy);
 
     return NextResponse.json(parsed);
   } catch (err: unknown) {
