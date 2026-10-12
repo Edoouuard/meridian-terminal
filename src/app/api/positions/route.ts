@@ -143,26 +143,14 @@ export async function GET(request: Request) {
       fetchAavePositions(address).catch((): AavePosition[] => []),
     ]);
 
-    // Convert Aave MCP positions to IndexedLendingPosition format for backward compat
-    const aaveIndexed: IndexedLendingPosition[] = aavePositions.flatMap((p) => {
-      const positions: IndexedLendingPosition[] = [];
-      if (p.totalCollateralUsd > 0 || p.totalDebtUsd > 0) {
-        positions.push({
-          protocol: `Aave v3`,
-          venue: p.chain ?? "MCP",
-          collateralUsd: p.totalCollateralUsd,
-          supplyUsd: p.totalCollateralUsd,
-          borrowUsd: p.totalDebtUsd,
-        });
-      }
-      return positions;
-    });
-
+    // `positions` stays Morpho-only: useIndexedPositions/useLivePortfolio treat
+    // it as Morpho and merge it next to the Aave positions they already read
+    // on-chain, so mixing Aave in here would count every Aave position twice.
     return NextResponse.json({
       address,
-      positions: [...morpho, ...aaveIndexed],
+      positions: morpho,
       vaults,
-      aave: aavePositions, // Also expose raw Aave MCP data for richer UI
+      aave: aavePositions, // Aave v3 positions from the Aave MCP, per market
     });
   } catch (e) {
     return NextResponse.json(

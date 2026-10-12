@@ -88,8 +88,11 @@ export default function TerminalApp() {
   const live = useLivePortfolio();
   const haikuData = useHaikuPortfolio();
 
-  // Merge Haiku MCP data into portfolio value when available
-  const haikuExtraUsd = haikuData.totalBalancesUsd + haikuData.totalPositionsUsd;
+  // Merge MCP-only data into the portfolio value. Only positions count:
+  // haikuData.positions holds Aave markets useLivePortfolio doesn't read
+  // on-chain (net: borrows are negative). The MCP native balances duplicate
+  // live.netUsd's own balance reads, so adding them would double-count.
+  const haikuExtraUsd = haikuData.totalPositionsUsd;
   const displayPortfolioValue = isConnected ? live.netUsd + haikuExtraUsd : PORTFOLIO_VALUE;
 
   // Build live positions from on-chain data + Haiku MCP enrichment
@@ -99,12 +102,12 @@ export default function TerminalApp() {
       ...(p.collateralUsd > 0 ? [{ asset: `${p.protocol} supply`, venue: p.chain, amount: fmtUsd(p.collateralUsd) }] : []),
       ...(p.debtUsd > 0 ? [{ asset: `${p.protocol} borrow`, venue: p.chain, amount: "-" + fmtUsd(p.debtUsd) }] : []),
     ]),
-    // Haiku MCP: DeFi positions from protocols not tracked by wagmi multicall
+    // MCP: DeFi positions in markets not tracked by wagmi multicall (borrows are negative)
     ...haikuData.positions
-      .filter((p) => p.depositedUsd > 1)
+      .filter((p) => Math.abs(p.depositedUsd) > 1)
       .map((p) => ({
         asset: `${p.protocol} ${p.type}`,
-        venue: `${p.asset} · chain ${p.chainId}`,
+        venue: `${p.asset} · ${CHAIN_LABEL[p.chainId] ?? `chain ${p.chainId}`}`,
         amount: fmtUsd(p.depositedUsd),
       })),
   ];

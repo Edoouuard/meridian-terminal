@@ -398,6 +398,13 @@ function buildSummary(ctx: Omit<YieldContext, "summary" | "fetchedAt">): string 
   return lines.join("\n");
 }
 
+/** DefiLlama's chain names, so MCP rows dedupe against (and read like) DefiLlama rows. */
+const DEFILLAMA_CHAIN_NAMES: Record<number, string> = {
+  1: "Ethereum", 10: "OP Mainnet", 56: "BSC", 100: "Gnosis", 137: "Polygon",
+  146: "Sonic", 324: "zkSync Era", 1088: "Metis", 5000: "Mantle", 8453: "Base",
+  42161: "Arbitrum", 42220: "Celo", 43114: "Avalanche", 59144: "Linea", 534352: "Scroll",
+};
+
 /* ---------- Handler ---------- */
 
 export async function GET() {
@@ -409,7 +416,8 @@ export async function GET() {
     fetchLighterVaults(),
     fetchPhilidorVaults(),
     fetchAaveYieldSummary([1, 8453, 42161, 10, 137, 43114, 56, 100, 534352, 324, 59144, 5000, 1088, 250, 146, 42220]).catch(() => ""),
-    haiku.fetchYieldOpportunities({ minApy: 1 }).catch(() => []),
+    // Aave is covered by the dedicated Aave MCP section above — skip it here.
+    haiku.fetchYieldOpportunities({ minApy: 1, includeAave: false }).catch(() => []),
   ]);
 
   const vaults: VaultYield[] = [
@@ -417,21 +425,27 @@ export async function GET() {
     ...lighterVaults,
   ].filter((v): v is VaultYield => v !== null);
 
-  // Merge Haiku MCP yield opportunities into lending data (deduplicated)
+  // Merge MCP yield opportunities (LI.FI earn vaults) into lending data (deduplicated)
   const haikuLending: YieldRow[] = haikuYields
     .filter((y) => y.apy > 0 && y.tvlUsd > MIN_TVL)
     .map((y) => ({
       protocol: y.protocol,
       asset: y.asset.toUpperCase(),
-      chain: String(y.chainId),
+      chain: DEFILLAMA_CHAIN_NAMES[y.chainId] ?? String(y.chainId),
       apy: y.apy,
       tvlUsd: y.tvlUsd,
       kind: y.type,
     }));
-  // Deduplicate: prefer DefiLlama data (already validated), add Haiku-only entries
-  const existingKeys = new Set(defiLlama.lending.map((r) => `${r.protocol}:${r.asset}:${r.chain}`));
+  // When the Aave MCP answered, its rates are authoritative (live, and frozen /
+  // capped reserves already removed) — drop DefiLlama's Aave rows so the model
+  // never sees two different rates for the same reserve.
+  const llamaLending = aaveMcp
+    ? defiLlama.lending.filter((r) => !/^Aave\b/i.test(r.protocol))
+    : defiLlama.lending;
+  // Deduplicate: prefer DefiLlama data (already validated), add MCP-only entries
+  const existingKeys = new Set(llamaLending.map((r) => `${r.protocol}:${r.asset}:${r.chain}`));
   const mergedLending = [
-    ...defiLlama.lending,
+    ...llamaLending,
     ...haikuLending.filter((r) => !existingKeys.has(`${r.protocol}:${r.asset}:${r.chain}`)),
   ].sort((a, b) => b.apy - a.apy).slice(0, 60);
 

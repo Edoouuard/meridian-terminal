@@ -3,18 +3,24 @@
  *
  * Originally connected to Haiku MCP (mcp.haiku.trade) but that endpoint
  * no longer exists as a hosted service. This module now aggregates
- * portfolio data from LI.FI MCP (token balances, earn vaults) and
- * Aave MCP (positions) to provide the same interface.
+ * portfolio data from LI.FI MCP (native balances, token prices, earn vaults)
+ * and Aave MCP (positions, markets, activity) behind the same interface.
  *
- * Fallback: uses LI.FI REST + Aave MCP for all reads.
+ * Overlap with on-chain reads: useLivePortfolio already reads native
+ * balances on every supported chain and Aave v3 positions in each chain's
+ * main pool (lib/onchain.ts LENDING_POOLS_BY_CHAIN). `fetchPositions`
+ * therefore only returns positions in Aave markets that list doesn't cover
+ * (e.g. Aave's Lido / EtherFi / Horizon markets on Ethereum), so the page can
+ * add them to the portfolio value without counting anything twice.
  */
 
-import { callMcpTool } from "../client";
+import { callMcpTool, parseMcpToolResult } from "../client";
+import { fetchAavePositions, fetchAaveReserves, isAaveReserveExecutable, isAaveReserveSuppliable } from "../aave";
+import { LENDING_POOLS_BY_CHAIN } from "@/lib/onchain";
 import type {
   McpProviderId,
   McpProviderStatus,
   ChainBalance,
-  TokenBalance,
   YieldPosition,
   YieldOpportunity,
   TokenInfo,
@@ -24,7 +30,7 @@ import type { Address } from "viem";
 const LIFI_MCP_URL = process.env.LIFI_MCP_URL || "https://mcp.li.quest/mcp";
 const AAVE_MCP_URL = process.env.AAVE_MCP_URL || "https://mcp.aave.com";
 const PROVIDER_ID: McpProviderId = "haiku";
-const SERVER_NAME = "haiku-via-lifi";
+const NATIVE_TOKEN = "0x0000000000000000000000000000000000000000";
 
 // Major chains for portfolio scanning
 const PORTFOLIO_CHAINS = [1, 10, 56, 137, 8453, 42161, 43114, 324, 59144, 534352];
@@ -68,39 +74,51 @@ export function getStatus(): McpProviderStatus {
 
 // ─── Portfolio reads ─────────────────────────────────────────────────
 
+/** Native gas-token price on a chain, from LI.FI's token metadata. */
+async function fetchNativePriceUsd(chainId: number): Promise<number | null> {
+  try {
+    const result = await callMcpTool(LIFI_MCP_URL, "lifi", "get-token", {
+      chain: String(chainId),
+      token: NATIVE_TOKEN,
+    }, 8000);
+    const price = parseFloat(parseMcpToolResult<{ priceUSD?: string }>(result)?.priceUSD ?? "");
+    return Number.isFinite(price) && price > 0 ? price : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Fetch native token balances across major chains via LI.FI MCP.
+ * Overlaps useLivePortfolio's own native-balance reads — informational only,
+ * never add it to the on-chain portfolio value.
  */
 export async function fetchBalances(userAddress: Address): Promise<ChainBalance[]> {
-  const results: ChainBalance[] = [];
-
-  // Fetch native balances in parallel across chains
-  const chainResults = await Promise.allSettled(
+  const chainResults = await Promise.all(
     PORTFOLIO_CHAINS.map(async (chainId) => {
       try {
         const result = await callMcpTool(LIFI_MCP_URL, "lifi", "get-native-token-balance", {
           address: userAddress,
           chain: String(chainId),
         }, 8000);
-        return { chainId, result };
+        // { address, balance, chainId, decimals, tokenSymbol } — balance in base units.
+        const parsed = parseMcpToolResult<{ balance?: string; decimals?: number; tokenSymbol?: string }>(result);
+        if (!parsed?.balance || !/^\d+$/.test(parsed.balance) || BigInt(parsed.balance) === 0n) return null;
+        const priceUsd = await fetchNativePriceUsd(chainId);
+        return { chainId, parsed, priceUsd };
       } catch {
-        return { chainId, result: null };
+        return null;
       }
     }),
   );
 
+  const results: ChainBalance[] = [];
   for (const r of chainResults) {
-    if (r.status !== "fulfilled" || !r.value.result) continue;
-    const { chainId } = r.value;
-    const parsed = parseResult<{ amount?: string; symbol?: string; decimals?: number; priceUSD?: string }>(r.value.result);
-    if (!parsed?.amount || parsed.amount === "0") continue;
-
-    const balance = parsed.amount;
-    const priceUsd = parseFloat(parsed.priceUSD ?? "0");
+    if (!r || r.priceUsd === null) continue;
+    const { chainId, parsed, priceUsd } = r;
     const decimals = parsed.decimals ?? 18;
-    const balanceNum = parseFloat(balance) / Math.pow(10, decimals);
+    const balanceNum = Number(BigInt(parsed.balance!)) / 10 ** decimals;
     const balanceUsd = balanceNum * priceUsd;
-
     if (balanceUsd < 0.01) continue;
 
     results.push({
@@ -108,13 +126,13 @@ export async function fetchBalances(userAddress: Address): Promise<ChainBalance[
       chainName: CHAIN_NAMES[chainId] ?? `Chain ${chainId}`,
       tokens: [{
         token: {
-          address: "0x0000000000000000000000000000000000000000" as Address,
-          symbol: parsed.symbol ?? "ETH",
+          address: NATIVE_TOKEN as Address,
+          symbol: parsed.tokenSymbol ?? "ETH",
           decimals,
           chainId,
           priceUsd,
         },
-        balance,
+        balance: parsed.balance!,
         balanceUsd,
       }],
       totalUsd: balanceUsd,
@@ -124,55 +142,51 @@ export async function fetchBalances(userAddress: Address): Promise<ChainBalance[
   return results;
 }
 
-/**
- * Fetch DeFi positions via Aave MCP (other protocols not available without Haiku).
- */
-export async function fetchPositions(userAddress: Address): Promise<YieldPosition[]> {
-  try {
-    const result = await callMcpTool(AAVE_MCP_URL, "aave", "get_user_positions", {
-      user: userAddress,
-    }, 10000);
-    const positions = parseResult<{
-      chainId: number;
-      supplies?: { symbol: string; balanceUsd: number; apy: number }[];
-      borrows?: { symbol: string; balanceUsd: number; apy: number }[];
-    }[]>(result);
-
-    if (!positions) return [];
-
-    const yieldPositions: YieldPosition[] = [];
-    for (const pos of positions) {
-      for (const s of pos.supplies ?? []) {
-        if (s.balanceUsd > 0.01) {
-          yieldPositions.push({
-            protocol: "Aave",
-            chainId: pos.chainId,
-            type: "lending",
-            asset: s.symbol,
-            depositedUsd: s.balanceUsd,
-            apy: s.apy,
-          });
-        }
-      }
-    }
-    return yieldPositions;
-  } catch (err) {
-    console.warn("[haiku] fetchPositions failed:", err);
-    return [];
-  }
+/** True when useLivePortfolio already reads this Aave market on-chain. */
+function isTrackedOnChain(chainId: number, market: string): boolean {
+  return (LENDING_POOLS_BY_CHAIN[chainId] ?? []).some((p) => p.pool.toLowerCase() === market.toLowerCase());
 }
 
 /**
- * Fetch yield opportunities via LI.FI earn vaults + Aave markets.
+ * Fetch Aave v3 positions (via Aave MCP) in the markets useLivePortfolio does
+ * NOT read on-chain. Supplies are positive `depositedUsd`, borrows negative,
+ * so summing `depositedUsd` gives the net value those markets add.
+ */
+export async function fetchPositions(userAddress: Address): Promise<YieldPosition[]> {
+  const positions = await fetchAavePositions(userAddress);
+  const out: YieldPosition[] = [];
+  for (const p of positions) {
+    if (isTrackedOnChain(p.chainId, p.market)) continue;
+    const protocol = `Aave v3 (${p.marketName})`;
+    for (const s of p.supplies) {
+      if (s.balanceUsd > 0.01) {
+        out.push({ protocol, chainId: p.chainId, type: "lending", asset: s.symbol, depositedUsd: s.balanceUsd, apy: s.apy });
+      }
+    }
+    for (const b of p.borrows) {
+      if (b.balanceUsd > 0.01) {
+        out.push({ protocol, chainId: p.chainId, type: "lending", asset: `${b.symbol} debt`, depositedUsd: -b.balanceUsd, apy: -b.apy });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Fetch yield opportunities via LI.FI earn vaults + Aave v3 markets.
+ * APYs are in percent (4.23 = 4.23%).
  */
 export async function fetchYieldOpportunities(opts?: {
   asset?: string;
   minApy?: number;
   chainIds?: number[];
+  /** Include Aave v3 reserves (default true). */
+  includeAave?: boolean;
 }): Promise<YieldOpportunity[]> {
   const opportunities: YieldOpportunity[] = [];
 
-  // LI.FI earn vaults
+  // LI.FI earn vaults. LI.FI's hosted MCP currently answers HTTP 404 for this
+  // tool (an upstream bug) — failures are caught and the Aave rows still load.
   try {
     const args: Record<string, unknown> = {
       sortBy: "apy",
@@ -183,66 +197,52 @@ export async function fetchYieldOpportunities(opts?: {
     if (opts?.chainIds?.[0]) args.chainId = String(opts.chainIds[0]);
 
     const result = await callMcpTool(LIFI_MCP_URL, "lifi", "get-earn-vaults", args, 10000);
-    const vaults = parseResult<{
+    const vaults = parseMcpToolResult<{
       address: string;
       chainId: number;
       protocol?: string;
       asset?: string;
       apy?: number;
       tvl?: number;
-      tags?: string[];
     }[]>(result);
 
-    if (vaults) {
+    if (Array.isArray(vaults)) {
       for (const v of vaults) {
-        const apy = v.apy ?? 0;
-        if (opts?.minApy && apy < opts.minApy / 100) continue;
+        const apy = (v.apy ?? 0) * 100; // fraction → percent
+        if (opts?.minApy && apy < opts.minApy) continue;
         opportunities.push({
           protocol: v.protocol ?? "Unknown",
           chainId: v.chainId,
           asset: v.asset ?? "?",
           type: "vault",
-          apy: apy * 100, // normalize to percentage
+          apy,
           tvlUsd: v.tvl ?? 0,
         });
       }
     }
   } catch (err) {
-    console.warn("[haiku] LI.FI earn vaults fetch failed:", err);
+    console.warn("[haiku] LI.FI earn vaults unavailable:", err instanceof Error ? err.message : err);
   }
 
-  // Aave markets as yield opportunities
-  try {
-    const result = await callMcpTool(AAVE_MCP_URL, "aave", "get_markets", {}, 10000);
-    const markets = parseResult<{
-      chainId: number;
-      reserves?: {
-        symbol: string;
-        supplyAPY?: number;
-        borrowAPY?: number;
-        totalSupply?: number;
-        ltv?: number;
-      }[];
-    }[]>(result);
-
-    if (markets) {
-      for (const m of markets) {
-        for (const r of m.reserves ?? []) {
-          const apy = (r.supplyAPY ?? 0) * 100;
-          if (opts?.minApy && apy < opts.minApy) continue;
-          opportunities.push({
-            protocol: "Aave",
-            chainId: m.chainId,
-            asset: r.symbol,
-            type: "lending",
-            apy,
-            tvlUsd: r.totalSupply ?? 0,
-          });
-        }
-      }
+  // Aave v3 markets as yield opportunities (only reserves that accept deposits now).
+  if (opts?.includeAave === false) return opportunities.sort((a, b) => b.apy - a.apy);
+  const chainIds = opts?.chainIds?.length ? opts.chainIds : PORTFOLIO_CHAINS;
+  const reservesPerChain = await Promise.all(chainIds.map((id) => fetchAaveReserves(id)));
+  const assetFilter = opts?.asset?.toUpperCase();
+  for (const reserves of reservesPerChain) {
+    for (const r of reserves) {
+      if (!isAaveReserveExecutable(r) || !isAaveReserveSuppliable(r) || r.supplyApyPct <= 0) continue;
+      if (opts?.minApy && r.supplyApyPct < opts.minApy) continue;
+      if (assetFilter && r.symbol.toUpperCase() !== assetFilter) continue;
+      opportunities.push({
+        protocol: "Aave v3",
+        chainId: r.chainId,
+        asset: r.symbol,
+        type: "lending",
+        apy: r.supplyApyPct,
+        tvlUsd: r.totalSuppliedUsd,
+      });
     }
-  } catch (err) {
-    console.warn("[haiku] Aave markets fetch failed:", err);
   }
 
   return opportunities.sort((a, b) => b.apy - a.apy);
@@ -257,14 +257,14 @@ export async function resolveToken(symbol: string, chainId: number): Promise<Tok
       chain: String(chainId),
       token: symbol,
     }, 8000);
-    const token = parseResult<{
+    const token = parseMcpToolResult<{
       address: string;
       symbol: string;
       decimals: number;
       name: string;
       priceUSD?: string;
     }>(result);
-    if (!token) return null;
+    if (!token?.address) return null;
     return {
       address: token.address as Address,
       symbol: token.symbol,
@@ -284,6 +284,7 @@ export async function resolveToken(symbol: string, chainId: number): Promise<Tok
 export interface TradeRecord {
   txHash: string;
   chainId: number;
+  /** Unix time in milliseconds. */
   timestamp: number;
   action: string;
   protocol: string;
@@ -294,9 +295,26 @@ export interface TradeRecord {
   valueUsd: number;
 }
 
+interface RawActivityItem {
+  __typename?: string;
+  txHash: string;
+  timestamp: string;
+  amount?: { value: string; usd: string };
+  reserve?: { symbol: string; token: string };
+  enabled?: boolean;
+}
+
+/** "UserSupplyTransaction" → "supply"; collateral toggles get an explicit label. */
+function activityAction(item: RawActivityItem): string {
+  const name = item.__typename ?? "";
+  if (name === "UserUsageAsCollateralTransaction") return item.enabled ? "enable collateral" : "disable collateral";
+  const m = name.match(/^User(\w+?)Transaction$/);
+  return m ? m[1].toLowerCase() : name || "activity";
+}
+
 /**
- * Fetch trade history via Aave MCP user_activity.
- * Other protocols' history not available without Haiku.
+ * Fetch Aave v3 activity via Aave MCP get_user_activity. Aave reads v3
+ * history one chain at a time — without `chainId` this is Ethereum.
  */
 export async function fetchTradeHistory(
   userAddress: Address,
@@ -306,28 +324,23 @@ export async function fetchTradeHistory(
     const args: Record<string, unknown> = { user: userAddress };
     if (opts?.chainId) args.chainId = opts.chainId;
     const result = await callMcpTool(AAVE_MCP_URL, "aave", "get_user_activity", args, 10000);
-    const activities = parseResult<{
-      txHash: string;
-      chainId: number;
-      timestamp: number;
-      action: string;
-      reserve?: string;
-      amount?: string;
-      amountUSD?: number;
-    }[]>(result);
+    const v3 = parseMcpToolResult<{ data?: { v3?: { chainsCovered?: number[]; items?: RawActivityItem[] } } }>(result)?.data?.v3;
+    if (!v3?.items) return [];
+    const chainId = opts?.chainId ?? v3.chainsCovered?.[0] ?? 1;
 
-    if (!activities) return [];
-
-    return activities.slice(0, opts?.limit ?? 50).map((a) => ({
-      txHash: a.txHash,
-      chainId: a.chainId,
-      timestamp: a.timestamp,
-      action: a.action,
-      protocol: "Aave",
-      tokenIn: a.reserve ?? "?",
-      amountIn: a.amount ?? "0",
-      valueUsd: a.amountUSD ?? 0,
-    }));
+    return v3.items
+      .map((a) => ({
+        txHash: a.txHash,
+        chainId,
+        timestamp: Date.parse(a.timestamp) || 0,
+        action: activityAction(a),
+        protocol: "Aave v3",
+        tokenIn: a.reserve?.symbol ?? "?",
+        amountIn: a.amount?.value ?? "0",
+        valueUsd: parseFloat(a.amount?.usd ?? "0") || 0,
+      }))
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, opts?.limit ?? 50);
   } catch (err) {
     console.warn("[haiku] fetchTradeHistory failed:", err);
     return [];
@@ -342,21 +355,3 @@ const CHAIN_NAMES: Record<number, string> = {
   1088: "Metis", 5000: "Mantle", 8453: "Base", 42161: "Arbitrum",
   42220: "Celo", 43114: "Avalanche", 59144: "Linea", 534352: "Scroll",
 };
-
-function parseResult<T>(content: unknown): T | null {
-  if (!content) return null;
-  if (Array.isArray(content)) {
-    for (const block of content) {
-      if (block && typeof block === "object" && "type" in block) {
-        if (block.type === "text" && "text" in block) {
-          try { return JSON.parse(block.text as string) as T; } catch { return null; }
-        }
-      }
-    }
-    return null;
-  }
-  if (typeof content === "string") {
-    try { return JSON.parse(content) as T; } catch { return null; }
-  }
-  return content as T;
-}
