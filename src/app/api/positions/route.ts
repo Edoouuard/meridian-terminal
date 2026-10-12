@@ -146,12 +146,13 @@ export async function GET(request: Request) {
     // Convert Aave MCP positions to IndexedLendingPosition format for backward compat
     const aaveIndexed: IndexedLendingPosition[] = aavePositions.flatMap((p) => {
       const positions: IndexedLendingPosition[] = [];
-      if (p.totalCollateralUsd > 0 || p.totalDebtUsd > 0) {
+      const supplyUsd = p.supplies.reduce((sum, s) => sum + s.balanceUsd, 0);
+      if (supplyUsd > 0 || p.totalDebtUsd > 0) {
         positions.push({
           protocol: `Aave v3`,
           venue: p.chain ?? "MCP",
           collateralUsd: p.totalCollateralUsd,
-          supplyUsd: p.totalCollateralUsd,
+          supplyUsd,
           borrowUsd: p.totalDebtUsd,
         });
       }

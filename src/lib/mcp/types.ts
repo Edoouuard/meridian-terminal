@@ -40,6 +40,8 @@ export interface McpProviderStatus {
   healthy: boolean;
   latencyMs: number | null;
   lastChecked: number;
+  /** False when the provider has no endpoint configured (shown as "not configured", not "offline"). */
+  configured?: boolean;
 }
 
 // ─── Token & asset types ────────────────────────────────────────────

@@ -71,8 +71,62 @@ export interface LifiQuote {
   estimate?: {
     toAmount: string;
     executionDuration: number;
+    /** Spender that needs an ERC-20 allowance before the tx (ERC-20 input only). */
+    approvalAddress?: string;
   };
   tool?: string;
+}
+
+// ─── Response normalization ─────────────────────────────────────────
+
+type Rec = Record<string, unknown>;
+const isRec = (v: unknown): v is Rec => typeof v === "object" && v !== null && !Array.isArray(v);
+
+/** MCP servers sometimes wrap payloads as { data } / { result }; unwrap one level. */
+function unwrap(v: unknown): unknown {
+  if (isRec(v)) {
+    if ("data" in v && (isRec(v.data) || Array.isArray(v.data))) return v.data;
+    if ("result" in v && (isRec(v.result) || Array.isArray(v.result))) return v.result;
+  }
+  return v;
+}
+
+/** get-chains may return an array or LI.FI's REST shape { chains: [...] }. Pure — exported for tests. */
+export function normalizeLifiChains(payload: unknown): LifiChain[] {
+  const raw = unwrap(payload);
+  const list = Array.isArray(raw) ? raw : isRec(raw) && Array.isArray(raw.chains) ? raw.chains : [];
+  return list.filter((c): c is LifiChain => isRec(c) && typeof c.id === "number");
+}
+
+/** get-quote returns LI.FI's REST quote object (possibly wrapped). Pure — exported for tests. */
+export function normalizeLifiQuote(payload: unknown): LifiQuote | null {
+  const raw = unwrap(payload);
+  if (!isRec(raw)) return null;
+  const quote = isRec(raw.quote) ? raw.quote : raw;
+  const txr = isRec(quote.transactionRequest) ? quote.transactionRequest : null;
+  const est = isRec(quote.estimate) ? quote.estimate : null;
+  const action = isRec(quote.action) ? quote.action : {};
+  const transactionRequest: LifiTxRequest | null =
+    txr && typeof txr.to === "string" && typeof txr.data === "string"
+      ? {
+          to: txr.to,
+          data: txr.data,
+          value: typeof txr.value === "string" ? txr.value : undefined,
+          chainId: typeof txr.chainId === "number" ? txr.chainId : Number(action.fromChainId),
+          gasLimit: typeof txr.gasLimit === "string" ? txr.gasLimit : undefined,
+        }
+      : null;
+  return {
+    transactionRequest,
+    estimate: est
+      ? {
+          toAmount: String(est.toAmount ?? ""),
+          executionDuration: Number(est.executionDuration ?? 0),
+          approvalAddress: typeof est.approvalAddress === "string" ? est.approvalAddress : undefined,
+        }
+      : undefined,
+    tool: typeof quote.tool === "string" ? quote.tool : undefined,
+  };
 }
 
 // ─── Read operations ─────────────────────────────────────────────────
@@ -80,8 +134,7 @@ export interface LifiQuote {
 /** All chains LI.FI currently routes across. Returns [] on failure. */
 export async function fetchLifiChains(): Promise<LifiChain[]> {
   try {
-    const result = await callLifiTool("get-chains", {});
-    return parseMcpToolResult<LifiChain[]>(result) ?? [];
+    return normalizeLifiChains(parseMcpToolResult<unknown>(await callLifiTool("get-chains", {})));
   } catch (err) {
     console.warn("[mcp/lifi] fetchLifiChains failed:", err);
     return [];
@@ -91,8 +144,8 @@ export async function fetchLifiChains(): Promise<LifiChain[]> {
 /** Token metadata (address/decimals/price) for a symbol on a chain. Returns null on failure. */
 export async function fetchLifiToken(chain: string | number, token: string): Promise<LifiToken | null> {
   try {
-    const result = await callLifiTool("get-token", { chain, token });
-    return parseMcpToolResult<LifiToken>(result);
+    const result = await callLifiTool("get-token", { chain: String(chain), token });
+    return unwrap(parseMcpToolResult<unknown>(result)) as LifiToken | null;
   } catch (err) {
     console.warn("[mcp/lifi] fetchLifiToken failed:", err);
     return null;
@@ -106,7 +159,7 @@ export async function getLifiStatus(
 ): Promise<unknown | null> {
   try {
     const result = await callLifiTool("get-status", { txHash, ...opts });
-    return parseMcpToolResult<unknown>(result);
+    return unwrap(parseMcpToolResult<unknown>(result));
   } catch (err) {
     console.warn("[mcp/lifi] getLifiStatus failed:", err);
     return null;
@@ -122,9 +175,9 @@ export async function getLifiAllowance(input: {
 }): Promise<string | null> {
   try {
     const result = await callLifiTool("get-allowance", input);
-    const parsed = parseMcpToolResult<{ allowance?: string } | string>(result);
-    if (typeof parsed === "string") return parsed;
-    return parsed?.allowance ?? null;
+    const parsed = unwrap(parseMcpToolResult<unknown>(result));
+    if (typeof parsed === "string" || typeof parsed === "number") return String(parsed);
+    return isRec(parsed) && parsed.allowance !== undefined ? String(parsed.allowance) : null;
   } catch (err) {
     console.warn("[mcp/lifi] getLifiAllowance failed:", err);
     return null;
@@ -133,24 +186,44 @@ export async function getLifiAllowance(input: {
 
 // ─── Unsigned transaction building ───────────────────────────────────
 
+const LIFI_REST_URL = process.env.LIFI_REST_URL || "https://li.quest/v1";
+
+async function getLifiQuoteViaRest(params: Record<string, string>): Promise<LifiQuote | null> {
+  const res = await fetch(`${LIFI_REST_URL}/quote?${new URLSearchParams(params)}`, {
+    signal: AbortSignal.timeout(15_000),
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`LI.FI REST /quote → HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  return normalizeLifiQuote(await res.json());
+}
+
 /**
  * The best single route + an unsigned transactionRequest for a swap/bridge.
- * Returns null on failure — the router (mcp/router.ts) falls back to
- * deBridge when this does.
+ * Tries the MCP server, then LI.FI's REST API (same parameters). Returns null
+ * on failure — the router (mcp/router.ts) falls back to deBridge when this does.
  */
 export async function getLifiQuote(input: LifiQuoteInput): Promise<LifiQuote | null> {
+  const params: Record<string, string> = {
+    fromChain: String(input.fromChain),
+    toChain: String(input.toChain),
+    fromToken: input.fromToken,
+    toToken: input.toToken,
+    fromAddress: input.fromAddress,
+    fromAmount: input.fromAmount,
+    ...(input.toAddress ? { toAddress: input.toAddress } : {}),
+    ...(input.slippage !== undefined ? { slippage: String(input.slippage) } : {}),
+  };
+
   try {
-    const result = await callLifiTool("get-quote", {
-      fromChain: input.fromChain,
-      toChain: input.toChain,
-      fromToken: input.fromToken,
-      toToken: input.toToken,
-      fromAddress: input.fromAddress,
-      fromAmount: input.fromAmount,
-      ...(input.toAddress ? { toAddress: input.toAddress } : {}),
-      ...(input.slippage !== undefined ? { slippage: input.slippage } : {}),
-    });
-    return parseMcpToolResult<LifiQuote>(result);
+    const quote = normalizeLifiQuote(parseMcpToolResult<unknown>(await callLifiTool("get-quote", params)));
+    if (quote?.transactionRequest) return quote;
+    console.warn("[mcp/lifi] get-quote returned no transactionRequest, trying REST");
+  } catch (err) {
+    console.warn("[mcp/lifi] get-quote via MCP failed, trying REST:", err);
+  }
+
+  try {
+    return await getLifiQuoteViaRest(params);
   } catch (err) {
     console.warn("[mcp/lifi] getLifiQuote failed:", err);
     return null;

@@ -46,7 +46,11 @@ export function McpStatusPanel() {
                     width: 7,
                     height: 7,
                     borderRadius: "50%",
-                    backgroundColor: p.healthy ? "var(--color-good)" : "var(--color-serious)",
+                    backgroundColor: p.healthy
+                      ? "var(--color-good)"
+                      : p.configured === false
+                        ? "var(--color-neutral-400)"
+                        : "var(--color-serious)",
                     display: "inline-block",
                     flexShrink: 0,
                   }}
@@ -56,7 +60,9 @@ export function McpStatusPanel() {
               <span style={{ color: "var(--color-neutral-500)" }}>
                 {p.healthy
                   ? `${p.latencyMs}ms`
-                  : "offline"}
+                  : p.configured === false
+                    ? "not configured"
+                    : "offline"}
               </span>
             </div>
           ))}
