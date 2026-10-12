@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAccount } from "wagmi";
 import type { Order } from "@/lib/execution";
 import { CHAIN_LABEL } from "@/lib/onchain";
@@ -9,7 +9,8 @@ import { explorerUrlFor } from "@/hooks/useExecute";
 import { useExecuteOrder } from "@/hooks/useExecuteOrder";
 import { useLivePortfolio } from "@/hooks/useLivePortfolio";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { assessHealthFactorGuardrail } from "@/lib/safety";
+import { guardrailFromSimulation } from "@/lib/safety";
+import { useHealthPreview } from "@/hooks/useHealthPreview";
 import type { OrderFlowState } from "@/lib/executionPlan";
 
 const STATUS_LABEL: Partial<Record<OrderFlowState, string>> = {
@@ -34,8 +35,17 @@ const STATUS_LABEL: Partial<Record<OrderFlowState, string>> = {
  * `buildExecution` supports (Aave/Spark/Compound/Morpho/Maker/Lido/WETH/
  * Rocket Pool/Frax/Uniswap/deBridge/LI.FI/transfers).
  */
-export function ValidatedExecuteButton({ order, label }: { order: Order; label: string }) {
-  const { isConnected } = useAccount();
+export function ValidatedExecuteButton({
+  order,
+  label,
+  onConfirmed,
+}: {
+  order: Order;
+  label: string;
+  /** Called once with the main tx hash after it confirms on-chain. */
+  onConfirmed?: (hash: `0x${string}`) => void;
+}) {
+  const { isConnected, address } = useAccount();
   const portfolio = useLivePortfolio();
   const { state, message, builtPlan, approvalHash, mainHash, needsApproval, prepare, confirm, reset } = useExecuteOrder(() => {
     void portfolio.refetchPortfolio();
@@ -43,15 +53,38 @@ export function ValidatedExecuteButton({ order, label }: { order: Order; label: 
   const [dialogOpen, setDialogOpen] = useState(false);
 
   useEffect(() => {
+    if (state === "CONFIRMED" && mainHash) onConfirmed?.(mainHash);
+  }, [state, mainHash, onConfirmed]);
+
+  useEffect(() => {
     if (state === "READY_FOR_SIGNATURE") setDialogOpen(true);
     if (state === "DRAFT") setDialogOpen(false);
   }, [state]);
 
-  // Health-factor guardrail for REAL-money Aave/Spark/Compound borrow/
-  // withdraw. No live health factor is available at signing time in this
-  // harness, so the helper honestly reports computable=false and requires
-  // an explicit extra confirmation for any HF-lowering action.
-  const guardrail = assessHealthFactorGuardrail({ orderType: order.type });
+  // Health-factor guardrail for REAL-money borrow/withdraw. On Aave the
+  // resulting health factor is simulated by the Aave MCP (preview_action) as
+  // soon as the confirmation opens; the guardrail then shows before → after
+  // and blocks anything below the floor. Other venues (and an unreachable
+  // MCP) fall back to an explicit extra confirmation — never an invented HF.
+  const { preview, isLoading: previewLoading, simulate } = useHealthPreview();
+  const simulatesHf = order.protocol === "aave" && (order.type === "borrow" || order.type === "withdraw");
+  const confirmOpen = dialogOpen && state === "READY_FOR_SIGNATURE";
+
+  useEffect(() => {
+    if (!confirmOpen || !simulatesHf || !address || !order.token || typeof order.amount !== "bigint") return;
+    void simulate({
+      address,
+      chainId: order.chainId,
+      action: order.type as "borrow" | "withdraw",
+      asset: order.token,
+      amount: formatBaseUnits(order.amount, order.decimals ?? 18),
+    });
+  }, [confirmOpen, simulatesHf, address, order.token, order.amount, order.decimals, order.chainId, order.type, simulate]);
+
+  const guardrail = useMemo(
+    () => guardrailFromSimulation(order.type, simulatesHf ? preview : null),
+    [order.type, simulatesHf, preview],
+  );
 
   const amountLabel =
     typeof order.amount === "bigint" ? formatBaseUnits(order.amount, order.decimals ?? 18) : String(order.amount);
@@ -125,7 +158,7 @@ export function ValidatedExecuteButton({ order, label }: { order: Order; label: 
         {label}
       </button>
       <ConfirmDialog
-        open={dialogOpen && state === "READY_FOR_SIGNATURE"}
+        open={confirmOpen}
         title="Confirm transaction"
         body={
           <div>
@@ -138,11 +171,17 @@ export function ValidatedExecuteButton({ order, label }: { order: Order; label: 
             )}
             {needsApproval === false && <>Your existing allowance already covers this — one signature is needed.</>}{" "}
             {builtPlan?.riskNote}
+            {simulatesHf && previewLoading && (
+              <div style={{ marginTop: 6, fontSize: 12, color: "var(--color-neutral-500)" }}>
+                Simulating your Aave health factor…
+              </div>
+            )}
           </div>
         }
         confirmLabel={needsApproval ? "Approve & Confirm" : "Confirm"}
         warning="This moves real funds from your wallet."
         guardrail={guardrail}
+        confirmDisabled={simulatesHf && previewLoading}
         onConfirm={() => {
           setDialogOpen(false);
           void confirm();
