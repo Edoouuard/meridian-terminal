@@ -24,6 +24,7 @@ export function ConfirmDialog({
   cancelLabel = "Cancel",
   warning,
   guardrail,
+  confirmDisabled = false,
   onConfirm,
   onCancel,
 }: {
@@ -34,6 +35,8 @@ export function ConfirmDialog({
   cancelLabel?: string;
   warning?: string;
   guardrail?: HealthFactorEstimateResult | null;
+  /** Disable the confirm button (e.g. while a safety check is still running). */
+  confirmDisabled?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -110,7 +113,7 @@ export function ConfirmDialog({
           <button className="btn btn-secondary" onClick={onCancel}>
             {cancelLabel}
           </button>
-          <button className="btn btn-primary" onClick={onConfirm} disabled={mustRefuse}>
+          <button className="btn btn-primary" onClick={onConfirm} disabled={mustRefuse || confirmDisabled}>
             {needsExtraConfirm && !mustRefuse ? "I understand — Sign anyway" : confirmLabel}
           </button>
         </div>

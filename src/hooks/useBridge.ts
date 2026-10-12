@@ -1,10 +1,9 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { useAccount, usePublicClient, useSendTransaction, useSwitchChain } from "wagmi";
-import { useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useState } from "react";
+import { useAccount } from "wagmi";
 import type { Address } from "viem";
-import { CHAIN_LABEL } from "@/lib/onchain";
+import type { Order } from "@/lib/execution";
 
 // ─── Chain name → chain id mapping ──────────────────────────────────
 
@@ -31,22 +30,14 @@ export function chainIdFromName(name: string): number | undefined {
   return CHAIN_NAME_TO_ID[name.toLowerCase().trim()];
 }
 
-// ─── Native token address (deBridge convention) ─────────────────────
+// ─── Native USDC per chain (all 6 decimals on these chains) ─────────
 
-/** deBridge uses the zero address for native gas tokens. */
-const NATIVE_TOKEN = "0x0000000000000000000000000000000000000000" as Address;
-
-// ─── Common stablecoin addresses per chain (for bridge destinations) ─
-
-const USDC_BY_CHAIN: Record<number, Address> = {
+export const USDC_BY_CHAIN: Record<number, Address> = {
   1: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
   10: "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",
-  56: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
   137: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",
   8453: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
   42161: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",
-  43114: "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",
-  534352: "0x06eFdBFf2a14a7c8E15944D1F4A48F9F95F663A4",
 };
 
 // ─── Types ──────────────────────────────────────────────────────────
@@ -55,243 +46,198 @@ export type BridgeStatus =
   | "idle"
   | "quoting"
   | "quoted"
-  | "switching_chain"
-  | "approving"
-  | "signing"
-  | "waiting_receipt"
-  | "bridging"
-  | "confirmed"
+  | "bridging" // source tx confirmed, waiting for delivery on the destination chain
+  | "delivered"
+  | "failed"
   | "error";
 
 export interface BridgeQuote {
-  provider: string;
-  fromToken: { symbol: string; chainId: number };
-  toToken: { symbol: string; chainId: number };
-  fromAmount: string;
+  provider: "debridge" | "lifi";
+  fromChainId: number;
+  toChainId: number;
+  /** Destination amount estimate, base units. */
   toAmount: string;
-  estimatedFeesUsd: number;
   estimatedTimeSeconds: number;
-  steps: { type: string; provider: string; fromToken: string; toToken: string }[];
   reason: string;
 }
 
 export interface BridgeState {
   status: BridgeStatus;
   quote: BridgeQuote | null;
+  /**
+   * The quoted route as an Order for the validated execution flow
+   * (`ValidatedExecuteButton`): allowlisted entrypoint check, exact-amount
+   * approval read live on-chain, simulation, then signature. This hook never
+   * signs anything itself.
+   */
+  order: Order | null;
   srcTxHash: `0x${string}` | null;
   orderId: string | null;
+  /** Raw destination status from the provider (e.g. "Created", "Fulfilled", "PENDING", "DONE"). */
+  deliveryStatus: string | null;
   error: string | null;
 }
 
+export interface BridgeQuoteParams {
+  fromChainId: number;
+  toChainId: number;
+  fromToken: Address;
+  toToken: Address;
+  /** Base units. */
+  fromAmount: string;
+  symbol: string;
+  decimals: number;
+}
+
 export interface UseBridgeResult extends BridgeState {
-  /** Fetch a bridge quote from the routing layer. */
-  fetchQuote: (params: {
-    fromChainId: number;
-    toChainId: number;
-    fromToken: Address;
-    toToken: Address;
-    fromAmount: string;
-  }) => Promise<void>;
-  /** Execute the quoted bridge (sign + send the unsigned tx). */
-  executeBridge: () => Promise<void>;
-  /** Poll the cross-chain order status. */
-  checkStatus: () => Promise<{ status: string; dstTxHash?: string } | null>;
-  /** Reset to idle. */
+  fetchQuote: (params: BridgeQuoteParams) => Promise<void>;
+  /** Call once the source-chain tx is confirmed: starts delivery tracking. */
+  onSourceConfirmed: (hash: `0x${string}`) => void;
   reset: () => void;
 }
 
+const POLL_MS = 20_000;
+const DELIVERED = new Set(["Fulfilled", "SentUnlock", "ClaimedUnlock", "DONE"]);
+const FAILED = new Set(["Cancelled", "FAILED"]);
+
+interface ApiRouteQuote {
+  provider: "debridge" | "lifi";
+  tx: { to: string; data: string; value?: string; chainId: number };
+  toAmountEstimate?: string;
+  etaSeconds?: number;
+  orderId?: string;
+}
+
+const INITIAL: BridgeState = {
+  status: "idle",
+  quote: null,
+  order: null,
+  srcTxHash: null,
+  orderId: null,
+  deliveryStatus: null,
+  error: null,
+};
+
 /**
- * Hook for cross-chain bridge execution via deBridge/LI.FI MCP routing.
+ * Cross-chain bridge via Meridian's routing layer (deBridge + LI.FI compared
+ * server-side by /api/bridge).
  *
- * Flow: fetchQuote → user reviews → executeBridge → track status
- *
- * The hook fetches quotes from /api/bridge (server-side MCP calls),
- * then signs the pre-built unsigned tx client-side via wagmi.
+ * Flow: fetchQuote → render `order` with ValidatedExecuteButton (which does
+ * every safety check and the signing) → onSourceConfirmed(hash) → this hook
+ * polls /api/bridge?action=status until the funds land on the destination.
  */
 export function useBridge(): UseBridgeResult {
-  const { address, chain } = useAccount();
-  const { sendTransactionAsync } = useSendTransaction();
-  const { switchChainAsync } = useSwitchChain();
-  const publicClient = usePublicClient();
-  const queryClient = useQueryClient();
-
-  const [state, setState] = useState<BridgeState>({
-    status: "idle",
-    quote: null,
-    srcTxHash: null,
-    orderId: null,
-    error: null,
-  });
-
-  // Store the full execution plan from the API (not exposed to the component)
-  const [executionData, setExecutionData] = useState<{
-    request: Record<string, unknown>;
-    transactions: { to: string; data: string; value: string; chainId: number }[];
-    approvals: { to: string; data: string; value: string; chainId: number }[];
-  } | null>(null);
+  const { address } = useAccount();
+  const [state, setState] = useState<BridgeState>(INITIAL);
 
   const fetchQuote = useCallback(
-    async (params: {
-      fromChainId: number;
-      toChainId: number;
-      fromToken: Address;
-      toToken: Address;
-      fromAmount: string;
-    }) => {
+    async (params: BridgeQuoteParams) => {
       if (!address) {
-        setState((s) => ({ ...s, status: "error", error: "Wallet not connected" }));
+        setState({ ...INITIAL, status: "error", error: "Connect a wallet first." });
         return;
       }
-
-      setState({ status: "quoting", quote: null, srcTxHash: null, orderId: null, error: null });
+      setState({ ...INITIAL, status: "quoting" });
 
       try {
         const res = await fetch("/api/bridge", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...params, userAddress: address }),
+          body: JSON.stringify({
+            fromChainId: params.fromChainId,
+            toChainId: params.toChainId,
+            fromToken: params.fromToken,
+            toToken: params.toToken,
+            fromAmount: params.fromAmount,
+            userAddress: address,
+          }),
         });
-
+        const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          const err = await res.json().catch(() => ({ error: "Bridge quote failed" }));
-          setState((s) => ({ ...s, status: "error", error: err.error ?? "No route available" }));
+          setState({ ...INITIAL, status: "error", error: data.error ?? "No route available." });
           return;
         }
 
-        const data = await res.json();
-        const best = data.comparison?.best;
-        if (!best) {
-          setState((s) => ({ ...s, status: "error", error: "No route returned" }));
+        const best = data.best as ApiRouteQuote | undefined;
+        if (!best?.tx) {
+          setState({ ...INITIAL, status: "error", error: "No route returned." });
           return;
         }
 
-        const quote: BridgeQuote = {
-          provider: best.provider,
-          fromToken: best.fromToken,
-          toToken: best.toToken,
-          fromAmount: best.fromAmount,
-          toAmount: best.toAmount,
-          estimatedFeesUsd: best.estimatedFeesUsd,
-          estimatedTimeSeconds: best.estimatedTimeSeconds,
-          steps: best.steps ?? [],
-          reason: data.comparison.reason,
+        const order: Order = {
+          type: "swap",
+          protocol: best.provider,
+          token: params.fromToken,
+          symbol: params.symbol,
+          amount: BigInt(params.fromAmount),
+          chainId: params.fromChainId,
+          decimals: params.decimals,
+          routerTx: {
+            to: best.tx.to as Address,
+            data: best.tx.data as `0x${string}`,
+            value: best.tx.value !== undefined ? BigInt(best.tx.value) : undefined,
+          },
         };
 
-        setExecutionData({
-          request: params,
-          transactions: data.execution?.transactions ?? [],
-          approvals: data.execution?.approvals ?? [],
+        setState({
+          ...INITIAL,
+          status: "quoted",
+          order,
+          orderId: best.orderId ?? null,
+          quote: {
+            provider: best.provider,
+            fromChainId: params.fromChainId,
+            toChainId: params.toChainId,
+            toAmount: best.toAmountEstimate ?? "0",
+            estimatedTimeSeconds: best.etaSeconds ?? 120,
+            reason: data.comparison?.reason ?? "",
+          },
         });
-
-        // Extract orderId from routeData if present
-        const orderId = best.routeData?.orderId ?? null;
-
-        setState({ status: "quoted", quote, srcTxHash: null, orderId, error: null });
       } catch (err) {
-        setState((s) => ({
-          ...s,
-          status: "error",
-          error: err instanceof Error ? err.message : "Quote failed",
-        }));
+        setState({ ...INITIAL, status: "error", error: err instanceof Error ? err.message : "Quote failed." });
       }
     },
     [address],
   );
 
-  const executeBridge = useCallback(async () => {
-    if (!executionData || !address) {
-      setState((s) => ({ ...s, status: "error", error: "No quote or wallet" }));
-      return;
-    }
-
-    const { transactions, approvals } = executionData;
-    if (transactions.length === 0) {
-      setState((s) => ({ ...s, status: "error", error: "No transactions to execute" }));
-      return;
-    }
-
-    const targetChainId = transactions[0].chainId;
-
-    try {
-      // Switch chain if needed
-      if (chain?.id !== targetChainId) {
-        setState((s) => ({ ...s, status: "switching_chain" }));
-        await switchChainAsync({ chainId: targetChainId as Parameters<typeof switchChainAsync>[0]["chainId"] });
-      }
-
-      // Execute approval txs first
-      if (approvals.length > 0) {
-        setState((s) => ({ ...s, status: "approving" }));
-        for (const approval of approvals) {
-          const approveHash = await sendTransactionAsync({
-            to: approval.to as Address,
-            data: approval.data as `0x${string}`,
-            value: BigInt(approval.value || "0"),
-          });
-          if (publicClient) {
-            const receipt = await publicClient.waitForTransactionReceipt({ hash: approveHash });
-            if (receipt.status === "reverted") {
-              setState((s) => ({ ...s, status: "error", error: "Approval transaction reverted" }));
-              return;
-            }
-          }
-        }
-      }
-
-      // Execute the main bridge transaction
-      setState((s) => ({ ...s, status: "signing" }));
-      const mainTx = transactions[0];
-      const hash = await sendTransactionAsync({
-        to: mainTx.to as Address,
-        data: mainTx.data as `0x${string}`,
-        value: BigInt(mainTx.value || "0"),
-      });
-
-      setState((s) => ({ ...s, status: "waiting_receipt", srcTxHash: hash }));
-
-      if (publicClient) {
-        const receipt = await publicClient.waitForTransactionReceipt({ hash });
-        if (receipt.status === "reverted") {
-          setState((s) => ({ ...s, status: "error", srcTxHash: hash, error: "Bridge transaction reverted on-chain" }));
-          return;
-        }
-      }
-
-      setState((s) => ({ ...s, status: "bridging", srcTxHash: hash }));
-
-      // Invalidate portfolio data
-      queryClient.invalidateQueries({ queryKey: ["readContracts"] });
-      queryClient.invalidateQueries({ queryKey: ["balance"] });
-      queryClient.invalidateQueries({ queryKey: ["readContract"] });
-
-      // After a brief delay, mark as confirmed (cross-chain delivery tracked separately)
-      setState((s) => ({ ...s, status: "confirmed" }));
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "Bridge execution failed";
-      // User rejected
-      if (msg.includes("rejected") || msg.includes("denied")) {
-        setState((s) => ({ ...s, status: "quoted", error: null }));
-        return;
-      }
-      setState((s) => ({ ...s, status: "error", error: msg }));
-    }
-  }, [executionData, address, chain, switchChainAsync, sendTransactionAsync, publicClient, queryClient]);
-
-  const checkStatus = useCallback(async () => {
-    if (!state.orderId) return null;
-    try {
-      const res = await fetch(`/api/bridge?action=status&orderId=${state.orderId}`);
-      if (!res.ok) return null;
-      return await res.json();
-    } catch {
-      return null;
-    }
-  }, [state.orderId]);
-
-  const reset = useCallback(() => {
-    setState({ status: "idle", quote: null, srcTxHash: null, orderId: null, error: null });
-    setExecutionData(null);
+  const onSourceConfirmed = useCallback((hash: `0x${string}`) => {
+    setState((s) => (s.srcTxHash === hash ? s : { ...s, status: "bridging", srcTxHash: hash }));
   }, []);
 
-  return { ...state, fetchQuote, executeBridge, checkStatus, reset };
+  // Poll destination delivery while bridging.
+  useEffect(() => {
+    if (state.status !== "bridging" || !state.quote || !state.srcTxHash) return;
+    const { provider, fromChainId, toChainId } = state.quote;
+    const url =
+      provider === "debridge" && state.orderId
+        ? `/api/bridge?action=status&provider=debridge&orderId=${state.orderId}`
+        : `/api/bridge?action=status&provider=lifi&txHash=${state.srcTxHash}&fromChainId=${fromChainId}&toChainId=${toChainId}`;
+
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch(url);
+        if (!res.ok || cancelled) return; // not indexed yet — keep polling
+        const data = (await res.json()) as { status?: string };
+        const status = data.status ?? null;
+        if (cancelled || !status) return;
+        setState((s) => ({
+          ...s,
+          deliveryStatus: status,
+          status: DELIVERED.has(status) ? "delivered" : FAILED.has(status) ? "failed" : s.status,
+        }));
+      } catch {
+        // transient — keep polling
+      }
+    };
+    void poll();
+    const timer = setInterval(poll, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [state.status, state.quote, state.srcTxHash, state.orderId]);
+
+  const reset = useCallback(() => setState(INITIAL), []);
+
+  return { ...state, fetchQuote, onSourceConfirmed, reset };
 }

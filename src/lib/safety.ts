@@ -179,3 +179,52 @@ export function assessHealthFactorGuardrail(input: HealthFactorEstimateInput): H
     needsExplicitConfirmation: false,
   };
 }
+/** Health factor before/after simulated by the Aave MCP (`/api/preview-action`). */
+export interface SimulatedHealthFactor {
+  healthFactorBefore: number | null;
+  healthFactorAfter: number | null;
+}
+
+/** Aave reports "no debt" as an effectively infinite health factor (≈1.15e59) or null. */
+const NO_DEBT_HF = 1e9;
+
+/**
+ * Turn an Aave-simulated health factor into the guardrail ConfirmDialog
+ * renders. Pure. With no simulation (null — the MCP was unreachable) it falls
+ * back to `assessHealthFactorGuardrail`, which demands an explicit extra
+ * confirmation instead of inventing a number.
+ */
+export function guardrailFromSimulation(
+  orderType: string,
+  sim: SimulatedHealthFactor | null,
+): HealthFactorEstimateResult {
+  const base = assessHealthFactorGuardrail({ orderType });
+  if (!base.lowersHealthFactor || !sim) return base;
+
+  const after = sim.healthFactorAfter;
+  if (after === null || after >= NO_DEBT_HF) {
+    // No debt after the action: nothing to liquidate.
+    return {
+      lowersHealthFactor: true,
+      computable: true,
+      estimatedHf: null,
+      refused: false,
+      reason: "Simulated by Aave: no debt after this action, so it cannot trigger a liquidation.",
+      needsExplicitConfirmation: false,
+    };
+  }
+
+  const before = sim.healthFactorBefore;
+  const beforeLabel = before === null || before >= NO_DEBT_HF ? "∞" : before.toFixed(2);
+  const refused = after < MIN_HEALTH_FACTOR;
+  return {
+    lowersHealthFactor: true,
+    computable: true,
+    estimatedHf: after,
+    refused,
+    reason: refused
+      ? `Simulated by Aave: health factor ${beforeLabel} → ${after.toFixed(2)}, below the ${MIN_HEALTH_FACTOR.toFixed(2)} floor. Reduce the amount.`
+      : `Simulated by Aave: health factor ${beforeLabel} → ${after.toFixed(2)}.`,
+    needsExplicitConfirmation: false,
+  };
+}

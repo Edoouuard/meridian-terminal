@@ -15,6 +15,7 @@ import { LidoWithdrawalsPanel } from "@/components/LidoWithdrawalsPanel";
 import { VaultRiskPanel } from "@/components/VaultRiskPanel";
 import { SolanaPanel } from "@/components/SolanaPanel";
 import { McpStatusPanel } from "@/components/McpStatusPanel";
+import { BridgePanel } from "@/components/BridgePanel";
 import { LiveAsset, LivePortfolio, useLivePortfolio } from "@/hooks/useLivePortfolio";
 import { useHaikuPortfolio } from "@/hooks/useHaikuPortfolio";
 import { NewsFeed } from "@/components/NewsFeed";
@@ -287,6 +288,7 @@ export default function TerminalApp() {
           {leftTab === "venues" && (
             <>
               <McpStatusPanel />
+              <BridgePanel />
               <HyperliquidPanel />
               <ExtendedConnectPanel />
               <LifiPerpsConnectPanel provider="ondo" />
