@@ -6,7 +6,7 @@ import {
   normalizeSupportedChains,
   toDebridgeChainId,
 } from "@/lib/mcp/debridge";
-import { normalizeLifiChains, normalizeLifiEarnVaults, normalizeLifiQuote } from "@/lib/mcp/lifi";
+import { applyEarnVaultFilters, normalizeLifiChains, normalizeLifiEarnVaults, normalizeLifiQuote } from "@/lib/mcp/lifi";
 import { aaveV3Payload, normalizeAaveMarkets, normalizeAavePositions } from "@/lib/mcp/aave";
 import { isSignableQuote, type RouteQuote } from "@/lib/mcp/router";
 
@@ -175,6 +175,19 @@ describe("mcp/lifi — earn vaults", () => {
     expect(v.asset).toBe("WETH/USDC");
     expect(v.apy).toBe(0);
     expect(normalizeLifiEarnVaults("error fetching earn vaults: HTTP 404")).toEqual([]);
+  });
+});
+
+describe("mcp/lifi — earn vault TVL floor", () => {
+  const v = (tvlUsd: number) => ({ address: "0x", chainId: 8453, name: "v", protocol: "p", asset: "USDC", apy: 0.05, tvlUsd, tags: [], isTransactional: true });
+
+  it("drops vaults under minTvlUsd and keeps the rest in order", () => {
+    const out = applyEarnVaultFilters([v(1_385), v(3_220_324), v(999_999), v(1_000_000)], { minTvlUsd: 1_000_000 });
+    expect(out.map((x) => x.tvlUsd)).toEqual([3_220_324, 1_000_000]);
+  });
+
+  it("is a no-op without a floor", () => {
+    expect(applyEarnVaultFilters([v(1)], {})).toHaveLength(1);
   });
 });
 
