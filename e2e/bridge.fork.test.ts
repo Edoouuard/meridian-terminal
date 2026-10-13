@@ -106,6 +106,7 @@ describe.skipIf(!ANVIL_ARB_URL)("golden path on an Arbitrum fork — bridge 5 US
         args: [account.address, quote!.tx.to as Address],
       });
       expect(allowanceLeft, `${quote!.provider}: allowance left`).toBe(0n);
+      console.info(`bridge fork proof: ${quote!.provider} → CONFIRMED (approval ${result.approvalHash}, tx ${result.hash})`);
       await testClient.revert({ id: snapshot });
     }
   }, 180_000);

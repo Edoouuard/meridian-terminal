@@ -163,7 +163,10 @@ Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → s
 - [ ] Vérifier que la position Aave apparaît après confirmation
 - [x] Remplacer le faux portefeuille de 128 400 $ par un état « connecte ton wallet » clair (Phase 1)
 - [x] Preuve sans wallet : le parcours d'or exécuté par le vrai code contre les vrais contrats Aave + USDC sur un **fork de Base** en CI (`e2e/aaveSupply.fork.test.ts`, aucun argent réel). *Preuve : CI run [38393651681](https://github.com/Edoouuard/meridian-terminal/actions/runs/38393651681) — approve exact → supply → `CONFIRMED`, allowance consommée à 0, collatéral ≈ 100 $ visible dans Aave ; refus avant signature si solde insuffisant.* Ne remplace pas le test avec ton wallet (UI, wallet, réseau réel), mais la logique d'exécution est prouvée.
-- [ ] Deuxième parcours : bridge 5 USDC Arbitrum → Base
+- [x] Bug corrigé (retour du test wallet) : « morpho supply requires a vaultAddress » / « deBridge order requires routerTx » — les étapes Morpho, bridge, Uniswap et perps passent par leur bouton dédié (données live : coffre ≥ 1 M$ TVL, route cotée, prix) ; « Execute Strategy » n'apparaît que si toutes les étapes sont signables ; le bridge cote de `leg.chain` vers `leg.toChain` (PR #20)
+- [x] Preuve sans wallet du bridge : devis live deBridge + LI.FI → même constructeur d'ordre que le bouton (`lib/bridgeOrder.ts`) → vrai `orderRunner` sur un **fork d'Arbitrum** en CI (`e2e/bridge.fork.test.ts`) : approve exact au routeur vérifié, calldata acceptée on-chain, 5 USDC sortis du wallet, allowance à 0. *Preuve : CI run [38428480844](https://github.com/Edoouuard/meridian-terminal/actions/runs/38428480844).* L'arrivée sur Base (remplie par le bridge) reste à voir avec ton wallet.
+- [x] Position visible : le portefeuille lit `getUserAccountData` du pool Aave Base (le même appel vérifié par la preuve fork) et se rafraîchit après chaque confirmation
+- [ ] Deuxième parcours : bridge 5 USDC Arbitrum → Base (**toi**)
 
 **Critère de sortie :** 2 transactions réelles confirmées (supply Aave + bridge), visibles dans l'app, sans intervention manuelle.
 
