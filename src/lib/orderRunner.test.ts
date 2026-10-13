@@ -65,6 +65,7 @@ describe("orderRunner — prepareOrder (never signs)", () => {
     const { deps, writes } = fakeDeps({ balance: AMOUNT - 1n });
     const res = await prepareOrder(deps, supply());
     expect(res).toMatchObject({ ok: false, state: "INSUFFICIENT_BALANCE" });
+    if (!res.ok) expect(res.message).toBe("Insufficient balance: this order needs 1000 USDC on Ethereum, your wallet holds 999.999999.");
     expect(writes).toHaveLength(0);
   });
 

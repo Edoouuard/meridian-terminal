@@ -6,7 +6,8 @@ import { useAccount } from "wagmi";
 import type { StakeYieldEntry } from "@/app/api/stake-yield/route";
 import { needsLiveCompletion, resolveOrderForLeg, protocolLabel } from "@/lib/assetMap";
 import type { Order } from "@/lib/execution";
-import { legChainId } from "@/lib/chains";
+import { chainIdFromName, legChainId } from "@/lib/chains";
+import { FundsArrivalGate } from "@/components/thread/FundsArrivalGate";
 import type { TradeLeg, TradePlan } from "@/lib/tradePlan";
 import { explorerUrlFor } from "@/lib/explorer";
 import { useStrategyExecutor, type LegStatus } from "@/hooks/useStrategyExecutor";
@@ -98,6 +99,14 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {plan.fundingNotes && plan.fundingNotes.length > 0 && (
+        <div className="risk-note" style={{ border: "1px solid var(--color-divider)" }}>
+          <div className="risk-note__label" style={{ color: "var(--color-neutral-500)" }}>Fitted to your wallet</div>
+          {plan.fundingNotes.map((n, k) => (
+            <span key={k} style={{ color: "var(--color-text)", display: "block" }}>{n}</span>
+          ))}
+        </div>
+      )}
       {plan.legs.map((leg, i) => {
         const resolved = resolveOrderForLeg(leg, undefined, prices, legChainId(leg, chain?.id));
         const legSide = (leg.side || "").toLowerCase();
@@ -115,6 +124,43 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
         const dedicated = isPerp || isUniswap || isMorpho || isLidoWithdraw || isBridge || isLifiSwap;
         const liveVenue = dedicated || isLidoStake;
         const building = isUnsupported(resolved) && !liveVenue;
+        // A leg funded by an earlier bridge into its chain waits for the funds.
+        const legChain = legChainId(leg, chain?.id);
+        const fundedByBridge =
+          legChain !== undefined &&
+          !isBridge &&
+          plan.legs.slice(0, i).some((p) => p.side.toLowerCase() === "bridge" && chainIdFromName(p.toChain) === legChain);
+        const execution =
+          dedicated || isUnsupported(resolved) ? (
+            !FEATURES.perps && /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "") ? (
+              <NotWired venue={leg.protocol} reason="Perps are paused during the beta while spot execution is validated end to end." />
+            ) : /hyperliquid/i.test(leg.protocol || "") ? (
+              <PerpExecuteButton leg={leg} prices={prices} />
+            ) : /extended/i.test(leg.protocol || "") ? (
+              <ExtendedPerpExecuteButton leg={leg} prices={prices} />
+            ) : /ondo/i.test(leg.protocol || "") ? (
+              <LifiPerpExecuteButton leg={leg} prices={prices} provider="ondo" />
+            ) : /lighter/i.test(leg.protocol || "") ? (
+              <LifiPerpExecuteButton leg={leg} prices={prices} provider="lighter" />
+            ) : /uniswap/i.test(leg.protocol || "") ? (
+              <SwapExecuteButton leg={leg} prices={prices} />
+            ) : isMorpho ? (
+              legSide === "withdraw" ? <MorphoWithdrawButton leg={leg} prices={prices} /> : <MorphoExecuteButton leg={leg} prices={prices} />
+            ) : isLidoWithdraw ? (
+              <LidoUnstakeButton leg={leg} prices={prices} />
+            ) : isBridge ? (
+              <BridgeExecuteButton leg={leg} prices={prices} />
+            ) : isLifiSwap ? (
+              <NotWired venue="LI.FI" reason="Same-chain LI.FI swaps aren't wired yet — cross-chain moves use the Bridge step." />
+            ) : isUnsupported(resolved) ? (
+              <NotWired venue={protocolLabel(leg.protocol)} reason={resolved.unsupported} />
+            ) : null
+          ) : (
+            <>
+              <OrderRow label="Amount" value={orderAmountDisplay(resolved)} valueColor="var(--color-accent-700)" />
+              <ValidatedExecuteButton order={resolved} label={`Execute on ${leg.protocol} →`} />
+            </>
+          );
         return (
           <div key={i} className="leg-card" style={{ opacity: building ? 0.55 : 1 }}>
             <div className="leg-card__header">
@@ -123,35 +169,12 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
             </div>
             <LegRiskBadge leg={leg} />
             <StakeYieldBadge leg={leg} />
-            {dedicated || isUnsupported(resolved) ? (
-              !FEATURES.perps && /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "") ? (
-                <NotWired venue={leg.protocol} reason="Perps are paused during the beta while spot execution is validated end to end." />
-              ) : /hyperliquid/i.test(leg.protocol || "") ? (
-                <PerpExecuteButton leg={leg} prices={prices} />
-              ) : /extended/i.test(leg.protocol || "") ? (
-                <ExtendedPerpExecuteButton leg={leg} prices={prices} />
-              ) : /ondo/i.test(leg.protocol || "") ? (
-                <LifiPerpExecuteButton leg={leg} prices={prices} provider="ondo" />
-              ) : /lighter/i.test(leg.protocol || "") ? (
-                <LifiPerpExecuteButton leg={leg} prices={prices} provider="lighter" />
-              ) : /uniswap/i.test(leg.protocol || "") ? (
-                <SwapExecuteButton leg={leg} prices={prices} />
-              ) : isMorpho ? (
-                legSide === "withdraw" ? <MorphoWithdrawButton leg={leg} prices={prices} /> : <MorphoExecuteButton leg={leg} prices={prices} />
-              ) : isLidoWithdraw ? (
-                <LidoUnstakeButton leg={leg} prices={prices} />
-              ) : isBridge ? (
-                <BridgeExecuteButton leg={leg} prices={prices} />
-              ) : isLifiSwap ? (
-                <NotWired venue="LI.FI" reason="Same-chain LI.FI swaps aren't wired yet — cross-chain moves use the Bridge step." />
-              ) : isUnsupported(resolved) ? (
-                <NotWired venue={protocolLabel(leg.protocol)} reason={resolved.unsupported} />
-              ) : null
+            {fundedByBridge && legChain !== undefined ? (
+              <FundsArrivalGate leg={leg} chainId={legChain} prices={prices}>
+                {execution}
+              </FundsArrivalGate>
             ) : (
-              <>
-                <OrderRow label="Amount" value={orderAmountDisplay(resolved)} valueColor="var(--color-accent-700)" />
-                <ValidatedExecuteButton order={resolved} label={`Execute on ${leg.protocol} →`} />
-              </>
+              execution
             )}
             {leg.note && (
               <span className="text-muted" style={{ fontSize: 10 }}>{leg.note}</span>

@@ -23,6 +23,9 @@ import { CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
 import { FEATURES } from "@/lib/features";
 import { routeThesis, type TradePlan } from "@/lib/routeThesis";
 import { routeThesisAsync, type PortfolioContext } from "@/lib/intentEngine";
+import { fundPlan } from "@/lib/fundingPlanner";
+import { browserFundingDeps } from "@/lib/fundingDeps";
+import { useLivePrices } from "@/hooks/useLivePrices";
 import { recordExecution } from "@/lib/history";
 
 // Expose the local order-history API on the page module so real execution
@@ -83,8 +86,9 @@ export default function TerminalApp() {
   // grouped into tabs so the left column stays scannable instead of dense.
   const [leftTab, setLeftTab] = useState<"risk" | "venues" | "activity">("risk");
 
-  const { isConnected } = useAccount();
+  const { isConnected, address, chain } = useAccount();
   const live = useLivePortfolio();
+  const { data: livePrices } = useLivePrices();
   const haikuData = useHaikuPortfolio();
 
   // Haiku reads the same wallet balances (LI.FI) and Aave positions (Aave MCP)
@@ -148,7 +152,7 @@ export default function TerminalApp() {
       : undefined;
 
     try {
-      const routed = await routeThesisAsync(trimmed, portfolioSnapshot);
+      const routed = await fundThreadItem(await routeThesisAsync(trimmed, portfolioSnapshot));
       setThread((cur) => cur.concat([routed]));
     } catch {
       setThread((cur) => cur.concat([routeThesis(trimmed)]));
@@ -157,6 +161,22 @@ export default function TerminalApp() {
       setIsAnalyzing(false);
       setPendingText("");
       setAnalyzeStep(0);
+    }
+  }
+
+  // Fit every strategy to the wallet's real balances: add the bridges a leg
+  // needs, keep a leg on the funds' chain when bridging doesn't pay, resize
+  // what can't be fully funded (lib/fundingPlanner.ts).
+  async function fundThreadItem(item: ThreadItem): Promise<ThreadItem> {
+    if (!item.plan || !isConnected || !address) return item;
+    const deps = browserFundingDeps({ address, assets: live.assets, prices: livePrices, connectedChainId: chain?.id });
+    try {
+      const variants = item.variants ? await Promise.all(item.variants.map((v) => fundPlan(v, deps))) : undefined;
+      const index = item.variants?.indexOf(item.plan) ?? -1;
+      const plan = variants && index >= 0 ? variants[index] : await fundPlan(item.plan, deps);
+      return { ...item, plan, variants };
+    } catch {
+      return item;
     }
   }
 
