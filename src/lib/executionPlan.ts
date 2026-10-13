@@ -1,5 +1,7 @@
 import type { Address } from "viem";
 import type { Order } from "./execution";
+import { explainError, userFacingError } from "./errorText";
+import { CHAIN_LABEL } from "./onchain";
 
 /**
  * executionPlan.ts — versioned plan schema + explicit state machine for
@@ -177,14 +179,14 @@ export function validateOrderPlan(plan: OrderPlan, ctx: OrderValidationContext):
     };
   }
   if (ctx.connectedChainId !== plan.order.chainId) {
-    return { ok: false, state: "WRONG_CHAIN", message: `Wrong network — switch to chain ${plan.order.chainId} before signing.` };
+    return { ok: false, state: "WRONG_CHAIN", message: `Wrong network — switch your wallet to ${CHAIN_LABEL[plan.order.chainId] ?? `chain ${plan.order.chainId}`} before signing.` };
   }
   if (isPlanExpired(plan, ctx.now)) {
     return { ok: false, state: "PLAN_EXPIRED", message: "This plan has expired — refresh the amount and try again." };
   }
   if (isWalletDebitingAction(plan.order)) {
     if (ctx.liveBalance === undefined) {
-      return { ok: false, state: "RPC_ERROR", message: "Could not read your live balance — try again." };
+      return { ok: false, state: "RPC_ERROR", message: "Could not read your live balance (the network endpoint didn't answer) — retry in a moment." };
     }
     const amount = typeof plan.order.amount === "bigint" ? plan.order.amount : undefined;
     if (amount !== undefined && ctx.liveBalance < amount) {
@@ -214,15 +216,20 @@ export function classifyExecutionError(err: unknown, phase: "approval" | "supply
       message: "Timed out waiting for confirmation. Check the explorer link — the transaction may still land; do not resubmit.",
     };
   }
+  const explained = explainError(err);
+  if (explained.cause === "gas") {
+    // A wallet problem, not a venue or infrastructure failure.
+    return { state: "INSUFFICIENT_BALANCE", message: userFacingError(err) };
+  }
   if (/revert/i.test(raw)) {
     return {
       state: "TRANSACTION_REVERTED",
-      message: phase === "approval" ? `Approval reverted on-chain: ${raw}` : `Transaction reverted on-chain: ${raw}`,
+      message: userFacingError(err, phase === "approval" ? "Approval reverted on-chain:" : "Transaction reverted on-chain:"),
     };
   }
   return {
     state: phase === "approval" ? "APPROVAL_FAILED" : "RPC_ERROR",
-    message: phase === "approval" ? `Approval failed: ${raw}` : `Request failed: ${raw}`,
+    message: userFacingError(err, phase === "approval" ? "Approval failed:" : "Request failed:"),
   };
 }
 

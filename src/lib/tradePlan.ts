@@ -86,6 +86,8 @@ declare module "@/lib/data" {
     plan?: TradePlan;
     /** Alternative plans for the same thesis, when the intent has more than one honest way to run it. Present only when length > 1. */
     variants?: TradePlan[];
+    /** Shown above the answer when it isn't the full AI plan (planner down, rate-limited, session expired). */
+    notice?: string;
   }
 }
 

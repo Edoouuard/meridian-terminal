@@ -155,7 +155,7 @@ export default function TerminalApp() {
       const routed = await fundThreadItem(await routeThesisAsync(trimmed, portfolioSnapshot));
       setThread((cur) => cur.concat([routed]));
     } catch {
-      setThread((cur) => cur.concat([routeThesis(trimmed)]));
+      setThread((cur) => cur.concat([{ ...routeThesis(trimmed), notice: "Something went wrong building your plan. Below is a basic plan from local rules, without live rates; ask again in a moment." }]));
     } finally {
       stepTimers.forEach(clearTimeout);
       setIsAnalyzing(false);
@@ -184,13 +184,26 @@ export default function TerminalApp() {
     setThread((cur) => cur.map((item, i) => (i === index ? { ...item, plan } : item)));
   }
 
+  // Three starting points, each one an end-to-end path Meridian has proven on
+  // forks (lend, stake/restake, fixed rate) — the first thing a new user tries
+  // should be something that works.
   const QUICK_PROMPTS = [
-    { label: "Yield on stables", thesis: "I want the best yield on my USDC across all protocols" },
-    { label: "ETH exposure", thesis: "I want exposure to ETH with different risk levels" },
-    { label: "Farm airdrops", thesis: "I want to farm airdrops and points with a delta-neutral strategy", perps: true },
-    { label: "Hedge portfolio", thesis: "I need to hedge my ETH exposure, I think the market is going down", perps: true },
-    { label: "Stake ETH", thesis: "I want to stake my ETH for yield, what are the best options?" },
-  ].filter((p) => FEATURES.perps || !("perps" in p));
+    {
+      label: "Best yield on my stablecoins",
+      hint: "Aave, Morpho, Pendle — across 7 chains, bridging only when it pays",
+      thesis: "Find the best yield on my stablecoins across all chains. Bridge or swap only if it pays off.",
+    },
+    {
+      label: "Stake my ETH",
+      hint: "Lido staking, optional EigenLayer restaking",
+      thesis: "I want to stake my ETH for yield: Lido, and restaking on EigenLayer if it makes sense.",
+    },
+    {
+      label: "Lock a fixed rate",
+      hint: "Pendle PT on major stablecoins, held to maturity",
+      thesis: "Lock a fixed rate on my USDC with Pendle, on a major stablecoin market.",
+    },
+  ];
 
   const FOLLOW_UPS = [
     { label: "Lower risk", thesis: "Same idea but more conservative, less leverage" },
@@ -280,11 +293,16 @@ export default function TerminalApp() {
                 <span style={{ fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{pos.amount}</span>
               </div>
             ))}
+            {!isConnected && (
+              <p style={{ fontSize: 12, margin: "6px 0 0" }} className="text-muted">
+                Your positions show up here once a wallet is connected.
+              </p>
+            )}
             {isConnected && livePositions.length === 0 && (
               <p style={{ fontSize: 12, margin: "6px 0 0" }} className="text-muted">
                 {live.isLoading
                   ? "Reading your wallet balances and Aave position…"
-                  : `No tracked assets or Aave position found across ${CHAIN_NAMES}.`}
+                  : `Nothing found yet across ${CHAIN_NAMES}. Fund this wallet, or ask for a strategy and Meridian will tell you what's needed.`}
               </p>
             )}
           </div>
@@ -377,13 +395,18 @@ export default function TerminalApp() {
                   }}>
                     Describe your goal. Meridian fetches live rates across every protocol and designs strategies at different risk levels.
                   </p>
+                  {!isConnected && (
+                    <p className="text-muted" style={{ margin: 0, fontSize: 12 }}>
+                      Connect a wallet to fit strategies to your real balances and execute them. You can explore without one.
+                    </p>
+                  )}
                 </div>
                 <div style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
                   gap: 8,
                   width: "100%",
-                  maxWidth: 500,
+                  maxWidth: 600,
                 }}>
                   {QUICK_PROMPTS.map((qp) => (
                     <button
@@ -399,7 +422,10 @@ export default function TerminalApp() {
                       disabled={isAnalyzing}
                       onClick={() => submitThesis(qp.thesis)}
                     >
-                      {qp.label}
+                      <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                        <span style={{ fontWeight: 600 }}>{qp.label}</span>
+                        <span className="text-muted" style={{ fontSize: 11, lineHeight: 1.4 }}>{qp.hint}</span>
+                      </span>
                     </button>
                   ))}
                 </div>

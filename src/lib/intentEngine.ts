@@ -178,7 +178,7 @@ export async function routeThesisAsync(rawText: string, portfolio?: PortfolioCon
 
     if (!res.ok) {
       const errBody = await res.json().catch(() => ({}));
-      throw new Error((errBody as { error?: string }).error ?? `API error ${res.status}`);
+      throw Object.assign(new Error((errBody as { error?: string }).error ?? `API error ${res.status}`), { status: res.status });
     }
 
     const data: ParseIntentResponse = await res.json();
@@ -204,6 +204,19 @@ export async function routeThesisAsync(rawText: string, portfolio?: PortfolioCon
     };
   } catch (err) {
     console.warn("[intentEngine] LLM parsing failed, falling back to regex parser:", err);
-    return routeThesis(text);
+    return { ...routeThesis(text), notice: plannerFallbackNotice(err) };
   }
+}
+
+/**
+ * Why the answer is the basic local plan instead of the AI planner's, in
+ * words the user can act on. Exported for tests.
+ */
+export function plannerFallbackNotice(err: unknown): string {
+  const status = (err as { status?: number } | null)?.status;
+  const basic = "Below is a basic plan from local rules, without live rates.";
+  if (status === 429) return `You're sending requests faster than the planner allows. Wait a minute, then ask again. ${basic}`;
+  if (status === 401) return `Your beta session expired. Reload the page and enter the access password again. ${basic}`;
+  if (status === undefined && err instanceof TypeError) return `You seem to be offline. Check your connection and ask again. ${basic}`;
+  return `The AI planner is unavailable right now. Ask again in a moment. ${basic}`;
 }

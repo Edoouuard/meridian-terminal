@@ -37,6 +37,7 @@ import {
 } from "@/lib/executionPlan";
 import { recordExecution, type OrderRecordType } from "@/lib/history";
 import { reportExecution } from "@/lib/execLog";
+import { userFacingError } from "@/lib/errorText";
 
 /** How long to wait for a tx to confirm before surfacing CONFIRMATION_TIMEOUT instead of hanging forever. */
 export const CONFIRMATION_TIMEOUT_MS = 120_000;
@@ -151,7 +152,7 @@ function failure(deps: OrderRunnerDeps, plan: OrderPlan | null, state: FailureSt
 }
 
 function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  return userFacingError(err);
 }
 
 /** Resolve the approve plan + its spender (from the approve call's own args), when the order needs one. */
@@ -309,7 +310,7 @@ export async function executePreparedOrder(deps: OrderRunnerDeps, prepared: Prep
   const order = plan.order;
 
   if (deps.connectedChainId !== order.chainId) {
-    return failure(deps, plan, "WRONG_CHAIN", `Wrong network — switch to chain ${order.chainId} before signing.`);
+    return failure(deps, plan, "WRONG_CHAIN", `Wrong network — switch your wallet to ${CHAIN_LABEL[order.chainId] ?? `chain ${order.chainId}`} before signing.`);
   }
   if (isPlanExpired(plan)) return failure(deps, plan, "PLAN_EXPIRED", "This plan has expired — refresh and try again.");
 

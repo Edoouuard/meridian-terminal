@@ -298,7 +298,10 @@ export function RiskPanel({ live, isConnected }: { live?: LivePortfolio; isConne
       </div>
 
       {!isConnected && (
-        <div style={{ marginTop: "var(--space-2)" }}>
+        <div style={{ marginTop: "var(--space-2)", display: "flex", flexDirection: "column", gap: 6 }}>
+          <p className="text-muted" style={{ fontSize: 11, margin: 0 }}>
+            {simulating ? "Simulated portfolio." : "Example figures, not yours."} Connect a wallet to see your own risk.
+          </p>
           <button className="btn btn-secondary" style={{ fontSize: 11 }} onClick={() => setSimulating((s) => !s)}>
             {simulating ? "Use demo figures" : "Simulate a portfolio"}
           </button>

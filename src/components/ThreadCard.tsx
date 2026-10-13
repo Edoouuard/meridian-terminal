@@ -196,6 +196,12 @@ export function ThreadCard({ item, onSelectVariant }: { item: ThreadItem; onSele
 
       {/* AI response */}
       <div className="ai-bubble">
+        {item.notice && (
+          <div className="risk-note" role="status" style={{ border: "1px solid var(--color-divider)", marginBottom: "var(--space-2)" }}>
+            <div className="risk-note__label" style={{ color: "var(--color-neutral-500)" }}>Heads up</div>
+            <span style={{ color: "var(--color-text)" }}>{item.notice}</span>
+          </div>
+        )}
         {/* Understanding line */}
         <p className="ai-bubble-text">
           <span style={{
