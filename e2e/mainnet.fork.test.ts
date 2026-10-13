@@ -27,7 +27,7 @@ import { mainnet } from "viem/chains";
 import { ERC20_ABI } from "@/lib/onchain";
 import { findToken, resolveOrderForLeg } from "@/lib/assetMap";
 import type { Order } from "@/lib/execution";
-import { fetchPendleBuyQuote, fetchPendleMarkets, pickPendleMarket } from "@/lib/integrations/pendle";
+import { PENDLE_ROUTER_V4, fetchPendleBuyQuote, fetchPendleMarkets, pickPendleMarket } from "@/lib/integrations/pendle";
 import { EIGENLAYER_STAKER_SHARES_ABI, EIGENLAYER_STETH_STRATEGY, EIGENLAYER_STRATEGY_MANAGER } from "@/lib/integrations/eigenlayer";
 import { executePreparedOrder, prepareOrder, type OrderRunnerClient, type OrderRunnerDeps, type WriteAsync } from "@/lib/orderRunner";
 
@@ -77,6 +77,12 @@ describe.skipIf(!ANVIL_ETH_URL)("Ethereum fork — Pendle PT and EigenLayer rest
     console.info(`pendle: ${markets.length} eligible markets on Ethereum: ${markets.map((m) => `${m.name}${m.isPrime ? "*" : ""}[${m.categories.join("/")}]`).join(", ")}`);
     const market = pickPendleMarket(markets, "USDC");
     expect(market, "no eligible Pendle stablecoin market on Ethereum").toBeDefined();
+    // Same order as PendleExecuteButton: approve the router first, then quote
+    // and sign straight away — the route's aggregator leg expires quickly.
+    await run(
+      { type: "approve", protocol: "pendle", token: usdc.address as Address, symbol: "USDC", amount, chainId: mainnet.id, decimals: 6, spender: PENDLE_ROUTER_V4 },
+      "pendle approve USDC",
+    );
     const quote = await fetchPendleBuyQuote({ chainId: mainnet.id, pt: market!.pt, tokenIn: usdc.address as Address, amountIn: amount.toString(), receiver: account.address });
     expect(quote, `no Pendle quote for PT-${market!.name}`).not.toBeNull();
 

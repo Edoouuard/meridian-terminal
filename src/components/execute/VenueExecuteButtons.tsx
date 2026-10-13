@@ -3,9 +3,9 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { zeroAddress } from "viem";
-import { useAccount, useBalance, useReadContracts } from "wagmi";
+import { useAccount, useBalance, useReadContract, useReadContracts } from "wagmi";
 import { findToken, DEFAULT_CHAIN_ID } from "@/lib/assetMap";
-import { CHAIN_LABEL, STETH_ADDRESS, SUPPORTED_CHAINS } from "@/lib/onchain";
+import { CHAIN_LABEL, ERC20_ALLOWANCE_ABI, STETH_ADDRESS, SUPPORTED_CHAINS } from "@/lib/onchain";
 import type { Order } from "@/lib/execution";
 import type { TradeLeg } from "@/lib/tradePlan";
 import { legChainId } from "@/lib/chains";
@@ -13,7 +13,7 @@ import { useIndexedPositions } from "@/hooks/useIndexedPositions";
 import { useVaultRisk } from "@/hooks/useVaultRisk";
 import { MIN_VAULT_TVL_USD } from "@/lib/vaultPolicy";
 import { MIN_MORPHO_RISK_SCORE } from "@/lib/integrations/morpho";
-import { PENDLE_CHAINS, isEthMarket, pickPendleMarket, type PendleBuyQuote, type PendleMarket } from "@/lib/integrations/pendle";
+import { PENDLE_CHAINS, PENDLE_ROUTER_V4, isEthMarket, pickPendleMarket, type PendleBuyQuote, type PendleMarket } from "@/lib/integrations/pendle";
 import { QUOTER_V2_QUOTE_READ_ABI, QUOTE_FEE_TIERS, UNISWAP_QUOTER_V2_BY_CHAIN, applySlippage, parseSwapAsset, pickBestFeeQuote } from "@/lib/integrations/uniswap";
 import { formatBaseUnits, resolvePriceFromList, usdToTokenAmount, type PriceEntry } from "@/lib/quote";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
@@ -327,6 +327,9 @@ export function LidoUnstakeButton({ leg, prices }: { leg: TradeLeg; prices?: Pri
   );
 }
 
+/** A Pendle quote is dropped after this, so a fresh one is fetched before signing (its aggregator leg expires). */
+const QUOTE_TTL_MS = 60_000;
+
 /**
  * Pendle fixed yield: buy the PT of a live market and hold it to maturity.
  * The market is the one the plan names (PT-sUSDe…) or, failing that, the best
@@ -355,19 +358,36 @@ export function PendleExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
     staleTime: 5 * 60_000,
   });
 
+  const market = markets ? pickPendleMarket(markets, leg.asset) : undefined;
+  const spend = market ? findToken(isEthMarket(market) ? "WETH" : "USDC", chainId) : undefined;
+  const price = spend ? resolvePriceFromList(prices, spend.symbol) : null;
+  const amount = spend ? usdToTokenAmount(spend.symbol, leg.sizeUsd, price, spend.decimals) : null;
+
+  // Approve first, quote second: Pendle's route embeds an aggregator quote
+  // that expires within minutes, so it's fetched only once the allowance is
+  // in place and signed right away — never quoted, then held through an
+  // approval round-trip (that ordering reverted on a fork).
+  const { data: allowance } = useReadContract({
+    address: spend?.address,
+    abi: ERC20_ALLOWANCE_ABI,
+    functionName: "allowance",
+    args: address ? [address, PENDLE_ROUTER_V4] : undefined,
+    chainId: chainId as (typeof SUPPORTED_CHAINS)[number]["id"],
+    query: {
+      enabled: !!spend && !!address && supported,
+      refetchInterval: (q) => (amount && q.state.data !== undefined && q.state.data >= amount.amountBase ? false : 5_000),
+    },
+  });
+
   if (!supported) {
     return <NotWired venue="Pendle" reason={`Pendle PT is wired on Ethereum, Arbitrum and Base — not ${chainName}.`} />;
   }
   if (isLoading || !markets) {
     return <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>Loading live Pendle markets on {chainName}…</p>;
   }
-  const market = pickPendleMarket(markets, leg.asset);
   if (!market) {
     return <NotWired venue="Pendle" reason={`No Pendle market for "${leg.asset}" on ${chainName} with ≥ $1M liquidity and more than 14 days to expiry.`} />;
   }
-  const spend = findToken(isEthMarket(market) ? "WETH" : "USDC", chainId);
-  const price = spend ? resolvePriceFromList(prices, spend.symbol) : null;
-  const amount = spend ? usdToTokenAmount(spend.symbol, leg.sizeUsd, price, spend.decimals) : null;
   if (!spend || !amount) {
     return <NotWired venue="Pendle" reason="No live price for the input token — cannot size this order safely." />;
   }
@@ -386,6 +406,8 @@ export function PendleExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
       const body = await res.json();
       if (!res.ok) throw new Error(body.error ?? "Pendle quote failed");
       const q = body as PendleBuyQuote;
+      // The quote's aggregator leg expires: drop it after QUOTE_TTL_MS so a stale one is never signed.
+      setTimeout(() => setQuote(null), QUOTE_TTL_MS);
       setQuote({
         ptOut: q.ptOut,
         order: {
@@ -411,10 +433,17 @@ export function PendleExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
       <OrderRow label="Market" value={`PT-${market.name} · ${chainName}`} />
       <OrderRow label="Fixed APY" value={`${market.impliedApyPct.toFixed(2)}% until ${expiry}`} valueColor="var(--color-accent-700)" />
       <OrderRow label="Liquidity" value={`$${Math.round(market.liquidityUsd).toLocaleString()}${market.isPrime ? " · Pendle prime" : ""}`} />
-      {quote ? (
-        <ValidatedExecuteButton order={quote.order} label={`Buy PT-${market.name} →`} />
-      ) : !address ? (
+      {!address ? (
         <NotWired venue="Pendle" reason="Connect a wallet to get a quote." />
+      ) : allowance === undefined ? (
+        <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>Reading your {spend.symbol} allowance…</p>
+      ) : allowance < amount.amountBase ? (
+        <ValidatedExecuteButton
+          order={{ type: "approve", protocol: "pendle", token: spend.address, symbol: spend.symbol, amount: amount.amountBase, chainId, decimals: spend.decimals, spender: PENDLE_ROUTER_V4 }}
+          label={`1/2 · Approve ${amount.amount} ${spend.symbol} for Pendle →`}
+        />
+      ) : quote ? (
+        <ValidatedExecuteButton order={quote.order} label={`2/2 · Buy PT-${market.name} →`} />
       ) : (
         <button className="btn btn-primary" style={{ fontSize: 13, marginTop: 6, cursor: "pointer" }} disabled={quoting} onClick={fetchQuote}>
           {quoting ? "Quoting on Pendle…" : `Get quote: ${amount.amount} ${spend.symbol} → PT-${market.name}`}
