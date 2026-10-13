@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { fetchAaveYieldSummary } from "@/lib/mcp/aave";
+import { PENDLE_CHAINS, fetchPendleMarkets, type PendleMarket } from "@/lib/integrations/pendle";
 import * as haiku from "@/lib/mcp/providers/haiku";
 
 /**
@@ -398,11 +399,24 @@ function buildSummary(ctx: Omit<YieldContext, "summary" | "fetchedAt">): string 
   return lines.join("\n");
 }
 
+/** Executable Pendle fixed-rate markets (≥ $1M liquidity, > 14 days to expiry), best fixed APY first. */
+function pendleSummary(markets: PendleMarket[]): string {
+  if (markets.length === 0) return "";
+  const chainName: Record<number, string> = { 1: "Ethereum", 42161: "Arbitrum", 8453: "Base" };
+  const lines = ["\n\n### Pendle fixed yield (buy PT, held to expiry) — executable, use asset \"PT-<name>\" and the chain shown"];
+  for (const m of markets.slice(0, 20)) {
+    lines.push(
+      `- PT-${m.name} | ${chainName[m.chainId] ?? m.chainId} | ${m.impliedApyPct.toFixed(2)}% fixed until ${m.expiry.slice(0, 10)} | ${fmtTvl(m.liquidityUsd)} liquidity${m.isPrime ? " | prime" : ""}${m.categories.length ? ` | ${m.categories.join(",")}` : ""}`,
+    );
+  }
+  return lines.join("\n");
+}
+
 /* ---------- Handler ---------- */
 
 export async function GET() {
   // Fetch ALL sources in parallel — each is independently null-safe
-  const [defiLlama, funding, hlp, lighterVaults, philidor, aaveMcp, haikuYields] = await Promise.all([
+  const [defiLlama, funding, hlp, lighterVaults, philidor, aaveMcp, haikuYields, pendleMarkets] = await Promise.all([
     fetchDefiLlama(),
     fetchFundingRates(),
     fetchHlpVault(),
@@ -410,6 +424,7 @@ export async function GET() {
     fetchPhilidorVaults(),
     fetchAaveYieldSummary([1, 8453, 42161, 10, 137, 43114, 56, 100, 534352, 324, 59144, 5000, 1088, 250, 146, 42220]).catch(() => ""),
     haiku.fetchYieldOpportunities({ minApy: 1 }).catch(() => []),
+    Promise.all(PENDLE_CHAINS.map((c) => fetchPendleMarkets(c))).then((all) => all.flat()),
   ]);
 
   const vaults: VaultYield[] = [
@@ -445,7 +460,7 @@ export async function GET() {
     summary: "",
   };
   // Build summary with optional Aave MCP enrichment appended
-  ctx.summary = buildSummary(ctx) + (aaveMcp ? `\n${aaveMcp}` : "");
+  ctx.summary = buildSummary(ctx) + pendleSummary(pendleMarkets) + (aaveMcp ? `\n${aaveMcp}` : "");
 
   return NextResponse.json(ctx);
 }

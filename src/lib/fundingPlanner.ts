@@ -88,6 +88,8 @@ export function spentSymbol(leg: TradeLeg, chainId: number): string | null {
     .replace(/\s*(PERP|PT)$/i, "");
   if (!raw) return null;
   if (side === "stake" && /lido/i.test(leg.protocol)) return "ETH";
+  // Pendle PT is bought with USDC (or WETH for an ETH market) — see PendleExecuteButton.
+  if (/pendle/i.test(leg.protocol)) return /eth/i.test(raw) ? "WETH" : "USDC";
   if (side === "transfer" && raw.toUpperCase() === "ETH") return "ETH";
   return (findToken(raw, chainId)?.symbol ?? raw).toUpperCase();
 }

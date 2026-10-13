@@ -11,6 +11,8 @@ on:
       - src/lib/onchain.ts
       - src/lib/integrations/uniswap.ts
       - src/lib/mcp/routerAllowlist.ts
+      - src/lib/integrations/pendle.ts
+      - src/lib/integrations/eigenlayer.ts
       - e2e/onchain.audit.test.ts
       - .github/workflows/onchain-audit.yml
 

@@ -20,7 +20,7 @@ import { FEATURES } from "@/lib/features";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
 import { BridgeExecuteButton } from "@/components/BridgeExecuteButton";
 import { ExtendedPerpExecuteButton, LifiPerpExecuteButton, PerpExecuteButton } from "@/components/execute/PerpExecuteButtons";
-import { LidoUnstakeButton, MorphoExecuteButton, MorphoWithdrawButton, SwapExecuteButton } from "@/components/execute/VenueExecuteButtons";
+import { LidoUnstakeButton, MorphoExecuteButton, MorphoWithdrawButton, PendleExecuteButton, SwapExecuteButton } from "@/components/execute/VenueExecuteButtons";
 import { NotWired, OrderRow, RISK_TIER_COLOR, isUnsupported, legRowValue } from "@/components/thread/shared";
 
 /**
@@ -118,10 +118,11 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
         const isLidoStake = isLido && legSide === "stake";
         const isPerp = /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "");
         const isUniswap = /uniswap/i.test(leg.protocol || "");
+        const isPendle = /pendle/i.test(leg.protocol || "");
         // These venues need live data (vault, route, on-chain quote, perp
         // signing) that only their dedicated button fetches — never hand their
         // shell order to the generic button.
-        const dedicated = isPerp || isUniswap || isMorpho || isLidoWithdraw || isBridge || isLifiSwap;
+        const dedicated = isPerp || isUniswap || isMorpho || isLidoWithdraw || isBridge || isLifiSwap || isPendle;
         const liveVenue = dedicated || isLidoStake;
         const building = isUnsupported(resolved) && !liveVenue;
         // A leg funded by an earlier bridge into its chain waits for the funds.
@@ -146,6 +147,8 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
               <SwapExecuteButton leg={leg} prices={prices} />
             ) : isMorpho ? (
               legSide === "withdraw" ? <MorphoWithdrawButton leg={leg} prices={prices} /> : <MorphoExecuteButton leg={leg} prices={prices} />
+            ) : isPendle ? (
+              <PendleExecuteButton leg={leg} prices={prices} />
             ) : isLidoWithdraw ? (
               <LidoUnstakeButton leg={leg} prices={prices} />
             ) : isBridge ? (

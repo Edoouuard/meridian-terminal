@@ -20,6 +20,9 @@ describe("fundingPlanner — spentSymbol", () => {
     expect(spentSymbol({ side: "Stake", asset: "stETH", protocol: "Lido" }, 1)).toBe("ETH");
     expect(spentSymbol({ side: "Swap", asset: "USDC → ETH", protocol: "Uniswap" }, 8453)).toBe("USDC");
     expect(spentSymbol({ side: "Borrow", asset: "USDC", protocol: "Aave" }, 8453)).toBeNull();
+    expect(spentSymbol({ side: "Supply", asset: "PT-sUSDe", protocol: "Pendle" }, 1)).toBe("USDC");
+    expect(spentSymbol({ side: "Supply", asset: "PT-wstETH", protocol: "Pendle" }, 1)).toBe("WETH");
+    expect(spentSymbol({ side: "Restake", asset: "stETH", protocol: "EigenLayer" }, 1)).toBe("STETH");
   });
 });
 

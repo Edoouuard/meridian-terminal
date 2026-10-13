@@ -11,6 +11,8 @@ import { writeFileSync } from "node:fs";
 import * as onchain from "@/lib/onchain";
 import * as uni from "@/lib/integrations/uniswap";
 import * as allow from "@/lib/mcp/routerAllowlist";
+import * as pendle from "@/lib/integrations/pendle";
+import * as eigen from "@/lib/integrations/eigenlayer";
 
 const rpc: Record<string, string> = {};
 for (const c of onchain.SUPPORTED_CHAINS) rpc[c.id] = c.rpcUrls.default.http[0];
@@ -81,6 +83,8 @@ async function chainProbe(idStr) {
     }
   }
   for (const [name, m] of [["LI.FI", A.lifi], ["deBridge", A.debridge]]) if (m[idStr]) log(id, name, m[idStr], (await code(m[idStr])) ? "OK" : "FAIL", "");
+  if (pendle.PENDLE_CHAINS.includes(id)) log(id, "Pendle", pendle.PENDLE_ROUTER_V4, (await code(pendle.PENDLE_ROUTER_V4)) ? "OK" : "FAIL", "RouterV4");
+  if (id === 1) for (const [n, a] of [["StrategyManager", eigen.EIGENLAYER_STRATEGY_MANAGER], ["stETH strategy", eigen.EIGENLAYER_STETH_STRATEGY], ["DelegationManager", eigen.EIGENLAYER_DELEGATION_MANAGER]]) log(id, "EigenLayer", `${n} ${a}`, (await code(a)) ? "OK" : "FAIL", "");
   if (id === 1) { const p = await c.readContract({ address: A.steth, abi: LIDO, functionName: "isStakingPaused" }).catch(() => "?"); log(id, "Lido", A.steth, p === false ? "OK" : "FAIL", `stakingPaused=${p}`); }
 }
 it("on-chain address audit", async () => {

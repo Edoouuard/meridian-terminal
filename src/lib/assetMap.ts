@@ -612,12 +612,27 @@ export function resolveOrderForLeg(
 
   // --- Remaining protocols -------------------------------------------------
   switch (protocol) {
-    case "pendle":
-      return { unsupported: "Pendle fixed-yield (PT) not wired for live execution yet" };
+    case "pendle": {
+      // Shell order: PendleExecuteButton picks the market and quotes the
+      // router call live. It spends USDC (or WETH for an ETH market).
+      const spend = /eth/i.test(leg.asset) ? "WETH" : "USDC";
+      const token = findToken(spend, resolveChainId);
+      if (!token) return { unsupported: `Pendle: ${spend} has no tracked address on this chain.` };
+      return { type: "swap", protocol: "pendle", token: token.address, symbol: token.symbol, amount: "0", chainId: resolveChainId, decimals: token.decimals };
+    }
     case "lido":
       return { unsupported: `Lido ${leg.side || "action"} not wired for live execution yet` };
-    case "eigenlayer":
-      return { unsupported: "EigenLayer restaking not wired for live execution yet" };
+    case "eigenlayer": {
+      // Restake stETH (the only open LST strategy wired), Ethereum only.
+      if (resolveChainId !== 1) return { unsupported: "EigenLayer restaking is only available on Ethereum mainnet." };
+      const symbol = bareSymbol(leg.asset);
+      if (!/^st?eth$/i.test(symbol)) return { unsupported: `EigenLayer restaking is wired for stETH only — "${symbol}" isn't.` };
+      const token = findToken("stETH", 1);
+      // stETH redeems 1:1 for ETH through Lido, so it's sized at the ETH price.
+      const quote = quoteFor("ETH", 18);
+      if (!token || !quote) return { unsupported: "No live price for ETH — cannot size this order safely." };
+      return { type: "stake", protocol: "eigenlayer", token: token.address, symbol: "stETH", amount: quote.amountBase, chainId: 1, decimals: 18 };
+    }
     case "bridge":
     case "cross-chain":
     case "debridge": {
@@ -749,7 +764,19 @@ export function approveOrderFor(order: Order): Order | null {
   // deBridge/LI.FI router swap: approve the SAME verified entrypoint the
   // quote will call (routerTx.to) — never a generic default, since that
   // address is chosen per-quote rather than fixed per protocol.
-  if ((order.protocol === "debridge" || order.protocol === "lifi") && order.type === "swap" && order.token && order.routerTx) {
+  // EigenLayer restake: approve the StrategyManager to pull the stETH.
+  if (order.protocol === "eigenlayer" && order.type === "stake" && order.token) {
+    return {
+      type: "approve",
+      protocol: "eigenlayer",
+      token: order.token,
+      symbol: order.symbol,
+      amount: order.amount,
+      chainId: order.chainId,
+      decimals: order.decimals,
+    };
+  }
+  if ((order.protocol === "debridge" || order.protocol === "lifi" || order.protocol === "pendle") && order.type === "swap" && order.token && order.routerTx) {
     return {
       type: "approve",
       protocol: order.protocol,
@@ -773,7 +800,7 @@ export function approveOrderFor(order: Order): Order | null {
 export function needsLiveCompletion(order: Order): boolean {
   const p = String(order.protocol);
   if (p === "morpho") return !order.vaultAddress && order.type !== "approve";
-  if (p === "debridge" || p === "lifi") return !order.routerTx;
+  if (p === "debridge" || p === "lifi" || p === "pendle") return !order.routerTx;
   if (p === "uniswap") return order.type === "swap" && !order.amountOutMinimum;
   return /hyperliquid|extended|ondo|lighter/.test(p);
 }

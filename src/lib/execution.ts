@@ -9,6 +9,8 @@ import {
   LIDO_WITHDRAWAL_QUEUE_ADDRESS,
 } from "./integrations/lido";
 import { isTrustedDebridgeEntrypoint, isTrustedLifiEntrypoint } from "./mcp/routerAllowlist";
+import { isTrustedPendleRouter } from "./integrations/pendle";
+import { EIGENLAYER_DEPOSIT_ABI, EIGENLAYER_RISK_NOTE, EIGENLAYER_STETH_STRATEGY, EIGENLAYER_STRATEGY_MANAGER } from "./integrations/eigenlayer";
 
 /**
  * Execution layer for Meridian's DeFi terminal.
@@ -954,10 +956,70 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
       return fail(`${assetLabel} perps on ${String(order.protocol)} use the LI.FI relay — use the dedicated perps panel instead.`);
     case "variational":
       return fail("Variational options are not yet wired for live execution.");
-    case "pendle":
-      return fail("Pendle fixed-yield (PT) is not yet wired for live execution.");
-    case "eigenlayer":
-      return fail("EigenLayer restaking is not yet wired for live execution.");
+    case "pendle": {
+      // Buy PT through Pendle's RouterV4. The calldata comes from Pendle's
+      // API (it routes the input token through an aggregator), so — like
+      // LI.FI/deBridge — its target is checked against Meridian's own
+      // router address before anything becomes signable.
+      if (order.type === "approve") {
+        const token = order.token;
+        const spender = order.spender as Address | undefined;
+        if (!token || !spender) return fail("Pendle approve requires a token and a spender");
+        if (!isTrustedPendleRouter(chainId, spender)) return fail(`Refusing to approve: ${spender} is not Pendle's verified router on ${chainLabel}.`);
+        const amount = normalizeAmount(order.amount, decimals);
+        if ("error" in amount) return amount;
+        return {
+          chainId,
+          address: token,
+          abi: ERC20_APPROVE_ABI,
+          functionName: "approve",
+          args: [spender, amount.value],
+          description: `Approve Pendle's router to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`,
+          riskNote: "Approval lets Pendle's verified router transfer up to this amount. Confirm before signing.",
+        };
+      }
+      if (order.type !== "swap") return fail(`Pendle only supports buying PT ('swap') and 'approve', got '${order.type}'`);
+      const routerTx = order.routerTx;
+      if (!routerTx) return fail("Pendle order requires routerTx (the quoted router call)");
+      if (!isTrustedPendleRouter(chainId, routerTx.to)) {
+        return fail(`Refusing to sign: ${routerTx.to} is not Pendle's verified router on ${chainLabel}. Refresh the quote and try again.`);
+      }
+      return {
+        chainId,
+        address: routerTx.to,
+        data: routerTx.data,
+        value: routerTx.value,
+        description: `Buy Pendle PT with ${order.amount} ${assetLabel} on ${chainLabel} (fixed yield to maturity)`,
+        riskNote: `Locks the market's implied APY until expiry: the PT redeems 1:1 for the underlying then. Selling before expiry happens at the market price, which can be lower. The underlying's own risk stays with you.`,
+      };
+    }
+
+    case "eigenlayer": {
+      if (chainId !== 1) return fail(`EigenLayer restaking is only on Ethereum mainnet, not ${chainLabel}`);
+      const amount = normalizeAmount(order.amount, decimals);
+      if ("error" in amount) return amount;
+      if (order.type === "approve") {
+        return {
+          chainId,
+          address: STETH_ADDRESS,
+          abi: ERC20_APPROVE_ABI,
+          functionName: "approve",
+          args: [EIGENLAYER_STRATEGY_MANAGER, amount.value],
+          description: `Approve EigenLayer's StrategyManager to spend up to ${order.amount} stETH`,
+          riskNote: "Approval lets EigenLayer's StrategyManager transfer up to this amount of stETH. Confirm before signing.",
+        };
+      }
+      if (order.type !== "stake") return fail(`EigenLayer only supports restaking ('stake') and 'approve', got '${order.type}'`);
+      return {
+        chainId,
+        address: EIGENLAYER_STRATEGY_MANAGER,
+        abi: EIGENLAYER_DEPOSIT_ABI,
+        functionName: "depositIntoStrategy",
+        args: [EIGENLAYER_STETH_STRATEGY, STETH_ADDRESS, amount.value],
+        description: `Restake ${order.amount} stETH into EigenLayer's stETH strategy`,
+        riskNote: EIGENLAYER_RISK_NOTE,
+      };
+    }
 
     default:
       return fail(`unknown protocol '${String(order.protocol)}'`);
