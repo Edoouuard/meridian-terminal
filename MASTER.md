@@ -141,6 +141,7 @@ Diagnostic honnête du code (≈ 22 000 lignes, 80 commits, 16 PR) :
 | `BETA_PASSWORD` | Accès bêta | présent (sensible, production) ; `NEXT_PUBLIC_BETA_PASSWORD` obsolète, à supprimer |
 | `LIFI_API_KEY` | Coffres earn LI.FI + quotas LI.FI | présente (sensible, production + preview) |
 | `BLOB_READ_WRITE_TOKEN` | Stockage | présent |
+| `NEXT_PUBLIC_SENTRY_DSN` | Suivi d'erreurs + journal des exécutions dans Sentry | **à créer** (sans DSN : journal dans les logs Vercel uniquement) |
 | `NEXT_PUBLIC_ALCHEMY_API_KEY` / `NEXT_PUBLIC_INFURA_API_KEY` | RPC dédiés sur les 7 chaînes (`lib/rpc.ts` : URL explicite `NEXT_PUBLIC_RPC_<CHAIN>` → Alchemy → Infura → publics) | **à créer** ; clés exposées au navigateur, à restreindre aux domaines Meridian côté fournisseur |
 
 ---
@@ -198,7 +199,7 @@ Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → s
 **Objectif : 5 à 10 utilisateurs réels sans que tu sois derrière eux.**
 
 - [~] RPC dédiés (Alchemy / Infura) pour les chaînes gardées — câblé (`lib/rpc.ts`) ; reste à créer les clés et les poser dans Vercel
-- [ ] Observabilité : journal serveur des exécutions (succès / échec / raison), suivi d'erreurs (Sentry ou équivalent)
+- [~] Observabilité — câblé : journal serveur des exécutions (`lib/execLog.ts` → `/api/exec-log` : une ligne `[exec-log]` par issue — succès / échec / raison, protocole, chaîne, montant, wallet, tx — dans les logs Vercel ; avec Sentry, un log Sentry par issue + une issue par échec actionnable : simulation, approbation, revert, RPC, timeout) ; suivi d'erreurs Sentry (`instrumentation.ts`, `instrumentation-client.ts`, error boundaries ; sans IP, cookies, en-têtes ni corps). Reste : créer le projet Sentry et poser `NEXT_PUBLIC_SENTRY_DSN` dans Vercel
 - [ ] Rate limit strict via Vercel WAF (le limiteur actuel est par instance)
 - [x] Test e2e automatisé du parcours d'or sur un fork (Anvil) en CI — voir Phase 0
 - [x] CI GitHub : lint + typecheck + tests + build sur chaque push (`.github/workflows/ci.yml`)
