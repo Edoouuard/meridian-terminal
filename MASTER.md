@@ -2,7 +2,7 @@
 
 > Vision, architecture, état réel et roadmap. **Ce fichier est la source de vérité** : toute PR doit faire avancer un item de la roadmap ci-dessous, et le mettre à jour.
 >
-> Dernière mise à jour : 2026-10-13 · `master` @ `4f84e0c` (PR #16)
+> Dernière mise à jour : 2026-10-13 · Phase 1 (hors wallet) faite sur `claude/focused-clarke-5s4k4i`
 
 ---
 
@@ -44,7 +44,7 @@ Un utilisateur DeFi déjà équipé d'un wallet (MetaMask, Rabby…) qui gère q
 | Positions utilisateur | 🟡 non vérifiées | liste vide sur l'adresse de test |
 | Coffres earn LI.FI | ❌ vides | `LIFI_API_KEY` manquante |
 | Routes deBridge avec swap | ❌ refusées | CrosschainForwarder hors allowlist (volontaire) |
-| Portefeuille sans wallet | ⚠️ **affiche un faux portefeuille de 128 400 $** | `src/lib/data.ts` (données démo) |
+| Portefeuille sans wallet | ✅ affiche « — » et invite à connecter un wallet (faux portefeuille supprimé) | Phase 1 |
 
 **En une phrase : les données marchent, l'exécution est construite mais n'a jamais été prouvée de bout en bout.** Tant qu'une vraie transaction n'est pas passée, le produit n'est pas « fonctionnel ».
 
@@ -63,6 +63,8 @@ Diagnostic honnête du code (≈ 22 000 lignes, 80 commits, 16 PR) :
 4. **Code mort qui brouille la lecture** : `lib/orchestrator.ts`, `lib/mcp/index.ts`, `lib/mcp/providers/index.ts`, `lib/integrations/index.ts`, `lib/heroArt.ts`, `hooks/useBaseMcp.ts`, `hooks/useLiveFeed.ts`, `hooks/useReveal.ts`, le composant `ExecuteButton` de `ThreadCard` (0 usage).
 5. **Un fichier monstre** : `components/ThreadCard.tsx` (1 730 lignes) mélange affichage, résolution d'ordres et 9 boutons d'exécution différents.
 6. **Rien ne mesure l'avancement** : pas de roadmap écrite, pas de critère de sortie. Ce document corrige ça.
+
+> **Mise à jour Phase 1 (2026-10-13)** : les points 3, 4 et 5 sont traités — un seul chemin d'exécution, code mort supprimé, `ThreadCard` découpé. Le point 1 (prouver un parcours en vrai) reste la Phase 0, qui demande ton wallet.
 
 ---
 
@@ -83,7 +85,7 @@ Diagnostic honnête du code (≈ 22 000 lignes, 80 commits, 16 PR) :
 │  assetMap.resolveOrderForLeg ──► Order (protocole, token, montant, chainId)          │
 │     │                                                                                │
 │     ▼                                                                                │
-│  ValidatedExecuteButton / useExecuteOrder  (machine à états)                         │
+│  ValidatedExecuteButton / useExecuteOrder ──► lib/orderRunner.ts                     │
 │     DRAFT → VALIDATING → SIMULATING → READY_FOR_SIGNATURE → SIGNING → CONFIRMED      │
 │     · adresses depuis onchain.ts / routerAllowlist.ts uniquement                     │
 │     · allowance lue on-chain, approve du montant exact                               │
@@ -98,7 +100,7 @@ Diagnostic honnête du code (≈ 22 000 lignes, 80 commits, 16 PR) :
 ┌────────────────▼──────────────── Serveur (routes API Next.js, Vercel) ───────────────┐
 │  Données : /prices /yield /best-yield /alpha /chains /vault-risk /yield-context      │
 │            /positions /stake-yield                                                   │
-│  Routage : /bridge /route-quote /swap ──► lib/mcp/router.ts (deBridge vs LI.FI)      │
+│  Routage : /bridge /route-quote ──► lib/mcp/router.ts (deBridge vs LI.FI)            │
 │  Risque  : /preview-action ──► Aave MCP (simulation health factor)                   │
 │  IA      : /parse-intent ──► OpenRouter                                              │
 │  Statut  : /mcp (santé des MCP)                                                      │
@@ -112,15 +114,15 @@ Diagnostic honnête du code (≈ 22 000 lignes, 80 commits, 16 PR) :
 
 | Couche | Fichiers | Rôle |
 |---|---|---|
-| UI | `app/page.tsx`, `components/ThreadCard.tsx`, `components/*Panel.tsx` | Terminal 3 colonnes, fil de conversation, panneaux |
+| UI | `app/page.tsx`, `components/ThreadCard.tsx`, `components/thread/*`, `components/execute/*`, `components/*Panel.tsx` | Terminal 3 colonnes, fil de conversation, boutons d'exécution par venue, panneaux |
 | Intent | `lib/intentEngine.ts`, `app/api/parse-intent`, `lib/tradePlan.ts` | Texte → `TradePlan` |
 | Résolution | `lib/assetMap.ts`, `lib/quote.ts` | `TradeLeg` → `Order` (montants exacts, prix live) |
-| Exécution | `lib/execution.ts`, `lib/executionPlan.ts`, `hooks/useExecuteOrder.ts`, `components/ValidatedExecuteButton.tsx`, `components/ConfirmDialog.tsx` | `Order` → transaction validée, simulée, signée |
-| Sécurité | `lib/onchain.ts`, `lib/mcp/routerAllowlist.ts`, `lib/safety.ts`, `lib/policy.ts` | Allowlist d'adresses, garde-fou HF, politiques |
+| Exécution | `lib/execution.ts`, `lib/executionPlan.ts`, `lib/orderRunner.ts`, `hooks/useExecuteOrder.ts`, `hooks/useStrategyExecutor.ts`, `components/ValidatedExecuteButton.tsx`, `components/ConfirmDialog.tsx` | `Order` → transaction validée, simulée, signée |
+| Sécurité | `lib/onchain.ts`, `lib/mcp/routerAllowlist.ts`, `lib/safety.ts` | Allowlist d'adresses, garde-fou HF |
 | Routage | `lib/mcp/router.ts`, `lib/mcp/{debridge,lifi}.ts` | Devis comparés, tx de bridge/swap |
 | MCP | `lib/mcp/client.ts`, `lib/mcp/aave.ts` | Client MCP robuste (timeouts, coercition, replis) |
 | Portefeuille | `hooks/useLivePortfolio.ts`, `app/api/positions` | Soldes et positions on-chain |
-| Infra | `proxy.ts`, `lib/rateLimit.ts`, `lib/betaGate.ts` | Rate limit, accès bêta |
+| Infra | `proxy.ts`, `lib/rateLimit.ts`, `lib/betaGate.ts`, `lib/features.ts` | Rate limit, accès bêta, feature flags |
 
 ### 4.3 Invariants de sécurité (non négociables)
 
@@ -129,7 +131,7 @@ Diagnostic honnête du code (≈ 22 000 lignes, 80 commits, 16 PR) :
 3. **Simulation avant signature.** Une simulation qui échoue bloque.
 4. **Health factor** : tout borrow/withdraw Aave simulé ; refus sous 1,10.
 5. **Meridian ne signe jamais** : le serveur ne détient aucune clé.
-6. **Un seul chemin d'exécution** (cible) : tout passe par `useExecuteOrder`. *Aujourd'hui violé par `useStrategyExecutor` et le claim Lido — voir Phase 1.*
+6. **Un seul chemin d'exécution** : tout ordre wallet passe par `lib/orderRunner.ts` (via `useExecuteOrder` ou `useStrategyExecutor`). Seuls les perps (signatures EIP-712 / StarkEx propres à chaque venue) ont leur propre chemin, et ils sont désactivés par défaut.
 
 ### 4.4 Configuration (Vercel)
 
@@ -167,14 +169,16 @@ Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → s
 
 **Objectif : moins de code, un seul chemin, un code lisible.**
 
-- [ ] Migrer `useStrategyExecutor` (multi-legs) sur `useExecuteOrder` → simulation + allowance lue on-chain pour tous les ordres
-- [ ] Migrer le claim Lido sur `useExecuteOrder`, puis supprimer `useExecute` (garder `explorerUrlFor` ailleurs)
-- [ ] Supprimer le code mort (liste §3.4)
-- [ ] Découper `ThreadCard.tsx` : `ThreadCard` (affichage) + `components/execute/*` (un bouton par venue) + résolution d'ordre hors composant
-- [ ] Fusionner les couches MCP : garder `lib/mcp/{client,debridge,lifi,aave,router}.ts`, supprimer `providers/` si redondant
-- [ ] **Réduire la surface visible** : derrière un flag, masquer ce qui n'est pas prouvé (perps, Solana, chaînes secondaires). Garder Ethereum, Base, Arbitrum (+ Optimism, Polygon pour le bridge)
-- [ ] Vérifier le double comptage potentiel Haiku + soldes live dans la valeur du portefeuille (`page.tsx`)
-- [ ] Ajouter `LIFI_API_KEY` (coffres earn)
+- [x] Un seul chemin d'exécution : `lib/orderRunner.ts` (prépare → simule → signe), utilisé par `useExecuteOrder` **et** `useStrategyExecutor`. Les stratégies multi-legs sont désormais vérifiées (solde, allowance, simulation) avant chaque signature, et chaque leg utilise le client de sa propre chaîne. *Preuve : 9 tests unitaires `orderRunner.test.ts` (wallet et chaîne simulés).*
+- [x] Claim Lido migré sur le chemin validé ; `useExecute` et l'`ExecuteButton` inutilisé supprimés ; `explorerUrlFor` → `lib/explorer.ts`
+- [x] Code mort supprimé : ~3 000 lignes nettes (orchestrator, policy, broadcast, feeds, registre perps + stubs, barrels, hooks inutilisés, données démo, `/api/swap` sans appelant, fonctions MCP mortes)
+- [x] `ThreadCard.tsx` découpé : 1 730 → 295 lignes (`components/execute/*`, `components/thread/*`)
+- [x] Couches MCP fusionnées : un module par fournisseur (`lib/mcp/{client,aave,debridge,lifi,router}.ts`) ; `providers/` ne garde que Haiku et Base
+- [x] Surface réduite par flags (`lib/features.ts`) : perps et Solana masqués par défaut (`NEXT_PUBLIC_FEATURE_PERPS=1` / `NEXT_PUBLIC_FEATURE_SOLANA=1` pour les réactiver) ; le chat ne propose plus de perps tant qu'ils sont coupés
+- [ ] Chaînes secondaires : **non fait** — masquer des chaînes cache aussi les fonds de l'utilisateur sur ces chaînes dans le portefeuille ; décision à prendre (D1)
+- [x] Double comptage Haiku corrigé : Haiku relisait les mêmes soldes (LI.FI) et positions Aave (Aave MCP) ; seules ses positions hors protocoles déjà suivis sont ajoutées
+- [x] Bug démo corrigé : un wallet connecté sans staking affichait 42 % de concentration staking (valeur démo)
+- [ ] Ajouter `LIFI_API_KEY` (coffres earn) — **action Vercel de ta part**
 
 **Critère de sortie :** un seul hook d'exécution, `ThreadCard` < 500 lignes, aucun module mort, les parcours de la Phase 0 passent toujours.
 
