@@ -40,7 +40,7 @@ Un utilisateur DeFi déjà équipé d'un wallet (MetaMask, Rabby…) qui gère q
 | Rate limit API + mot de passe bêta | ✅ | PR #16, testé en local |
 | Mobile | 🟡 codé, jamais vu sur téléphone | PR #16 |
 | Chat IA (`parse-intent`, OpenRouter / Gemini Flash) | 🟡 non vérifié en prod | clé en Production uniquement, prod derrière mot de passe |
-| Exécution (validation → approve exact → simulation → signature) | 🟡 **jamais testée avec un vrai wallet** | uniquement tests unitaires |
+| Exécution (validation → approve exact → simulation → signature) | 🟡 prouvée sur un fork de Base (vrais contrats Aave/USDC), **pas encore avec un vrai wallet** | CI `fork` + tests unitaires |
 | Positions utilisateur | 🟡 non vérifiées | liste vide sur l'adresse de test |
 | Coffres earn LI.FI | ❌ vides | `LIFI_API_KEY` manquante |
 | Routes deBridge avec swap | ❌ refusées | CrosschainForwarder hors allowlist (volontaire) |
@@ -161,7 +161,7 @@ Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → s
 - [ ] Corriger tout ce qui casse pendant ce test (**moi**, sur retour d'erreur)
 - [ ] Vérifier que la position Aave apparaît après confirmation
 - [x] Remplacer le faux portefeuille de 128 400 $ par un état « connecte ton wallet » clair (Phase 1)
-- [ ] Preuve sans wallet : le parcours d'or exécuté par le vrai code contre les vrais contrats Aave + USDC sur un **fork de Base** en CI (`e2e/aaveSupply.fork.test.ts`, aucun argent réel). Ne remplace pas le test réel, mais élimine les erreurs de code avant.
+- [x] Preuve sans wallet : le parcours d'or exécuté par le vrai code contre les vrais contrats Aave + USDC sur un **fork de Base** en CI (`e2e/aaveSupply.fork.test.ts`, aucun argent réel). *Preuve : CI run [38393651681](https://github.com/Edoouuard/meridian-terminal/actions/runs/38393651681) — approve exact → supply → `CONFIRMED`, allowance consommée à 0, collatéral ≈ 100 $ visible dans Aave ; refus avant signature si solde insuffisant.* Ne remplace pas le test avec ton wallet (UI, wallet, réseau réel), mais la logique d'exécution est prouvée.
 - [ ] Deuxième parcours : bridge 5 USDC Arbitrum → Base
 
 **Critère de sortie :** 2 transactions réelles confirmées (supply Aave + bridge), visibles dans l'app, sans intervention manuelle.
@@ -190,8 +190,8 @@ Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → s
 - [ ] RPC dédiés (Alchemy / Infura) pour les chaînes gardées
 - [ ] Observabilité : journal serveur des exécutions (succès / échec / raison), suivi d'erreurs (Sentry ou équivalent)
 - [ ] Rate limit strict via Vercel WAF (le limiteur actuel est par instance)
-- [ ] Test e2e automatisé du parcours d'or sur un fork (Anvil) en CI — *en place, voir Phase 0*
-- [ ] CI GitHub : lint + typecheck + tests + build sur chaque push (`.github/workflows/ci.yml`)
+- [x] Test e2e automatisé du parcours d'or sur un fork (Anvil) en CI — voir Phase 0
+- [x] CI GitHub : lint + typecheck + tests + build sur chaque push (`.github/workflows/ci.yml`)
 - [ ] Onboarding : 3 prompts suggérés, états vides propres, messages d'erreur compréhensibles
 - [ ] Décision deBridge CrosschainForwarder (routes avec swap)
 
