@@ -25,7 +25,7 @@ jobs:
       - run: npm run build
 
   fork:
-    name: Golden paths on forks (Aave on Base, bridge from Arbitrum)
+    name: Golden paths on forks (Aave on Base, bridge from Arbitrum, Pendle + EigenLayer on Ethereum)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -35,14 +35,16 @@ jobs:
           cache: npm
       - run: npm ci
       - uses: foundry-rs/foundry-toolchain@v1
-      - name: Start anvil forks (Base, Arbitrum)
+      - name: Start anvil forks (Base, Arbitrum, Ethereum)
         env:
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
           ARB_RPC_URL: ${{ secrets.ARB_RPC_URL }}
+          ETH_RPC_URL: ${{ secrets.ETH_RPC_URL }}
         run: |
           anvil --fork-url "${BASE_RPC_URL:-https://mainnet.base.org}" --port 8545 --silent &
           anvil --fork-url "${ARB_RPC_URL:-https://arb1.arbitrum.io/rpc}" --port 8546 --silent &
-          for port in 8545 8546; do
+          anvil --fork-url "${ETH_RPC_URL:-https://ethereum-rpc.publicnode.com}" --port 8547 --silent &
+          for port in 8545 8546 8547; do
             ok=0
             for i in $(seq 1 30); do
               if curl -sf -X POST -H 'content-type: application/json' \
@@ -55,3 +57,4 @@ jobs:
         env:
           ANVIL_URL: http://127.0.0.1:8545
           ANVIL_ARB_URL: http://127.0.0.1:8546
+          ANVIL_ETH_URL: http://127.0.0.1:8547

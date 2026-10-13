@@ -97,6 +97,8 @@ const WALLET_DEBITING_ACTIONS: ReadonlySet<string> = new Set([
   "uniswap:swap",
   "debridge:swap",
   "lifi:swap",
+  "pendle:swap",
+  "eigenlayer:stake",
   "eth:transfer",
   "erc20:transfer",
 ]);

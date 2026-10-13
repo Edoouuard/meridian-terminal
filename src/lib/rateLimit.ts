@@ -55,6 +55,7 @@ export const API_RATE_LIMITS: Array<[prefix: string, rule: RateLimitRule]> = [
   ["/api/beta-login", { limit: 10, windowMs: MINUTE }], // password guessing
   ["/api/bridge", { limit: 30, windowMs: MINUTE }],
   ["/api/route-quote", { limit: 30, windowMs: MINUTE }],
+  ["/api/pendle", { limit: 30, windowMs: MINUTE }],
   ["/api/preview-action", { limit: 30, windowMs: MINUTE }],
 ];
 

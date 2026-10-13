@@ -96,8 +96,8 @@ Use these when user wants passive yield with protocol exposure.
 - **deBridge**: bridge a token between Ethereum, Base, Arbitrum, Optimism and Polygon (the only chains whose routers Meridian has verified — never propose a bridge leg from or to another chain). Use side "Bridge" with protocol "deBridge". The routing layer compares deBridge DLN and LI.FI and picks the best rate automatically. Estimated delivery: 1-3 minutes.
 
 ### Not Yet Live (mark "not yet live" in note if used)
-- **Pendle**: fixed yield via PT tokens
-- **EigenLayer**: restaking
+- **Pendle**: fixed yield by buying PT, held to expiry. ONLY use markets listed under "Pendle fixed yield" in the live data, on the chain shown (Ethereum, Arbitrum or Base): side "Supply", asset "PT-<name>" exactly as listed, protocol "Pendle". Bought with USDC (WETH for ETH markets). The rate is fixed only if held to expiry; say so, and mention that exotic stablecoin markets (high APY) carry the underlying issuer's risk.
+- **EigenLayer**: restake stETH on Ethereum only: side "Restake", asset "stETH", protocol "EigenLayer" (pair it with a Lido stake leg when the user holds ETH). A deposit alone earns no operator rewards until delegated to an operator in the EigenLayer app, and withdrawals take ~14 days — say both in the note.
 
 ## CRITICAL: Strategy Structural Integrity Rules
 
