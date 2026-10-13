@@ -392,7 +392,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           abi: AAVE_V3_POOL_REPAY_ABI,
           functionName: "repay",
           // [asset, amount, interestRateMode, onBehalfOf] — onBehalfOf is patched with
-          // the connected sender by useExecute via `senderIndex`.
+          // the connected sender by applySender via `senderIndex`.
           args: [token, amount.value, AAVE_INTEREST_RATE_MODE_VARIABLE, zeroAddress],
           senderIndex: 3,
           description: `Repay ${order.amount} ${assetLabel} of Aave v3 debt (variable rate) on ${chainLabel}`,
