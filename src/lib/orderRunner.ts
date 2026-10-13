@@ -18,7 +18,8 @@
  */
 
 import type { Address } from "viem";
-import { ERC20_ABI, ERC20_ALLOWANCE_ABI } from "@/lib/onchain";
+import { CHAIN_LABEL, ERC20_ABI, ERC20_ALLOWANCE_ABI } from "@/lib/onchain";
+import { formatBaseUnits } from "@/lib/quote";
 import { applySender, buildExecution, normalizeAmount, type ExecutionPlan, type Order } from "@/lib/execution";
 import { approveOrderFor } from "@/lib/assetMap";
 import { needsAllowanceReset } from "@/lib/integrations/usdt";
@@ -138,6 +139,33 @@ function resolveApproval(order: Order): ResolvedApproval | null | { error: strin
   return { built, spender };
 }
 
+/**
+ * Say exactly what's short: how much of which token the wallet holds on which
+ * chain versus what the order needs — and, for a WETH order, whether the
+ * wallet holds enough native ETH to wrap instead (Aave/Uniswap take WETH).
+ */
+async function insufficientBalanceMessage(
+  client: OrderRunnerClient,
+  address: Address,
+  order: Order,
+  needed: bigint,
+  held: bigint,
+  nativeValue: bigint | undefined,
+): Promise<string> {
+  const decimals = order.decimals ?? 18;
+  const isNative = nativeValue !== undefined && nativeValue > BigInt(0);
+  const symbol = isNative ? (order.symbol ?? "ETH") : (order.symbol ?? "tokens");
+  const chain = CHAIN_LABEL[order.chainId] ?? `chain ${order.chainId}`;
+  let message = `Insufficient balance: this order needs ${formatBaseUnits(needed, decimals)} ${symbol} on ${chain}, your wallet holds ${formatBaseUnits(held, decimals)}.`;
+  if (!isNative && symbol.toUpperCase() === "WETH") {
+    const native = await client.getBalance({ address }).catch(() => undefined);
+    if (native !== undefined && native >= needed) {
+      message += ` You hold ${formatBaseUnits(native, 18)} ETH — this venue takes WETH, so wrap ETH to WETH first.`;
+    }
+  }
+  return message;
+}
+
 /** eth_call the plan: simulateContract for ABI plans, a raw call for router calldata. Native sends have nothing to simulate. */
 async function simulatePlan(client: OrderRunnerClient, account: Address, plan: ExecutionPlan): Promise<void> {
   if (plan.abi && plan.functionName && plan.args) {
@@ -210,7 +238,13 @@ export async function prepareOrder(deps: OrderRunnerDeps, order: Order): Promise
     }
   }
   const validation = validateOrderPlan(plan, { connectedAddress: address, connectedChainId: deps.connectedChainId, liveBalance });
-  if (!validation.ok) return failure(deps, plan, validation.state, validation.message);
+  if (!validation.ok) {
+    if (validation.state === "INSUFFICIENT_BALANCE" && liveBalance !== undefined) {
+      const message = await insufficientBalanceMessage(client, address, exactOrder, normalized.value, liveBalance, patched.value);
+      return failure(deps, plan, validation.state, message);
+    }
+    return failure(deps, plan, validation.state, validation.message);
+  }
 
   transition(deps, plan, "SIMULATING");
   const approval = resolveApproval(exactOrder);
