@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:fork": "vitest run --config vitest.fork.config.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "audit:onchain": "vitest run -c vitest.audit.config.ts"
   },
   "dependencies": {
     "@blackcube/extended-sdk": "0.56.0",

@@ -1,0 +1,27 @@
+name: On-chain address audit
+
+# Report-only: reads every contract Meridian signs against on its live chain
+# (code present, token decimals, Aave reserve flags, Compound base token,
+# Uniswap router/quoter pairing and a live quote). Re-runs whenever an
+# address table changes.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - src/lib/onchain.ts
+      - src/lib/integrations/uniswap.ts
+      - src/lib/mcp/routerAllowlist.ts
+      - e2e/onchain.audit.test.ts
+      - .github/workflows/onchain-audit.yml
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run audit:onchain
