@@ -14,6 +14,7 @@ import { useVaultRisk } from "@/hooks/useVaultRisk";
 import { PHILIDOR_PROTOCOL_ID } from "@/lib/integrations/philidor";
 import { formatBaseUnits } from "@/lib/quote";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { FEATURES } from "@/lib/features";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
 import { BridgeExecuteButton } from "@/components/BridgeExecuteButton";
 import { ExtendedPerpExecuteButton, LifiPerpExecuteButton, PerpExecuteButton } from "@/components/execute/PerpExecuteButtons";
@@ -116,7 +117,9 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
             <LegRiskBadge leg={leg} />
             <StakeYieldBadge leg={leg} />
             {isUnsupported(resolved) ? (
-              /hyperliquid/i.test(leg.protocol || "") ? (
+              !FEATURES.perps && /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "") ? (
+                <NotWired venue={leg.protocol} reason="Perps are paused during the beta while spot execution is validated end to end." />
+              ) : /hyperliquid/i.test(leg.protocol || "") ? (
                 <PerpExecuteButton leg={leg} prices={prices} />
               ) : /extended/i.test(leg.protocol || "") ? (
                 <ExtendedPerpExecuteButton leg={leg} prices={prices} />

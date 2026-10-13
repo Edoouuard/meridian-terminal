@@ -20,6 +20,7 @@ import { LiveAsset, LivePortfolio, useLivePortfolio } from "@/hooks/useLivePortf
 import { useHaikuPortfolio } from "@/hooks/useHaikuPortfolio";
 import { NewsFeed } from "@/components/NewsFeed";
 import { CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
+import { FEATURES } from "@/lib/features";
 import { routeThesis, type TradePlan } from "@/lib/routeThesis";
 import { routeThesisAsync, type PortfolioContext } from "@/lib/intentEngine";
 import { recordExecution } from "@/lib/history";
@@ -166,17 +167,17 @@ export default function TerminalApp() {
   const QUICK_PROMPTS = [
     { label: "Yield on stables", thesis: "I want the best yield on my USDC across all protocols" },
     { label: "ETH exposure", thesis: "I want exposure to ETH with different risk levels" },
-    { label: "Farm airdrops", thesis: "I want to farm airdrops and points with a delta-neutral strategy" },
-    { label: "Hedge portfolio", thesis: "I need to hedge my ETH exposure, I think the market is going down" },
+    { label: "Farm airdrops", thesis: "I want to farm airdrops and points with a delta-neutral strategy", perps: true },
+    { label: "Hedge portfolio", thesis: "I need to hedge my ETH exposure, I think the market is going down", perps: true },
     { label: "Stake ETH", thesis: "I want to stake my ETH for yield, what are the best options?" },
-  ];
+  ].filter((p) => FEATURES.perps || !("perps" in p));
 
   const FOLLOW_UPS = [
     { label: "Lower risk", thesis: "Same idea but more conservative, less leverage" },
     { label: "More yield", thesis: "I want to push for higher yield, I can take more risk" },
     { label: "On Arbitrum", thesis: "Show me the same strategies but on Arbitrum" },
-    { label: "Delta neutral", thesis: "Make it delta neutral, I don't want directional exposure" },
-  ];
+    { label: "Delta neutral", thesis: "Make it delta neutral, I don't want directional exposure", perps: true },
+  ].filter((p) => FEATURES.perps || !("perps" in p));
 
   return (
     <div className="app-shell" style={{ background: "var(--color-bg)", color: "var(--color-text)", height: "100vh", display: "flex", flexDirection: "column" }}>
@@ -263,7 +264,7 @@ export default function TerminalApp() {
               <p style={{ fontSize: 12, margin: "6px 0 0" }} className="text-muted">
                 {live.isLoading
                   ? "Reading your wallet balances and Aave position…"
-                  : `No tracked assets or Aave position found across ${CHAIN_NAMES}. Connect Extended, Ondo, or Lighter (left panel) to trade their perps — Variational and Pendle aren't wired up yet.`}
+                  : `No tracked assets or Aave position found across ${CHAIN_NAMES}.`}
               </p>
             )}
           </div>
@@ -294,12 +295,16 @@ export default function TerminalApp() {
             <>
               <McpStatusPanel />
               <BridgePanel />
-              <HyperliquidPanel />
-              <ExtendedConnectPanel />
-              <LifiPerpsConnectPanel provider="ondo" />
-              <LifiPerpsConnectPanel provider="lighter" />
+              {FEATURES.perps && (
+                <>
+                  <HyperliquidPanel />
+                  <ExtendedConnectPanel />
+                  <LifiPerpsConnectPanel provider="ondo" />
+                  <LifiPerpsConnectPanel provider="lighter" />
+                </>
+              )}
               <LidoWithdrawalsPanel />
-              <SolanaPanel />
+              {FEATURES.solana && <SolanaPanel />}
             </>
           )}
           {leftTab === "activity" && <HistoryPanel />}
