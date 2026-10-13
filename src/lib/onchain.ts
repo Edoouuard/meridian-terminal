@@ -80,7 +80,7 @@ export const AAVE_V3_POOL_BY_CHAIN: Record<number, Address> = {
   [linea.id]: "0xc47b8C00b0f69a36fa203Ffeac0334874574a8Ac",
   [mantle.id]: "0x458F293454fE0d67EC0655f3672301301DD51422",
   [metis.id]: "0x90df02551bB792286e8D4f13E0e357b4Bf1D6a57",
-  [fantom.id]: "0x794a61358D6845594F94dc1DB02A252b5b4814aD",
+  // Fantom: no Aave v3 pool code on-chain any more (the market moved to Sonic).
   [sonic.id]: "0x5362dBb1e601abF3a4c14c22ffEdA64042E5eAA3",
   [celo.id]: "0x3E59A31363E2ad014dcbc521c4a0d5757d9f3402",
 };
@@ -139,8 +139,9 @@ export const COMPOUND_V3_USDC_COMET_BY_CHAIN: Record<number, Address> = {
   [base.id]: "0xb125E6687d4313864e53df431d5425969c15Eb2F",
   [arbitrum.id]: "0x9c4ec768c28520B50860ea7a15bd7213a9fF58bf",
   [optimism.id]: "0x2e44e174f7D53F0212823acC11C01A11d58c5bCB",
-  [polygon.id]: "0xF25212E676D1F7F89Cd72fFEe66158f541246445",
   [scroll.id]: "0xB2f97c1Bd3bf02f5e74d13f02E3e26F93D77CE44",
+  // Polygon's USDC Comet is denominated in bridged USDC.e, not the native USDC
+  // Meridian tracks there — an approve/supply would target the wrong token.
 };
 
 export interface TrackedToken {
@@ -380,7 +381,6 @@ export const LENDING_POOLS_BY_CHAIN: Record<number, LendingPool[]> = {
   [linea.id]: [{ protocol: "Aave v3", pool: "0xc47b8C00b0f69a36fa203Ffeac0334874574a8Ac" }],
   [mantle.id]: [{ protocol: "Aave v3", pool: "0x458F293454fE0d67EC0655f3672301301DD51422" }],
   [metis.id]: [{ protocol: "Aave v3", pool: "0x90df02551bB792286e8D4f13E0e357b4Bf1D6a57" }],
-  [fantom.id]: [{ protocol: "Aave v3", pool: "0x794a61358D6845594F94dc1DB02A252b5b4814aD" }],
   [sonic.id]: [{ protocol: "Aave v3", pool: "0x5362dBb1e601abF3a4c14c22ffEdA64042E5eAA3" }],
   [celo.id]: [{ protocol: "Aave v3", pool: "0x3E59A31363E2ad014dcbc521c4a0d5757d9f3402" }],
 };

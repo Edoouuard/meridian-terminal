@@ -1,6 +1,7 @@
 "use client";
 
-import { useAccount, useBalance, useSimulateContract } from "wagmi";
+import { zeroAddress } from "viem";
+import { useAccount, useBalance, useReadContracts } from "wagmi";
 import { findToken, DEFAULT_CHAIN_ID } from "@/lib/assetMap";
 import { CHAIN_LABEL, STETH_ADDRESS, SUPPORTED_CHAINS } from "@/lib/onchain";
 import type { Order } from "@/lib/execution";
@@ -10,7 +11,7 @@ import { useIndexedPositions } from "@/hooks/useIndexedPositions";
 import { useVaultRisk } from "@/hooks/useVaultRisk";
 import { MIN_VAULT_TVL_USD } from "@/lib/vaultPolicy";
 import { MIN_MORPHO_RISK_SCORE } from "@/lib/integrations/morpho";
-import { QUOTER_V2_QUOTE_EXACT_INPUT_SINGLE_ABI, UNISWAP_QUOTER_V2_BY_CHAIN, applySlippage, defaultFeeTier, parseSwapAsset } from "@/lib/integrations/uniswap";
+import { QUOTER_V2_QUOTE_READ_ABI, QUOTE_FEE_TIERS, UNISWAP_QUOTER_V2_BY_CHAIN, applySlippage, parseSwapAsset, pickBestFeeQuote } from "@/lib/integrations/uniswap";
 import { formatBaseUnits, resolvePriceFromList, usdToTokenAmount, type PriceEntry } from "@/lib/quote";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
 import { NotWired, OrderRow, RISK_TIER_COLOR } from "@/components/thread/shared";
@@ -32,28 +33,27 @@ export function SwapExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: Pri
   const parsed = parseSwapAsset(leg.asset);
   const tokenIn = parsed ? findToken(parsed.from, chainId) : undefined;
   const tokenOut = parsed ? findToken(parsed.to, chainId) : undefined;
-  const fee = tokenIn && tokenOut ? defaultFeeTier(tokenIn.symbol, tokenOut.symbol) : undefined;
-
   const price = tokenIn ? resolvePriceFromList(prices, tokenIn.symbol) : null;
   const inQuote = tokenIn ? usdToTokenAmount(tokenIn.symbol, leg.sizeUsd, price, tokenIn.decimals) : null;
 
+  // Quote every fee tier and keep the best pool: the deepest pool differs by
+  // pair and chain (e.g. USDC/WETH only has a 0.05% pool on Avalanche).
   const quoterAddress = UNISWAP_QUOTER_V2_BY_CHAIN[chainId];
-  const quoteEnabled = !!(tokenIn && tokenOut && fee && inQuote && quoterAddress);
-  const {
-    data: sim,
-    isLoading: quoting,
-    error: quoteError,
-  } = useSimulateContract({
-    address: quoterAddress,
-    abi: QUOTER_V2_QUOTE_EXACT_INPUT_SINGLE_ABI,
-    functionName: "quoteExactInputSingle",
-    args:
-      tokenIn && tokenOut && fee !== undefined && inQuote
-        ? [{ tokenIn: tokenIn.address, tokenOut: tokenOut.address, amountIn: inQuote.amountBase, fee, sqrtPriceLimitX96: BigInt(0) }]
-        : undefined,
-    chainId: chainId as (typeof SUPPORTED_CHAINS)[number]["id"],
+  const quoteEnabled = !!(tokenIn && tokenOut && inQuote && quoterAddress);
+  const { data: tierQuotes, isLoading: quoting } = useReadContracts({
+    contracts: QUOTE_FEE_TIERS.map((fee) => ({
+      address: quoterAddress,
+      abi: QUOTER_V2_QUOTE_READ_ABI,
+      functionName: "quoteExactInputSingle" as const,
+      args: [{ tokenIn: tokenIn?.address ?? zeroAddress, tokenOut: tokenOut?.address ?? zeroAddress, amountIn: inQuote?.amountBase ?? BigInt(0), fee, sqrtPriceLimitX96: BigInt(0) }] as const,
+      chainId: chainId as (typeof SUPPORTED_CHAINS)[number]["id"],
+    })),
+    allowFailure: true,
     query: { enabled: quoteEnabled },
   });
+  const best = tierQuotes
+    ? pickBestFeeQuote(tierQuotes.map((r, i) => ({ fee: QUOTE_FEE_TIERS[i], amountOut: r.status === "success" ? r.result[0] : undefined })))
+    : null;
 
   if (!parsed) {
     return <NotWired venue="Uniswap" reason={`Could not parse a swap pair from "${leg.asset}".`} />;
@@ -73,16 +73,16 @@ export function SwapExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: Pri
   if (!inQuote) {
     return <NotWired venue="Uniswap" reason={`No live price for ${tokenIn.symbol} — cannot size this order safely.`} />;
   }
-  if (quoteError) {
-    return <NotWired venue="Uniswap" reason="Could not fetch a live quote from Uniswap right now." />;
-  }
-  if (quoting || !sim) {
+  if (quoting || !tierQuotes) {
     return (
       <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>Fetching live Uniswap quote…</p>
     );
   }
 
-  const amountOut = sim.result[0];
+  if (!best) {
+    return <NotWired venue="Uniswap" reason={`No Uniswap v3 pool quotes ${tokenIn.symbol} → ${tokenOut.symbol} on ${CHAIN_LABEL[chainId] ?? `chain ${chainId}`} right now.`} />;
+  }
+  const { fee, amountOut } = best;
   const amountOutMinimum = applySlippage(amountOut);
 
   const order: Order = {
