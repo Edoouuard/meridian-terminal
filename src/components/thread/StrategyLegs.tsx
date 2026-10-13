@@ -6,6 +6,7 @@ import { useAccount } from "wagmi";
 import type { StakeYieldEntry } from "@/app/api/stake-yield/route";
 import { resolveOrderForLeg, protocolLabel } from "@/lib/assetMap";
 import type { Order } from "@/lib/execution";
+import { legChainId } from "@/lib/chains";
 import type { TradeLeg, TradePlan } from "@/lib/tradePlan";
 import { explorerUrlFor } from "@/lib/explorer";
 import { useStrategyExecutor, type LegStatus } from "@/hooks/useStrategyExecutor";
@@ -98,7 +99,7 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       {plan.legs.map((leg, i) => {
-        const resolved = resolveOrderForLeg(leg, undefined, prices, chain?.id);
+        const resolved = resolveOrderForLeg(leg, undefined, prices, legChainId(leg, chain?.id));
         const legSide = (leg.side || "").toLowerCase();
         const isMorpho = /morpho/i.test(leg.protocol || "");
         const isLido = /lido/i.test(leg.protocol || "");
@@ -186,7 +187,7 @@ export function ExecuteStrategyButton({ plan }: { plan: TradePlan }) {
     const results: { leg: TradeLeg; order: Order; legIndex: number }[] = [];
     for (let i = 0; i < plan.legs.length; i++) {
       const leg = plan.legs[i];
-      const resolved = resolveOrderForLeg(leg, undefined, prices, chain?.id);
+      const resolved = resolveOrderForLeg(leg, undefined, prices, legChainId(leg, chain?.id));
       if (!isUnsupported(resolved)) {
         results.push({ leg, order: resolved, legIndex: i });
       }

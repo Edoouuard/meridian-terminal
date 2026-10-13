@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useAccount } from "wagmi";
+import { useAccount, useSwitchChain } from "wagmi";
 import type { Order } from "@/lib/execution";
 import { CHAIN_LABEL } from "@/lib/onchain";
 import { formatBaseUnits } from "@/lib/quote";
@@ -45,7 +45,8 @@ export function ValidatedExecuteButton({
   /** Called once with the main tx hash after it confirms on-chain. */
   onConfirmed?: (hash: `0x${string}`) => void;
 }) {
-  const { isConnected, address } = useAccount();
+  const { isConnected, address, chainId: walletChainId } = useAccount();
+  const { switchChain, isPending: switching } = useSwitchChain();
   const portfolio = useLivePortfolio();
   const { state, message, builtPlan, approvalHash, mainHash, needsApproval, prepare, confirm, reset } = useExecuteOrder(() => {
     void portfolio.refetchPortfolio();
@@ -144,6 +145,20 @@ export function ValidatedExecuteButton({
   }
 
   const mustRefuse = !!guardrail.refused;
+
+  // The order is built for its own chain; offer the switch instead of failing validation.
+  if (isConnected && walletChainId !== order.chainId && state === "DRAFT") {
+    return (
+      <button
+        className="btn btn-primary"
+        style={{ fontSize: 13, marginTop: 6, cursor: "pointer" }}
+        disabled={switching}
+        onClick={() => switchChain({ chainId: order.chainId as Parameters<typeof switchChain>[0]["chainId"] })}
+      >
+        {switching ? "Switching…" : `Switch wallet to ${chainLabel}`}
+      </button>
+    );
+  }
 
   return (
     <>

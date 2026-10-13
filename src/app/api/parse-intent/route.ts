@@ -192,6 +192,9 @@ sizeUsd: integer USD value.
 leverage: only for Long/Short legs. Integer.
 note: MUST include the exact live rate from data (e.g. "Currently 4.23% APY", "Funding +12.3% annualized").
 
+## Chain of each leg (REQUIRED)
+Every leg MUST set "chain" to the chain where that leg executes, using one of: Ethereum, Base, Arbitrum, Optimism, Polygon, Avalanche, BNB Chain, Gnosis, Scroll, zkSync, Linea, Mantle, Metis, Fantom, Sonic, Celo. If the user names a chain, use it. For a Bridge leg, "chain" is the SOURCE chain. The transaction is built on exactly this chain, so it must match the strategy name and summary.
+
 ## Output Format
 
 Return ONLY valid JSON (no markdown, no text before/after):
@@ -204,7 +207,7 @@ Return ONLY valid JSON (no markdown, no text before/after):
       "variantNote": "Specific risk of this strategy",
       "summary": "2-3 sentences with exact live rates and expected outcome.",
       "legs": [
-        { "side": "Supply", "asset": "USDC", "protocol": "Aave", "sizeUsd": 10000, "note": "Currently X.XX% APY on Ethereum" }
+        { "side": "Supply", "asset": "USDC", "protocol": "Aave", "chain": "Ethereum", "sizeUsd": 10000, "note": "Currently X.XX% APY on Ethereum" }
       ]
     },
     { "name": "...", "risk": "moderate", "variantNote": "...", "summary": "...", "legs": [...] },

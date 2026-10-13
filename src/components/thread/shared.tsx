@@ -52,8 +52,8 @@ export function NotWired({ venue, reason }: { venue: string; reason: string }) {
   );
 }
 
-export function legRowValue(leg: { asset: string; protocol: string; sizeUsd?: number; leverage?: number }): string {
-  return `${leg.asset} · ${leg.protocol}${leg.sizeUsd ? ` · ${fmtUsd(leg.sizeUsd)}` : ""}${leg.leverage ? ` · ${leg.leverage}x` : ""}`;
+export function legRowValue(leg: { asset: string; protocol: string; chain?: string; sizeUsd?: number; leverage?: number }): string {
+  return `${leg.asset} · ${leg.protocol}${leg.chain ? ` · ${leg.chain}` : ""}${leg.sizeUsd ? ` · ${fmtUsd(leg.sizeUsd)}` : ""}${leg.leverage ? ` · ${leg.leverage}x` : ""}`;
 }
 
 /**
