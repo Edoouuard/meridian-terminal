@@ -160,7 +160,8 @@ Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → s
 - [ ] Exécuter le parcours d'or avec un vrai wallet, petit montant (**toi**)
 - [ ] Corriger tout ce qui casse pendant ce test (**moi**, sur retour d'erreur)
 - [ ] Vérifier que la position Aave apparaît après confirmation
-- [ ] Remplacer le faux portefeuille de 128 400 $ par un état « connecte ton wallet » clair
+- [x] Remplacer le faux portefeuille de 128 400 $ par un état « connecte ton wallet » clair (Phase 1)
+- [ ] Preuve sans wallet : le parcours d'or exécuté par le vrai code contre les vrais contrats Aave + USDC sur un **fork de Base** en CI (`e2e/aaveSupply.fork.test.ts`, aucun argent réel). Ne remplace pas le test réel, mais élimine les erreurs de code avant.
 - [ ] Deuxième parcours : bridge 5 USDC Arbitrum → Base
 
 **Critère de sortie :** 2 transactions réelles confirmées (supply Aave + bridge), visibles dans l'app, sans intervention manuelle.
@@ -189,8 +190,8 @@ Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → s
 - [ ] RPC dédiés (Alchemy / Infura) pour les chaînes gardées
 - [ ] Observabilité : journal serveur des exécutions (succès / échec / raison), suivi d'erreurs (Sentry ou équivalent)
 - [ ] Rate limit strict via Vercel WAF (le limiteur actuel est par instance)
-- [ ] Test e2e automatisé du parcours d'or sur un fork (Anvil) en CI
-- [ ] CI GitHub : lint + typecheck + tests + build sur chaque PR
+- [ ] Test e2e automatisé du parcours d'or sur un fork (Anvil) en CI — *en place, voir Phase 0*
+- [ ] CI GitHub : lint + typecheck + tests + build sur chaque push (`.github/workflows/ci.yml`)
 - [ ] Onboarding : 3 prompts suggérés, états vides propres, messages d'erreur compréhensibles
 - [ ] Décision deBridge CrosschainForwarder (routes avec swap)
 

@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:fork": "vitest run --config vitest.fork.config.ts",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@blackcube/extended-sdk": "0.56.0",
