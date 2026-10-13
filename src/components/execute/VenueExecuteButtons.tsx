@@ -8,6 +8,7 @@ import type { TradeLeg } from "@/lib/tradePlan";
 import { legChainId } from "@/lib/chains";
 import { useIndexedPositions } from "@/hooks/useIndexedPositions";
 import { useVaultRisk } from "@/hooks/useVaultRisk";
+import { MIN_VAULT_TVL_USD } from "@/lib/vaultPolicy";
 import { MIN_MORPHO_RISK_SCORE } from "@/lib/integrations/morpho";
 import { QUOTER_V2_QUOTE_EXACT_INPUT_SINGLE_ABI, UNISWAP_QUOTER_V2_BY_CHAIN, applySlippage, defaultFeeTier, parseSwapAsset } from "@/lib/integrations/uniswap";
 import { formatBaseUnits, resolvePriceFromList, usdToTokenAmount, type PriceEntry } from "@/lib/quote";
@@ -130,10 +131,12 @@ export function MorphoExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
     protocol: "Morpho",
     asset: symbol || undefined,
     chain: chainName,
-    limit: 1,
+    limit: 25,
     enabled: !!symbol && !!chainName,
   });
-  const vault = vaults?.[0];
+  // Best-rated vault that also clears the TVL floor (the risk sort alone can
+  // surface a sub-$1M vault with no yield).
+  const vault = vaults?.find((v) => v.tvlUsd >= MIN_VAULT_TVL_USD);
 
   const token = findToken(symbol, chainId);
   const price = token ? resolvePriceFromList(prices, token.symbol) : null;
@@ -149,7 +152,7 @@ export function MorphoExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
     return (
       <NotWired
         venue="Morpho"
-        reason={`No live Morpho ${symbol} vault found on ${chainName} — try another asset or switch networks.`}
+        reason={`No live Morpho ${symbol} vault with at least $${MIN_VAULT_TVL_USD / 1_000_000}M TVL found on ${chainName} — try another asset or chain.`}
       />
     );
   }
