@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { checkAllProviders, getAllProviderStatus } from "@/lib/mcp/router";
 import { checkAaveHealth, getAaveStatus } from "@/lib/mcp/aave";
-import * as lifi from "@/lib/mcp/providers/lifi";
+import { fetchLifiChains, fetchLifiTokens } from "@/lib/mcp/lifi";
 import * as baseMcp from "@/lib/mcp/providers/base";
 
 export const revalidate = 60;
@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
   }
 
   if (action === "chains") {
-    const chains = await lifi.getSupportedChains();
+    const chains = (await fetchLifiChains()).map((c) => ({ id: c.id, name: c.name }));
     return NextResponse.json({ chains });
   }
 
@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
     if (!chainId) {
       return NextResponse.json({ error: "chainId required" }, { status: 400 });
     }
-    const tokens = await lifi.getTokens(Number(chainId));
+    const tokens = await fetchLifiTokens(Number(chainId));
     return NextResponse.json({ tokens });
   }
 
