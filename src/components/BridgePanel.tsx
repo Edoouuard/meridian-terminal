@@ -4,7 +4,7 @@ import { useState } from "react";
 import { parseUnits } from "viem";
 import { useAccount, useSwitchChain } from "wagmi";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
-import { explorerUrlFor } from "@/hooks/useExecute";
+import { explorerUrlFor } from "@/lib/explorer";
 import { useBridge, USDC_BY_CHAIN } from "@/hooks/useBridge";
 import { CHAIN_LABEL } from "@/lib/onchain";
 import { formatBaseUnits } from "@/lib/quote";

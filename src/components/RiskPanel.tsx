@@ -284,7 +284,7 @@ export function RiskPanel({ live, isConnected }: { live?: LivePortfolio; isConne
     isLive ? (effLive?.netDeltaEthTotal ?? effLive?.netDeltaEth ?? null) : NET_DELTA_ETH;
   const netDeltaNull = isLive && netDelta == null;
   const stakingConcentration =
-    isLive && effLive?.stakingConcentrationPct != null ? effLive.stakingConcentrationPct : STAKING_CONCENTRATION_PCT;
+    isLive ? (effLive?.stakingConcentrationPct ?? 0) : STAKING_CONCENTRATION_PCT;
   const suggestions = isLive && effLive ? buildLiveSuggestions(effLive) : RISK_SUGGESTIONS;
 
   return (

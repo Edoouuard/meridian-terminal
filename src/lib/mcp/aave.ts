@@ -282,49 +282,6 @@ export async function previewAaveAction(
 // ─── Write operations (unsigned tx building) ─────────────────────────
 
 /**
- * Build an unsigned Aave v3 transaction via `prepare_action`. Returns the
- * transaction only when the plan is directly signable (`TransactionRequest`);
- * approval-first plans return null so callers use their own approve flow.
- * `amount` is in main units.
- */
-export async function buildAaveTransaction(
-  userAddress: string,
-  chainId: number,
-  action: "supply" | "borrow" | "withdraw" | "repay",
-  asset: string,
-  amount: string,
-): Promise<AaveTxData | null> {
-  try {
-    const reserve = await resolveV3Reserve(chainId, asset);
-    if (!reserve) return null;
-    const result = await callMcpTool(AAVE_MCP_URL, SERVER_NAME, "prepare_action", {
-      version: "v3",
-      action,
-      sender: userAddress,
-      amount,
-      market: reserve.market,
-      token: reserve.token,
-      chainId,
-      ...(action === "supply" ? { enableCollateral: true } : {}),
-    });
-    const plan = aaveV3Payload(result);
-    if (!plan || plan.__typename !== "TransactionRequest") {
-      if (plan) console.warn(`[mcp/aave] prepare_action returned ${String(plan.__typename)} (not directly signable)`);
-      return null;
-    }
-    return {
-      to: String(plan.to),
-      data: String(plan.data),
-      value: plan.value !== undefined ? String(plan.value) : undefined,
-      chainId: toNum(plan.chainId) || chainId,
-    };
-  } catch (err) {
-    console.warn(`[mcp/aave] buildAaveTransaction(${action}) failed:`, err);
-    return null;
-  }
-}
-
-/**
  * Fetch live APY rates for yield context (used by the strategy engine).
  * Returns a formatted summary string for the LLM. Chains are queried in
  * parallel (sequential calls blew through serverless time limits).

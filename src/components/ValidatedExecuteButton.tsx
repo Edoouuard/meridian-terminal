@@ -5,7 +5,7 @@ import { useAccount } from "wagmi";
 import type { Order } from "@/lib/execution";
 import { CHAIN_LABEL } from "@/lib/onchain";
 import { formatBaseUnits } from "@/lib/quote";
-import { explorerUrlFor } from "@/hooks/useExecute";
+import { explorerUrlFor } from "@/lib/explorer";
 import { useExecuteOrder } from "@/hooks/useExecuteOrder";
 import { useLivePortfolio } from "@/hooks/useLivePortfolio";
 import { ConfirmDialog } from "@/components/ConfirmDialog";

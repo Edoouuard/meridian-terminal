@@ -20,23 +20,21 @@ import { LiveAsset, LivePortfolio, useLivePortfolio } from "@/hooks/useLivePortf
 import { useHaikuPortfolio } from "@/hooks/useHaikuPortfolio";
 import { NewsFeed } from "@/components/NewsFeed";
 import { CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
+import { FEATURES } from "@/lib/features";
 import { routeThesis, type TradePlan } from "@/lib/routeThesis";
 import { routeThesisAsync, type PortfolioContext } from "@/lib/intentEngine";
 import { recordExecution } from "@/lib/history";
 
 // Expose the local order-history API on the page module so real execution
-// sites (ThreadCard's useExecute / useHyperliquid) can log orders going
+// sites (lib/orderRunner, useHyperliquid) can log orders going
 // forward: `recordExecution({ type, label, amount, asset, protocol, chainId, status, hash })`.
 export { recordExecution };
 
+/** Protocols useLivePortfolio already reads on-chain (lending pools + Morpho indexer). */
+const LIVE_TRACKED_PROTOCOLS = /aave|spark|compound|morpho/i;
+
 const CHAIN_NAMES = SUPPORTED_CHAINS.map((c) => CHAIN_LABEL[c.id]).join(", ");
-import {
-  ALLOCATION,
-  PORTFOLIO_VALUE,
-  POSITIONS,
-  ThreadItem,
-  fmtUsd,
-} from "@/lib/data";
+import { ThreadItem, fmtUsd } from "@/lib/data";
 
 const ALLOCATION_COLORS = [
   "var(--color-accent-700)",
@@ -89,9 +87,14 @@ export default function TerminalApp() {
   const live = useLivePortfolio();
   const haikuData = useHaikuPortfolio();
 
-  // Merge Haiku MCP data into portfolio value when available
-  const haikuExtraUsd = haikuData.totalBalancesUsd + haikuData.totalPositionsUsd;
-  const displayPortfolioValue = isConnected ? live.netUsd + haikuExtraUsd : PORTFOLIO_VALUE;
+  // Haiku reads the same wallet balances (LI.FI) and Aave positions (Aave MCP)
+  // that useLivePortfolio reads on-chain, so only its positions in protocols
+  // the live reader doesn't track are added — never its balances.
+  const haikuExtraPositions = haikuData.positions.filter(
+    (p) => p.depositedUsd > 1 && !LIVE_TRACKED_PROTOCOLS.test(p.protocol),
+  );
+  const haikuExtraUsd = haikuExtraPositions.reduce((sum, p) => sum + p.depositedUsd, 0);
+  const portfolioValue = isConnected ? live.netUsd + haikuExtraUsd : null;
 
   // Build live positions from on-chain data + Haiku MCP enrichment
   const livePositions = [
@@ -101,16 +104,14 @@ export default function TerminalApp() {
       ...(p.debtUsd > 0 ? [{ asset: `${p.protocol} borrow`, venue: p.chain, amount: "-" + fmtUsd(p.debtUsd) }] : []),
     ]),
     // Haiku MCP: DeFi positions from protocols not tracked by wagmi multicall
-    ...haikuData.positions
-      .filter((p) => p.depositedUsd > 1)
-      .map((p) => ({
+    ...haikuExtraPositions.map((p) => ({
         asset: `${p.protocol} ${p.type}`,
         venue: `${p.asset} · chain ${p.chainId}`,
         amount: fmtUsd(p.depositedUsd),
       })),
   ];
-  const displayPositions = isConnected ? livePositions : POSITIONS;
-  const displayAllocation = isConnected ? buildLiveAllocation(live) : ALLOCATION;
+  const displayPositions = isConnected ? livePositions : [];
+  const displayAllocation = isConnected ? buildLiveAllocation(live) : [];
 
   // Auto-scroll to bottom when thread changes or analysis starts
   useEffect(() => {
@@ -166,17 +167,17 @@ export default function TerminalApp() {
   const QUICK_PROMPTS = [
     { label: "Yield on stables", thesis: "I want the best yield on my USDC across all protocols" },
     { label: "ETH exposure", thesis: "I want exposure to ETH with different risk levels" },
-    { label: "Farm airdrops", thesis: "I want to farm airdrops and points with a delta-neutral strategy" },
-    { label: "Hedge portfolio", thesis: "I need to hedge my ETH exposure, I think the market is going down" },
+    { label: "Farm airdrops", thesis: "I want to farm airdrops and points with a delta-neutral strategy", perps: true },
+    { label: "Hedge portfolio", thesis: "I need to hedge my ETH exposure, I think the market is going down", perps: true },
     { label: "Stake ETH", thesis: "I want to stake my ETH for yield, what are the best options?" },
-  ];
+  ].filter((p) => FEATURES.perps || !("perps" in p));
 
   const FOLLOW_UPS = [
     { label: "Lower risk", thesis: "Same idea but more conservative, less leverage" },
     { label: "More yield", thesis: "I want to push for higher yield, I can take more risk" },
     { label: "On Arbitrum", thesis: "Show me the same strategies but on Arbitrum" },
-    { label: "Delta neutral", thesis: "Make it delta neutral, I don't want directional exposure" },
-  ];
+    { label: "Delta neutral", thesis: "Make it delta neutral, I don't want directional exposure", perps: true },
+  ].filter((p) => FEATURES.perps || !("perps" in p));
 
   return (
     <div className="app-shell" style={{ background: "var(--color-bg)", color: "var(--color-text)", height: "100vh", display: "flex", flexDirection: "column" }}>
@@ -190,7 +191,7 @@ export default function TerminalApp() {
         </span>
         <WalletConnectButton />
         <span className="tag tag-neutral" style={{ fontVariantNumeric: "tabular-nums" }}>
-          {fmtUsd(displayPortfolioValue)}
+          {portfolioValue === null ? "—" : fmtUsd(portfolioValue)}
         </span>
       </div>
 
@@ -200,7 +201,7 @@ export default function TerminalApp() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <h6 style={{ color: "var(--color-accent)", margin: 0 }}>Portfolio</h6>
             <span className="text-muted" style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>
-              {isConnected ? "Live" : "Example"}
+              {isConnected ? "Live" : "Not connected"}
             </span>
           </div>
           <p
@@ -211,8 +212,13 @@ export default function TerminalApp() {
               fontVariantNumeric: "tabular-nums",
             }}
           >
-            {fmtUsd(displayPortfolioValue)}
+            {portfolioValue === null ? "—" : fmtUsd(portfolioValue)}
           </p>
+          {!isConnected && (
+            <p className="text-muted" style={{ fontSize: 12, margin: "0 0 var(--space-3)" }}>
+              Connect a wallet to see your balances and positions across {SUPPORTED_CHAINS.length} chains.
+            </p>
+          )}
 
           {displayAllocation.length > 0 && (
             <>
@@ -258,7 +264,7 @@ export default function TerminalApp() {
               <p style={{ fontSize: 12, margin: "6px 0 0" }} className="text-muted">
                 {live.isLoading
                   ? "Reading your wallet balances and Aave position…"
-                  : `No tracked assets or Aave position found across ${CHAIN_NAMES}. Connect Extended, Ondo, or Lighter (left panel) to trade their perps — Variational and Pendle aren't wired up yet.`}
+                  : `No tracked assets or Aave position found across ${CHAIN_NAMES}.`}
               </p>
             )}
           </div>
@@ -289,12 +295,16 @@ export default function TerminalApp() {
             <>
               <McpStatusPanel />
               <BridgePanel />
-              <HyperliquidPanel />
-              <ExtendedConnectPanel />
-              <LifiPerpsConnectPanel provider="ondo" />
-              <LifiPerpsConnectPanel provider="lighter" />
+              {FEATURES.perps && (
+                <>
+                  <HyperliquidPanel />
+                  <ExtendedConnectPanel />
+                  <LifiPerpsConnectPanel provider="ondo" />
+                  <LifiPerpsConnectPanel provider="lighter" />
+                </>
+              )}
               <LidoWithdrawalsPanel />
-              <SolanaPanel />
+              {FEATURES.solana && <SolanaPanel />}
             </>
           )}
           {leftTab === "activity" && <HistoryPanel />}

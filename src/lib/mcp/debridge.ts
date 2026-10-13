@@ -214,28 +214,6 @@ async function callDlnRest(path: string, params: Record<string, string>): Promis
 
 // ─── Read operations ─────────────────────────────────────────────────
 
-/** Chains deBridge currently supports. Returns [] on failure (fail closed, like every mcp/ module). */
-export async function fetchDebridgeSupportedChains(): Promise<DebridgeChain[]> {
-  try {
-    return normalizeSupportedChains(await callDebridge("get_supported_chains", {}));
-  } catch (err) {
-    console.warn("[mcp/debridge] fetchDebridgeSupportedChains failed:", err);
-    return [];
-  }
-}
-
-/** Search deBridge's token list on a given chain by symbol/name/address substring. */
-export async function searchDebridgeTokens(chainId: number, query: string): Promise<DebridgeToken[]> {
-  try {
-    const raw = unwrap(await callDebridge("search_tokens", { query, chainId: toDebridgeChainId(chainId) }));
-    const list = Array.isArray(raw) ? raw : isRec(raw) && Array.isArray(raw.tokens) ? raw.tokens : [];
-    return list as DebridgeToken[];
-  } catch (err) {
-    console.warn("[mcp/debridge] searchDebridgeTokens failed:", err);
-    return [];
-  }
-}
-
 // ─── Unsigned transaction building ───────────────────────────────────
 
 /**
@@ -301,6 +279,42 @@ export async function createDebridgeSameChainSwapTx(input: DebridgeSameChainSwap
     return swap?.tx ? swap : null;
   } catch (err) {
     console.warn("[mcp/debridge] createDebridgeSameChainSwapTx failed:", err);
+    return null;
+  }
+}
+
+// ─── Order status (cross-chain tracking) ─────────────────────────────
+
+export interface DeBridgeOrderStatus {
+  orderId: string;
+  /** Raw DLN status: None | Created | Fulfilled | SentUnlock | ClaimedUnlock | Cancelled … */
+  status: string;
+  /** True once funds are delivered on the destination chain. */
+  delivered: boolean;
+  srcTxHash?: string;
+  dstTxHash?: string;
+}
+
+export async function getDebridgeOrderStatus(orderId: string): Promise<DeBridgeOrderStatus | null> {
+  // deBridge MCP has no status tool — use the DLN stats API (per deBridge's monitoring docs).
+  try {
+    const res = await fetch(`https://stats-api.dln.trade/api/Orders/${encodeURIComponent(orderId)}`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const status: string = data.status ?? data.state ?? "None";
+    const hash = (v: unknown): string | undefined =>
+      typeof v === "string" ? v : v && typeof v === "object" && "stringValue" in v ? String((v as { stringValue: unknown }).stringValue) : undefined;
+    return {
+      orderId,
+      status,
+      delivered: ["Fulfilled", "SentUnlock", "ClaimedUnlock"].includes(status),
+      srcTxHash: hash(data.createdSrcEventMetadata?.transactionHash) ?? hash(data.creationTxHash),
+      dstTxHash: hash(data.fulfilledDstEventMetadata?.transactionHash) ?? hash(data.fulfillTxHash),
+    };
+  } catch (err) {
+    console.warn("[mcp/debridge] getDebridgeOrderStatus failed:", err);
     return null;
   }
 }

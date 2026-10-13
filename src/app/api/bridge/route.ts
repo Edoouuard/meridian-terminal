@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { findBestRoute, planRoute, type RouteComparison, type RouteQuote as RouterQuote } from "@/lib/mcp/router";
-import { getOrderStatus } from "@/lib/mcp/providers/debridge";
-import { getRouteStatusWithFallback } from "@/lib/mcp/providers/lifi";
+import { getDebridgeOrderStatus } from "@/lib/mcp/debridge";
+import { getLifiRouteStatus } from "@/lib/mcp/lifi";
 import type { RouteRequest } from "@/lib/mcp/types";
 
 /**
@@ -115,7 +115,7 @@ export async function GET(req: NextRequest) {
       if (!txHash || !fromChainId) {
         return NextResponse.json({ error: "txHash and fromChainId required for LI.FI status" }, { status: 400 });
       }
-      const status = await getRouteStatusWithFallback(
+      const status = await getLifiRouteStatus(
         txHash,
         Number(fromChainId),
         toChainId ? Number(toChainId) : undefined,
@@ -131,7 +131,7 @@ export async function GET(req: NextRequest) {
     if (!orderId) {
       return NextResponse.json({ error: "orderId is required" }, { status: 400 });
     }
-    const status = await getOrderStatus(orderId);
+    const status = await getDebridgeOrderStatus(orderId);
     if (!status) {
       return NextResponse.json({ error: "Order not found or tracking unavailable" }, { status: 404 });
     }

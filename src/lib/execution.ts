@@ -19,7 +19,7 @@ import { isTrustedDebridgeEntrypoint, isTrustedLifiEntrypoint } from "./mcp/rout
  * address, the ABI, the function name and typed args, plus an optional native
  * `value`. Nothing here EVER auto-executes — this module is pure, serializable and
  * side-effect free. The actual wallet write only happens when a UI component
- * explicitly calls `execute()` on the `useExecute` hook, which is wired to a real
+ * explicitly confirms through `useExecuteOrder` (lib/orderRunner), which is wired to a real
  * user mouse/keyboard click.
  *
  * The trade planner should emit amount in HUMAN units (a decimal string such as
@@ -392,7 +392,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           abi: AAVE_V3_POOL_REPAY_ABI,
           functionName: "repay",
           // [asset, amount, interestRateMode, onBehalfOf] — onBehalfOf is patched with
-          // the connected sender by useExecute via `senderIndex`.
+          // the connected sender by applySender via `senderIndex`.
           args: [token, amount.value, AAVE_INTEREST_RATE_MODE_VARIABLE, zeroAddress],
           senderIndex: 3,
           description: `Repay ${order.amount} ${assetLabel} of Aave v3 debt (variable rate) on ${chainLabel}`,
@@ -405,7 +405,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           address: pool,
           abi: AAVE_V3_POOL_SUPPLY_ABI,
           functionName: "supply",
-          // [asset, amount, onBehalfOf, referralCode] — onBehalfOf patched by useExecute.
+          // [asset, amount, onBehalfOf, referralCode] — onBehalfOf patched by applySender.
           args: [token, amount.value, zeroAddress, AAVE_REFERRAL_CODE],
           senderIndex: 2,
           description: `Supply ${order.amount} ${assetLabel} as collateral to Aave v3 on ${chainLabel}`,
@@ -593,7 +593,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           address: LIDO_WITHDRAWAL_QUEUE_ADDRESS,
           abi: LIDO_REQUEST_WITHDRAWALS_ABI,
           functionName: "requestWithdrawals",
-          // [amounts, owner] — owner patched to the connected sender by useExecute via `senderIndex`.
+          // [amounts, owner] — owner patched to the connected sender by applySender via `senderIndex`.
           args: [[amount.value], zeroAddress],
           senderIndex: 1,
           description: `Request withdrawal of ${order.amount} stETH from Lido on ${chainLabel}`,
@@ -707,7 +707,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           address: vault,
           abi: ERC4626_DEPOSIT_ABI,
           functionName: "deposit",
-          // [assets, receiver] — receiver patched to the connected sender by useExecute via `senderIndex`.
+          // [assets, receiver] — receiver patched to the connected sender by applySender via `senderIndex`.
           args: [amount.value, zeroAddress],
           senderIndex: 1,
           description: `Deposit ${order.amount} ${assetLabel} into a Morpho vault on ${chainLabel}`,

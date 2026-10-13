@@ -16,7 +16,6 @@ import type {
   McpProviderId,
   McpProviderStatus,
   ChainBalance,
-  TokenBalance,
   YieldPosition,
   YieldOpportunity,
   TokenInfo,

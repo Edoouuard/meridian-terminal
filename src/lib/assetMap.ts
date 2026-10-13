@@ -28,7 +28,7 @@ export type { PriceEntry } from "@/lib/quote";
  *     `{ unsupported: <message> }` instead of ever pretending to succeed.
  *
  * Nothing here ever triggers a write — it only produces data. The actual wallet
- * signature happens exclusively in `useExecute.execute()` on an explicit click.
+ * signature happens exclusively in lib/orderRunner after an explicit click.
  */
 
 /** Default execution chain: mainnet. Assets are resolved here by default. */

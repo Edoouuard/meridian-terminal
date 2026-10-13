@@ -131,56 +131,67 @@ export function normalizeLifiQuote(payload: unknown): LifiQuote | null {
 
 // ─── Read operations ─────────────────────────────────────────────────
 
-/** All chains LI.FI currently routes across. Returns [] on failure. */
+/** All chains LI.FI currently routes across (MCP, then REST). Returns [] on failure. */
 export async function fetchLifiChains(): Promise<LifiChain[]> {
   try {
-    return normalizeLifiChains(parseMcpToolResult<unknown>(await callLifiTool("get-chains", {})));
+    const chains = normalizeLifiChains(parseMcpToolResult<unknown>(await callLifiTool("get-chains", {})));
+    if (chains.length > 0) return chains;
   } catch (err) {
-    console.warn("[mcp/lifi] fetchLifiChains failed:", err);
+    console.warn("[mcp/lifi] get-chains failed, trying REST:", err);
+  }
+  try {
+    const res = await fetch(`${LIFI_REST_URL}/chains`, { signal: AbortSignal.timeout(8000), headers: authHeaders() });
+    return res.ok ? normalizeLifiChains(await res.json()) : [];
+  } catch {
     return [];
   }
 }
 
-/** Token metadata (address/decimals/price) for a symbol on a chain. Returns null on failure. */
-export async function fetchLifiToken(chain: string | number, token: string): Promise<LifiToken | null> {
+/** Every token LI.FI knows on a chain (MCP, then REST). Returns [] on failure. */
+export async function fetchLifiTokens(chainId: number): Promise<LifiToken[]> {
+  const pick = (payload: unknown): LifiToken[] => {
+    const tokens = isRec(payload) && isRec(payload.tokens) ? payload.tokens[String(chainId)] : undefined;
+    return Array.isArray(tokens) ? (tokens as LifiToken[]) : [];
+  };
   try {
-    const result = await callLifiTool("get-token", { chain: String(chain), token });
-    return unwrap(parseMcpToolResult<unknown>(result)) as LifiToken | null;
+    const tokens = pick(unwrap(parseMcpToolResult<unknown>(await callLifiTool("get-tokens", { chains: [String(chainId)] }))));
+    if (tokens.length > 0) return tokens;
   } catch (err) {
-    console.warn("[mcp/lifi] fetchLifiToken failed:", err);
-    return null;
+    console.warn("[mcp/lifi] get-tokens failed, trying REST:", err);
+  }
+  try {
+    const res = await fetch(`${LIFI_REST_URL}/tokens?chains=${chainId}`, { signal: AbortSignal.timeout(8000), headers: authHeaders() });
+    return res.ok ? pick(await res.json()) : [];
+  } catch {
+    return [];
   }
 }
 
-/** Current cross-chain transfer status for a bridge tx hash. Returns null on failure. */
-export async function getLifiStatus(
-  txHash: string,
-  opts?: { bridge?: string; fromChain?: number | string; toChain?: number | string },
-): Promise<unknown | null> {
-  try {
-    const result = await callLifiTool("get-status", { txHash, ...opts });
-    return unwrap(parseMcpToolResult<unknown>(result));
-  } catch (err) {
-    console.warn("[mcp/lifi] getLifiStatus failed:", err);
-    return null;
-  }
+export interface LifiRouteStatus {
+  status: "PENDING" | "DONE" | "FAILED" | "NOT_FOUND" | string;
+  substatus?: string;
+  sending?: { txHash: string; chainId: number };
+  receiving?: { txHash: string; chainId: number };
 }
 
-/** Current ERC-20 allowance for a (owner, spender) pair, read live by the LI.FI server. Returns null on failure. */
-export async function getLifiAllowance(input: {
-  chain: string | number;
-  tokenAddress: string;
-  ownerAddress: string;
-  spenderAddress: string;
-}): Promise<string | null> {
+/** Cross-chain transfer status for a source tx hash (MCP, then REST). Returns null on failure. */
+export async function getLifiRouteStatus(txHash: string, fromChainId: number, toChainId?: number): Promise<LifiRouteStatus | null> {
+  let mcp: LifiRouteStatus | null = null;
   try {
-    const result = await callLifiTool("get-allowance", input);
-    const parsed = unwrap(parseMcpToolResult<unknown>(result));
-    if (typeof parsed === "string" || typeof parsed === "number") return String(parsed);
-    return isRec(parsed) && parsed.allowance !== undefined ? String(parsed.allowance) : null;
+    const args: Record<string, unknown> = { txHash, fromChain: String(fromChainId) };
+    if (toChainId) args.toChain = String(toChainId);
+    const v = unwrap(parseMcpToolResult<unknown>(await callLifiTool("get-status", args)));
+    if (isRec(v) && typeof v.status === "string") mcp = v as unknown as LifiRouteStatus;
   } catch (err) {
-    console.warn("[mcp/lifi] getLifiAllowance failed:", err);
-    return null;
+    console.warn("[mcp/lifi] get-status failed:", err);
+  }
+  if ((mcp && mcp.status !== "NOT_FOUND") || !toChainId) return mcp;
+  try {
+    const params = new URLSearchParams({ txHash, fromChain: String(fromChainId), toChain: String(toChainId) });
+    const res = await fetch(`${LIFI_REST_URL}/status?${params}`, { signal: AbortSignal.timeout(10_000), headers: authHeaders() });
+    return res.ok ? ((await res.json()) as LifiRouteStatus) : mcp;
+  } catch {
+    return mcp;
   }
 }
 

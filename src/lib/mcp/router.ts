@@ -12,7 +12,7 @@
 import { createDebridgeCrossChainTx, createDebridgeSameChainSwapTx } from "./debridge";
 import { getLifiQuote } from "./lifi";
 import { isTrustedDebridgeEntrypoint, isTrustedLifiEntrypoint } from "./routerAllowlist";
-import type { RouteRequest as TypesRouteRequest, McpProviderStatus, RouteQuote as TypesRouteQuote } from "./types";
+import type { RouteRequest as TypesRouteRequest, McpProviderStatus } from "./types";
 
 export type RouteProvider = "debridge" | "lifi";
 
@@ -209,11 +209,6 @@ export async function findBestRoute(req: TypesRouteRequest): Promise<RouteCompar
 /** Compatibility wrapper: plan route returns comparison + execution data. */
 export async function planRoute(req: TypesRouteRequest): Promise<RouteComparison | null> {
   return findBestRoute(req);
-}
-
-/** Build unsigned tx data from a route — the tx is already in the quote. */
-export function buildRouteExecution(quote: RouteQuote): RouteTx | null {
-  return quote.tx ?? null;
 }
 
 // ─── Provider health tracking ─────────────────────────────────────────

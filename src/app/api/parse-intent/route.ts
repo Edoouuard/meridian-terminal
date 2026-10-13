@@ -1,3 +1,4 @@
+import { FEATURES } from "@/lib/features";
 import { NextRequest, NextResponse } from "next/server";
 
 /**
@@ -15,6 +16,12 @@ import { NextRequest, NextResponse } from "next/server";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
 const DEFAULT_MODEL = "google/gemini-2.5-flash";
+
+/** Appended while perps are feature-flagged off (lib/features.ts): steer to executable spot strategies. */
+const PERPS_DISABLED_NOTE = `
+
+## CURRENT LIMITATION — PERPS DISABLED
+Perpetual futures (Hyperliquid, Extended, Ondo, Lighter) cannot be executed in Meridian right now. Build every strategy from spot legs only (lending, staking, swaps, bridges, vaults). If the user's goal truly needs a perp (hedge, delta-neutral), say so in variantNote and propose the closest spot-only alternative instead of a perp leg.`;
 
 const SYSTEM_PROMPT = `You are Meridian's DeFi strategy engine. You receive a user's investment thesis and LIVE MARKET DATA, and produce 3 executable strategies.
 
@@ -501,7 +508,7 @@ export async function POST(req: NextRequest) {
         max_tokens: 4096,
         temperature: 0.4,
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: FEATURES.perps ? SYSTEM_PROMPT : SYSTEM_PROMPT + PERPS_DISABLED_NOTE },
           { role: "user", content: userMessage },
         ],
       }),

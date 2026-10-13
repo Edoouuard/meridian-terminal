@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
  *
  * A tiny localStorage-backed log of executions (and future activity) so the
  * terminal keeps a recent-order history across reloads. Real executions
- * (ThreadCard's `useExecute` / `useHyperliquid` run sites) should call
+ * (lib/orderRunner and the perp run sites) should call
  * `recordExecution(...)` so the panel updates live via `useHistory()`.
  *
  * This module is client-only in spirit (it touches `window.localStorage` and
