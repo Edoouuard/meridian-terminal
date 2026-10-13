@@ -52,6 +52,7 @@ export function useBridgeSwapQuote(): UseBridgeSwapQuoteResult {
       }
       const data = (await res.json()) as { best: RouteQuote | null; alternatives: RouteQuote[] };
       setBest(data.best);
+      if (!data.best) setError("No signable route: neither deBridge nor LI.FI returned a verified route for this pair and amount.");
       setAlternatives(data.alternatives ?? []);
       return data.best;
     } catch (err) {

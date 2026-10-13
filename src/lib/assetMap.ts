@@ -110,7 +110,6 @@ const SYMBOL_ALIASES: Record<string, string> = {
   s: "WS",
   metis: "METIS",
   celo: "CELO",
-  matic: "WETH", // Polygon uses WETH, not WMATIC for Aave
   avax: "WAVAX",
   btc: "WBTC",
 };

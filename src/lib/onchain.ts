@@ -202,7 +202,7 @@ export const TRACKED_TOKENS_BY_CHAIN: Record<number, TrackedToken[]> = {
     { symbol: "USDT", address: "0xFd086bC7CD5C481DCC9C85ebE478A1C0b69FCbb9", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
     { symbol: "WETH", address: "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
     { symbol: "WBTC", address: "0x2f2a2543B76A4166549F7aaB2e75Bef0aefC5B0f", decimals: 8, priceSymbol: "WBTC", venue: "Wallet" },
-    { symbol: "wstETH", address: "0x5979D7b546E38E414f7E9822514be443A4800529", decimals: 18, priceSymbol: "WSTETH", venue: "Lido" },
+    { symbol: "wstETH", address: "0x5979D7b546E38E414F7E9822514be443A4800529", decimals: 18, priceSymbol: "WSTETH", venue: "Lido" },
     { symbol: "DAI", address: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1", decimals: 18, priceSymbol: "DAI", venue: "Wallet" },
     { symbol: "ARB", address: "0x912CE59144191C1204E64559FE8253a0e49E6548", decimals: 18, priceSymbol: "ARB", venue: "Wallet" },
     { symbol: "GMX", address: "0xfc5A1A6EB076a2C7aD06eD22C90d7E710E35ad0a", decimals: 18, priceSymbol: "GMX", venue: "Wallet" },
@@ -218,7 +218,7 @@ export const TRACKED_TOKENS_BY_CHAIN: Record<number, TrackedToken[]> = {
     { symbol: "USDT", address: "0x94b008aA00579c1307B0EF2c499aD98a8ce58e58", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
     { symbol: "WETH", address: "0x4200000000000000000000000000000000000006", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
     { symbol: "WBTC", address: "0x68f180fcCe6836688e9084f035309E29Bf0A2095", decimals: 8, priceSymbol: "WBTC", venue: "Wallet" },
-    { symbol: "wstETH", address: "0x1F32b1c2345538c0c6f582fCB022739c4AbeEfa8", decimals: 18, priceSymbol: "WSTETH", venue: "Lido" },
+    { symbol: "wstETH", address: "0x1F32b1c2345538c0c6f582fCB022739c4A194Ebb", decimals: 18, priceSymbol: "WSTETH", venue: "Lido" },
     { symbol: "DAI", address: "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1", decimals: 18, priceSymbol: "DAI", venue: "Wallet" },
     { symbol: "OP", address: "0x4200000000000000000000000000000000000042", decimals: 18, priceSymbol: "OP", venue: "Wallet" },
     { symbol: "LINK", address: "0x350a791Bfc2C21F9Ed5d10980Dad2e2638ffa7f6", decimals: 18, priceSymbol: "LINK", venue: "Wallet" },
@@ -231,7 +231,7 @@ export const TRACKED_TOKENS_BY_CHAIN: Record<number, TrackedToken[]> = {
     { symbol: "USDC", address: "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
     { symbol: "USDT", address: "0xc2132D05D31c914a87C6611C10748AEb04B58e8F", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
     { symbol: "WETH", address: "0x7ceB23fD6bC0adD59E62ac25578270cFf1b9f619", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
-    { symbol: "WBTC", address: "0x1bfd67037b42cf73acF2047067bd4F2C47D9BfD6", decimals: 8, priceSymbol: "WBTC", venue: "Wallet" },
+    { symbol: "WBTC", address: "0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6", decimals: 8, priceSymbol: "WBTC", venue: "Wallet" },
     { symbol: "wstETH", address: "0x03b54A6e9a984069379fae1a4fC4dBAE93B3bCCD", decimals: 18, priceSymbol: "WSTETH", venue: "Lido" },
     { symbol: "DAI", address: "0x8f3Cf7ad23Cd3CaDbD9735AFf958023239c6A063", decimals: 18, priceSymbol: "DAI", venue: "Wallet" },
     { symbol: "LINK", address: "0x53E0bca35eC356BD5ddDFebbD1Fc0fD03FaBad39", decimals: 18, priceSymbol: "LINK", venue: "Wallet" },
@@ -255,7 +255,7 @@ export const TRACKED_TOKENS_BY_CHAIN: Record<number, TrackedToken[]> = {
   [zkSync.id]: [
     { symbol: "USDC", address: "0x3355df6d4c9c3035724fd0e3914de96a5a83aaf4", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
     { symbol: "USDT", address: "0x493257fD37EDB34451f62EDf8D2a0C418852bA4C", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
-    { symbol: "WETH", address: "0x5aeA5775959fbc2557Cc8789bC1bf90A239D9a91", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
+    { symbol: "WETH", address: "0x5AEa5775959fBC2557Cc8789bC1bf90A239D9a91", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
   ],
   [linea.id]: [
     { symbol: "USDC", address: "0x176211869cA2b568f2A7D4EE941E073a821EE1ff", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
@@ -270,12 +270,12 @@ export const TRACKED_TOKENS_BY_CHAIN: Record<number, TrackedToken[]> = {
     { symbol: "WAVAX", address: "0xB31f66AA3C1e785363F0875A1B74E27b85FD66c7", decimals: 18, priceSymbol: "AVAX", venue: "Wallet" },
     { symbol: "DAI", address: "0xd586E7F844cEa2F87f50152665BCbc2C279D8d70", decimals: 18, priceSymbol: "DAI", venue: "Wallet" },
     { symbol: "LINK", address: "0x5947BB275c521040051D82396192181b413227A3", decimals: 18, priceSymbol: "LINK", venue: "Wallet" },
-    { symbol: "AAVE", address: "0x63a72806098Bd3D9520cC43356dD56502289c344", decimals: 18, priceSymbol: "AAVE", venue: "Wallet" },
+    { symbol: "AAVE", address: "0x63a72806098Bd3D9520cC43356dD78afe5D386D9", decimals: 18, priceSymbol: "AAVE", venue: "Wallet" },
   ],
   // ─── Chains that were missing tracked tokens ────────────────────────
   // Verified 2026-10 against each chain's block explorer + Aave v3 market list.
   [mantle.id]: [
-    { symbol: "USDC", address: "0x09Bc4E0D10E52d373fa6186b9a2f9AAD4bd9bF3e", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
+    { symbol: "USDC", address: "0x09Bc4E0D864854c6aFB6eB9A9cdF58aC190D0dF9", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
     { symbol: "USDT", address: "0x201EBa5CC46D216Ce6DC03F6a759e8E766e956aE", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
     { symbol: "WETH", address: "0xdEAddEaDdeadDEadDEADDEAddEADDEAddead1111", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
     { symbol: "WMNT", address: "0x78c1b0C915c4FAA5FffA6CAbf0219DA63d7f4cb8", decimals: 18, priceSymbol: "MNT", venue: "Wallet" },
@@ -401,7 +401,7 @@ export interface CometMarket {
 export const COMET_MARKETS: CometMarket[] = [
   {
     protocol: "Compound V3",
-    market: "0xc3d688B66703497DAA19211EEdFF47f25384cdc3",
+    market: "0xc3d688B66703497DAA19211EEdff47f25384cdc3",
     baseToken: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
     baseDecimals: 6,
     baseSymbol: "USDC",

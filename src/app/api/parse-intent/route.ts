@@ -93,7 +93,7 @@ Use these when user wants passive yield with protocol exposure.
 - **LI.FI**: DEX aggregator comparing 30+ DEXes (1inch, Paraswap, 0x, CowSwap, etc.) for the best swap rate. Same-chain swaps only. Use protocol "LI.FI" for aggregated swaps.
 
 ### Cross-chain Bridge
-- **deBridge**: bridge any token between chains (Ethereum, Base, Arbitrum, Optimism, Polygon, Avalanche, BNB Chain, etc.). Use side "Bridge" with protocol "deBridge". The routing layer compares deBridge DLN and LI.FI and picks the best rate automatically. Estimated delivery: 1-3 minutes.
+- **deBridge**: bridge a token between Ethereum, Base, Arbitrum, Optimism and Polygon (the only chains whose routers Meridian has verified — never propose a bridge leg from or to another chain). Use side "Bridge" with protocol "deBridge". The routing layer compares deBridge DLN and LI.FI and picks the best rate automatically. Estimated delivery: 1-3 minutes.
 
 ### Not Yet Live (mark "not yet live" in note if used)
 - **Pendle**: fixed yield via PT tokens

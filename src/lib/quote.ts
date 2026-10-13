@@ -73,15 +73,35 @@ export function resolvePriceFromList(
   symbol: string | undefined,
 ): number | null {
   if (!prices || !symbol) return null;
-  const target = symbol.trim().toUpperCase().replace(/-PERP$/, "");
-  for (const p of prices) {
-    const candidate = (p.symbol || "").trim().toUpperCase().replace(/-PERP$/, "");
-    if (candidate === target) {
-      return Number.isFinite(p.price) && p.price > 0 ? p.price : null;
+  const find = (sym: string): number | null => {
+    for (const p of prices) {
+      const candidate = (p.symbol || "").trim().toUpperCase().replace(/-PERP$/, "");
+      if (candidate === sym) return Number.isFinite(p.price) && p.price > 0 ? p.price : null;
     }
-  }
-  return null;
+    return null;
+  };
+  const target = symbol.trim().toUpperCase().replace(/-PERP$/, "");
+  const direct = find(target);
+  if (direct !== null) return direct;
+  // A wrapped native token redeems 1:1 for the native asset, so its price IS
+  // the native price — the feeds only list the native symbol (ETH, not WETH).
+  const native = WRAPPED_NATIVE[target];
+  return native ? find(native) : null;
 }
+
+/** Wrapped native token → the native symbol it redeems 1:1 for. */
+const WRAPPED_NATIVE: Record<string, string> = {
+  WETH: "ETH",
+  WBNB: "BNB",
+  WAVAX: "AVAX",
+  WPOL: "POL",
+  WMATIC: "MATIC",
+  WFTM: "FTM",
+  WS: "S",
+  WMNT: "MNT",
+  WXDAI: "XDAI",
+  WCELO: "CELO",
+};
 
 /**
  * Convert a USD notional into an exact token amount.

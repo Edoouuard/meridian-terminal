@@ -71,7 +71,7 @@ describe("uniswap — parseSwapAsset", () => {
 
 describe("uniswap — address tables", () => {
   it("covers all chains where Uniswap v3 is deployed", () => {
-    const chains = [1, 8453, 42161, 10, 137, 43114, 56, 42220, 534352, 59144, 5000, 324];
+    const chains = [1, 8453, 42161, 10, 137, 43114, 56, 42220, 534352, 59144, 324]; // no official Uniswap v3 on Mantle (5000)
     for (const id of chains) {
       expect(UNISWAP_SWAP_ROUTER02_BY_CHAIN[id]).toBeDefined();
       expect(UNISWAP_QUOTER_V2_BY_CHAIN[id]).toBeDefined();

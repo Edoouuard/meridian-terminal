@@ -3,6 +3,7 @@
 import { useAccount } from "wagmi";
 import type { TradeLeg } from "@/lib/tradePlan";
 import { bridgeOrderFromQuote } from "@/lib/bridgeOrder";
+import { isRoutingSupportedChain } from "@/lib/mcp/routerAllowlist";
 import { CHAIN_LABEL } from "@/lib/onchain";
 import { findToken } from "@/lib/assetMap";
 import { resolvePriceFromList, usdToTokenAmount, type PriceEntry } from "@/lib/quote";
@@ -48,6 +49,10 @@ export function BridgeExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
   }
   if (toChainId === fromChainId) {
     return <NotWiredLine reason={`Source and destination are both ${CHAIN_LABEL[toChainId] ?? `chain ${toChainId}`} — nothing to bridge.`} />;
+  }
+
+  if (!isRoutingSupportedChain(fromChainId)) {
+    return <NotWiredLine reason={`Bridging from ${CHAIN_LABEL[fromChainId] ?? `chain ${fromChainId}`} isn't supported yet — Meridian only signs against routers it has verified on Ethereum, Base, Arbitrum, Optimism and Polygon.`} />;
   }
 
   const fromToken = findToken(leg.asset, fromChainId);
