@@ -55,10 +55,12 @@ export function BridgeExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
     return <NotWiredLine reason={`Bridging from ${CHAIN_LABEL[fromChainId] ?? `chain ${fromChainId}`} isn't supported yet — Meridian only signs against routers it has verified on Ethereum, Base, Arbitrum, Optimism and Polygon.`} />;
   }
 
-  const fromToken = findToken(leg.asset, fromChainId);
+  // A bridge can also swap: it spends `fromAsset` (when set) and delivers `asset`.
+  const fromAsset = leg.fromAsset ?? leg.asset;
+  const fromToken = findToken(fromAsset, fromChainId);
   const toToken = findToken(leg.asset, toChainId);
   if (!fromToken) {
-    return <NotWiredLine reason={`"${leg.asset}" has no tracked address on ${CHAIN_LABEL[fromChainId] ?? `chain ${fromChainId}`}.`} />;
+    return <NotWiredLine reason={`"${fromAsset}" has no tracked address on ${CHAIN_LABEL[fromChainId] ?? `chain ${fromChainId}`}.`} />;
   }
   if (!toToken) {
     return <NotWiredLine reason={`"${leg.asset}" has no tracked address on ${CHAIN_LABEL[toChainId] ?? `chain ${toChainId}`}.`} />;

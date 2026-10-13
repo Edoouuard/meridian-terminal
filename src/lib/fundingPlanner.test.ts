@@ -90,4 +90,42 @@ describe("fundingPlanner — fundPlan", () => {
     expect(out.legs.map((l) => l.side)).toEqual(["Supply"]);
     expect(out.fundingNotes?.[0]).toMatch(/holds no USDC on Avalanche \(and Meridian can.t bridge into Avalanche\)/);
   });
+
+  it("swaps another stable on the same chain when the leg's stable isn't held anywhere", async () => {
+    const out = await fundPlan(plan(supply("Base", 100)), deps([{ symbol: "USDT", chain: "Base", usd: 300 }]));
+    expect(out.legs).toHaveLength(2);
+    expect(out.legs[0]).toMatchObject({ side: "Swap", asset: "USDT → USDC", protocol: "Uniswap", chain: "Base", sizeUsd: 100 });
+    expect(out.legs[1]).toMatchObject({ side: "Supply", sizeUsd: 98.5 });
+    expect(out.fundingNotes?.[0]).toMatch(/swap was added/);
+  });
+
+  it("swaps and bridges in one route from another chain's stable", async () => {
+    const out = await fundPlan(plan(supply("Base", 100)), deps([{ symbol: "DAI", chain: "Optimism", usd: 300 }]));
+    expect(out.legs[0]).toMatchObject({ side: "Bridge", fromAsset: "DAI", asset: "USDC", chain: "Optimism", toChain: "Base", sizeUsd: 100 });
+    expect(out.fundingNotes?.[0]).toMatch(/swaps it to USDC and bridges it to Base/);
+  });
+
+  it("prefers moving the same stable over converting another one", async () => {
+    const out = await fundPlan(
+      plan(supply("Base", 100)),
+      deps([{ symbol: "USDT", chain: "Base", usd: 300 }, { symbol: "USDC", chain: "Arbitrum", usd: 300 }]),
+    );
+    expect(out.legs[0]).toMatchObject({ side: "Bridge", asset: "USDC", chain: "Arbitrum" });
+    expect(out.legs[0].fromAsset).toBeUndefined();
+  });
+
+  it("never converts a volatile asset to fund a stable leg", async () => {
+    const out = await fundPlan(plan(supply("Base", 100)), deps([{ symbol: "WETH", chain: "Base", usd: 5000 }]));
+    expect(out.legs.map((l) => l.side)).toEqual(["Supply"]);
+  });
+
+  it("credits a swapping bridge with the token it delivers", async () => {
+    const out = await fundPlan(
+      plan({ side: "Bridge", asset: "USDC", fromAsset: "USDT", protocol: "deBridge", chain: "Arbitrum", toChain: "Base", sizeUsd: 200 }, supply("Base", 150)),
+      deps([{ symbol: "USDT", chain: "Arbitrum", usd: 250 }]),
+    );
+    expect(out.legs).toHaveLength(2);
+    expect(out.fundingNotes).toBeUndefined();
+    expect(spentSymbol(out.legs[0], 42161)).toBe("USDT");
+  });
 });
