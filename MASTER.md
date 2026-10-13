@@ -141,7 +141,7 @@ Diagnostic honnête du code (≈ 22 000 lignes, 80 commits, 16 PR) :
 | `BETA_PASSWORD` | Accès bêta | présent (sensible, production) ; `NEXT_PUBLIC_BETA_PASSWORD` obsolète, à supprimer |
 | `LIFI_API_KEY` | Coffres earn LI.FI + quotas LI.FI | présente (sensible, production + preview) |
 | `BLOB_READ_WRITE_TOKEN` | Stockage | présent |
-| RPC dédiés | Fiabilité des lectures | **absents** (RPC publics par défaut) |
+| `NEXT_PUBLIC_ALCHEMY_API_KEY` / `NEXT_PUBLIC_INFURA_API_KEY` | RPC dédiés sur les 7 chaînes (`lib/rpc.ts` : URL explicite `NEXT_PUBLIC_RPC_<CHAIN>` → Alchemy → Infura → publics) | **à créer** ; clés exposées au navigateur, à restreindre aux domaines Meridian côté fournisseur |
 
 ---
 
@@ -180,16 +180,16 @@ Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → s
 - [x] `ThreadCard.tsx` découpé : 1 730 → 295 lignes (`components/execute/*`, `components/thread/*`)
 - [x] Couches MCP fusionnées : un module par fournisseur (`lib/mcp/{client,aave,debridge,lifi,router}.ts`) ; `providers/` ne garde que Haiku et Base
 - [x] Surface réduite par flags (`lib/features.ts`) : perps et Solana masqués par défaut (`NEXT_PUBLIC_FEATURE_PERPS=1` / `NEXT_PUBLIC_FEATURE_SOLANA=1` pour les réactiver) ; le chat ne propose plus de perps tant qu'ils sont coupés
-- [ ] Chaînes secondaires : **non fait** — masquer des chaînes cache aussi les fonds de l'utilisateur sur ces chaînes dans le portefeuille ; décision à prendre (D1)
+- [x] Chaînes (D1) : exécution et propositions du chat limitées à 7 chaînes (`ACTIVE_CHAIN_IDS` : Ethereum, Base, Arbitrum, Optimism, Polygon, Avalanche, BNB Chain) ; le portefeuille lit toujours toutes les chaînes (aucun fonds caché) ; bridges LI.FI/deBridge étendus à Avalanche et BNB Chain
 - [x] Double comptage Haiku corrigé : Haiku relisait les mêmes soldes (LI.FI) et positions Aave (Aave MCP) ; seules ses positions hors protocoles déjà suivis sont ajoutées
 - [x] Bug démo corrigé : un wallet connecté sans staking affichait 42 % de concentration staking (valeur démo)
 - [x] `LIFI_API_KEY` ajoutée dans Vercel (production + preview) ; bug d'unité des APY earn corrigé (×100)
 - [x] Coffres earn : jamais proposés sous **1 M$ de TVL** (`MIN_VAULT_TVL_USD`, appliqué au chat et à `/api/haiku?action=yields`)
 - [x] Audit protocole × chaîne × action (560 combinaisons) + audit on-chain de toutes les adresses (`npm run audit:onchain`, workflow dédié) : prix WETH manquant, alias MATIC→WETH, adresses fausses (wstETH OP, USDC Mantle, AAVE Avalanche, Uniswap Scroll/Linea), checksums invalides, Uniswap multi-niveaux de frais, venues sans contrat retirées
 - [x] Plan ajusté au wallet (`lib/fundingPlanner.ts`) : chaque étape est financée par les soldes réels — bridge ajouté depuis la chaîne où sont les fonds, étape gardée sur place si le bridge ne se rembourse pas en 90 jours de rendement en plus (devis live + APY DefiLlama), montant réduit sinon ; l'étape suivant un bridge attend l'arrivée des fonds (`FundsArrivalGate`)
-- [x] Pendle exécutable (`lib/integrations/pendle.ts`, `/api/pendle`, `PendleExecuteButton`) : achat de PT sur les marchés live (≥ 1 M$ de liquidité, > 14 jours avant échéance) sur Ethereum, Arbitrum et Base, appel du RouterV4 coté par l'API Pendle et vérifié contre notre adresse ; marchés injectés dans les données du chat
+- [x] Pendle exécutable (`lib/integrations/pendle.ts`, `/api/pendle`, `PendleExecuteButton`) : achat de PT sur les marchés live **prime ou stable majeur uniquement** (sélection curée par Pendle, ou sous-jacent USDC/USDT/DAI/USDS/USDe et leurs versions d'épargne, GHO, PYUSD ; ≥ 1 M$ de liquidité, > 14 jours avant échéance) sur Ethereum, Arbitrum et Base, appel du RouterV4 coté par l'API Pendle et vérifié contre notre adresse ; marchés injectés dans les données du chat
 - [x] EigenLayer exécutable (`lib/integrations/eigenlayer.ts`) : restake stETH sur Ethereum (StrategyManager → stratégie stETH) ; la délégation à un opérateur (nécessaire pour les récompenses) reste dans l'app EigenLayer, retraits ~14 jours — dit avant signature
-- [x] Preuves fork Ethereum en CI (`e2e/mainnet.fork.test.ts`) : USDC → PT Pendle sur le meilleur marché stable « prime » live, ETH → stETH (Lido) → restake EigenLayer
+- [x] Preuves fork Ethereum en CI (`e2e/mainnet.fork.test.ts`) : USDC → PT Pendle sur le meilleur marché stable majeur live (aucun marché stable n'est prime sur Ethereum), ETH → stETH (Lido) → restake EigenLayer
 
 **Critère de sortie :** un seul hook d'exécution, `ThreadCard` < 500 lignes, aucun module mort, les parcours de la Phase 0 passent toujours.
 
@@ -197,7 +197,7 @@ Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → s
 
 **Objectif : 5 à 10 utilisateurs réels sans que tu sois derrière eux.**
 
-- [ ] RPC dédiés (Alchemy / Infura) pour les chaînes gardées
+- [~] RPC dédiés (Alchemy / Infura) pour les chaînes gardées — câblé (`lib/rpc.ts`) ; reste à créer les clés et les poser dans Vercel
 - [ ] Observabilité : journal serveur des exécutions (succès / échec / raison), suivi d'erreurs (Sentry ou équivalent)
 - [ ] Rate limit strict via Vercel WAF (le limiteur actuel est par instance)
 - [x] Test e2e automatisé du parcours d'or sur un fork (Anvil) en CI — voir Phase 0

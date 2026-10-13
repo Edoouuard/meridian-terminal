@@ -89,9 +89,14 @@ describe("fundingPlanner — fundPlan", () => {
   });
 
   it("never bridges from or to a chain without a verified router", async () => {
-    const out = await fundPlan(plan(supply("Avalanche", 100)), deps([{ symbol: "USDC", chain: "Arbitrum", usd: 500 }]));
+    const out = await fundPlan(plan(supply("Gnosis", 100)), deps([{ symbol: "USDC", chain: "Arbitrum", usd: 500 }]));
     expect(out.legs.map((l) => l.side)).toEqual(["Supply"]);
-    expect(out.fundingNotes?.[0]).toMatch(/holds no USDC on Avalanche \(and Meridian can.t bridge into Avalanche\)/);
+    expect(out.fundingNotes?.[0]).toMatch(/holds no USDC on Gnosis \(and Meridian can.t bridge into Gnosis\)/);
+  });
+
+  it("bridges into Avalanche and BNB Chain now that their routers are verified", async () => {
+    const out = await fundPlan(plan(supply("BNB Chain", 100)), deps([{ symbol: "USDC", chain: "Arbitrum", usd: 500 }]));
+    expect(out.legs[0]).toMatchObject({ side: "Bridge", chain: "Arbitrum", toChain: "BNB Chain" });
   });
 
   it("swaps another stable on the same chain when the leg's stable isn't held anywhere", async () => {

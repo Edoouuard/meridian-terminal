@@ -253,6 +253,6 @@ describe("mcp/router — isSignableQuote", () => {
     expect(isSignableQuote(q("lifi", "0x1231deb6f5749ef6ce6943a275a1d3e7486f4eae"))).toBe(true);
     expect(isSignableQuote(q("debridge", "0xeF4fB24aD0916217251F553c0596F8Edc630EB66", 8453))).toBe(true);
     expect(isSignableQuote(q("debridge", "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE"))).toBe(false);
-    expect(isSignableQuote(q("lifi", "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE", 56))).toBe(false);
+    expect(isSignableQuote(q("lifi", "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE", 100))).toBe(false);
   });
 });

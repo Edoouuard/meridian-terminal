@@ -13,9 +13,10 @@ import * as uni from "@/lib/integrations/uniswap";
 import * as allow from "@/lib/mcp/routerAllowlist";
 import * as pendle from "@/lib/integrations/pendle";
 import * as eigen from "@/lib/integrations/eigenlayer";
+import { RPC_URLS } from "@/lib/rpc";
 
 const rpc: Record<string, string> = {};
-for (const c of onchain.SUPPORTED_CHAINS) rpc[c.id] = c.rpcUrls.default.http[0];
+for (const c of onchain.SUPPORTED_CHAINS) rpc[c.id] = RPC_URLS[c.id]?.[0] ?? c.rpcUrls.default.http[0];
 const A: any = {
   rpc, labels: onchain.CHAIN_LABEL, aave: onchain.AAVE_V3_POOL_BY_CHAIN, spark: onchain.SPARK_POOL_BY_CHAIN,
   comet: onchain.COMPOUND_V3_USDC_COMET_BY_CHAIN, uniRouter: uni.UNISWAP_SWAP_ROUTER02_BY_CHAIN, uniQuoter: uni.UNISWAP_QUOTER_V2_BY_CHAIN,

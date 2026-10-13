@@ -37,6 +37,17 @@ export const SUPPORTED_CHAINS = [
   celo,
 ] as const;
 
+/**
+ * Chains Meridian executes on and the chat proposes (decision D1). The wallet
+ * view still reads every SUPPORTED_CHAINS entry, so funds elsewhere stay
+ * visible; they just aren't a target for new strategies.
+ */
+export const ACTIVE_CHAIN_IDS: readonly number[] = [mainnet.id, base.id, arbitrum.id, optimism.id, polygon.id, avalanche.id, bsc.id];
+
+export function isActiveChain(chainId: number | undefined): boolean {
+  return chainId !== undefined && ACTIVE_CHAIN_IDS.includes(chainId);
+}
+
 export const CHAIN_LABEL: Record<number, string> = {
   [mainnet.id]: "Ethereum",
   [base.id]: "Base",
@@ -245,6 +256,8 @@ export const TRACKED_TOKENS_BY_CHAIN: Record<number, TrackedToken[]> = {
     { symbol: "USDT", address: "0x55d398326f99059fF775485246999027B3197955", decimals: 18, priceSymbol: "USDT", venue: "Wallet" },
     { symbol: "USDC", address: "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d", decimals: 18, priceSymbol: "USDC", venue: "Wallet" },
     { symbol: "WBNB", address: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", decimals: 18, priceSymbol: "BNB", venue: "Wallet" },
+    // Binance-Peg ETH (on-chain symbol "ETH"), the ERC-20 ETH Aave and the bridges use on BNB Chain.
+    { symbol: "WETH", address: "0x2170Ed0880ac9A755fd29B2688956BD959F933F8", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
   ],
   [gnosis.id]: [
     { symbol: "USDC", address: "0xDDAfbb505ad214D7b80b1f830fcCc89B60fb7A83", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },

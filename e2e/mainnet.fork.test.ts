@@ -1,7 +1,8 @@
 /**
  * Fixed yield and restaking on an Ethereum fork, executed by the real
  * lib/orderRunner against the real contracts:
- *   - Pendle: live markets + a live router quote from Pendle's API, USDC → PT;
+ *   - Pendle: live eligible markets (prime or major stable) + a live router
+ *     quote from Pendle's API: USDC → PT on a stable market, WETH → PT-wstETH;
  *   - EigenLayer: ETH → stETH through Lido, then stETH restaked into
  *     EigenLayer's stETH strategy.
  *
@@ -27,7 +28,7 @@ import { mainnet } from "viem/chains";
 import { ERC20_ABI } from "@/lib/onchain";
 import { findToken, resolveOrderForLeg } from "@/lib/assetMap";
 import type { Order } from "@/lib/execution";
-import { fetchPendleBuyQuote, fetchPendleMarkets, pickPendleMarket } from "@/lib/integrations/pendle";
+import { PENDLE_ROUTER_V4, fetchPendleBuyQuote, fetchPendleMarkets, pickPendleMarket } from "@/lib/integrations/pendle";
 import { EIGENLAYER_STAKER_SHARES_ABI, EIGENLAYER_STETH_STRATEGY, EIGENLAYER_STRATEGY_MANAGER } from "@/lib/integrations/eigenlayer";
 import { executePreparedOrder, prepareOrder, type OrderRunnerClient, type OrderRunnerDeps, type WriteAsync } from "@/lib/orderRunner";
 
@@ -63,7 +64,41 @@ describe.skipIf(!ANVIL_ETH_URL)("Ethereum fork — Pendle PT and EigenLayer rest
     console.info(`${label} → CONFIRMED (tx ${result.hash})`);
   }
 
-  it("buys PT on the best live Pendle stablecoin market with USDC", async () => {
+  async function buyPt(spend: { address: string; symbol: string; decimals: number }, amount: bigint, kind: "USDC" | "ETH") {
+    const markets = await fetchPendleMarkets(mainnet.id);
+    console.info(`pendle: ${markets.length} eligible markets on Ethereum: ${markets.map((m) => `${m.name}${m.isPrime ? "*" : ""}${m.majorStable ? "$" : ""}`).join(", ")}`);
+    expect(markets.every((m) => m.isPrime || m.majorStable)).toBe(true);
+    const market = pickPendleMarket(markets, kind);
+    expect(market, `no eligible Pendle ${kind} market on Ethereum`).toBeDefined();
+    // Same order as PendleExecuteButton: approve the router first, then quote
+    // and sign straight away — the route's aggregator leg expires quickly.
+    const token = spend.address as Address;
+    await run(
+      { type: "approve", protocol: "pendle", token, symbol: spend.symbol, amount, chainId: mainnet.id, decimals: spend.decimals, spender: PENDLE_ROUTER_V4 },
+      `pendle approve ${spend.symbol}`,
+    );
+    const quote = await fetchPendleBuyQuote({ chainId: mainnet.id, pt: market!.pt, tokenIn: token, amountIn: amount.toString(), receiver: account.address });
+    expect(quote, `no Pendle quote for PT-${market!.name}`).not.toBeNull();
+    await run(
+      {
+        type: "swap",
+        protocol: "pendle",
+        token,
+        symbol: spend.symbol,
+        amount,
+        chainId: mainnet.id,
+        decimals: spend.decimals,
+        routerTx: { to: quote!.tx.to, data: quote!.tx.data, value: quote!.tx.value ? BigInt(quote!.tx.value) : undefined },
+      },
+      `pendle PT-${market!.name} (${market!.impliedApyPct.toFixed(2)}% fixed, ${market!.isPrime ? "prime" : "major stable"})`,
+    );
+    const pt = await publicClient.readContract({ address: market!.pt, abi: ERC20_ABI, functionName: "balanceOf", args: [account.address] });
+    expect(pt).toBeGreaterThan(0n);
+    const left = await publicClient.readContract({ address: token, abi: ERC20_ABI, functionName: "balanceOf", args: [account.address] });
+    expect(left).toBe(0n);
+  }
+
+  it("buys PT on the best live Pendle stablecoin market (prime or major stable) with USDC", async () => {
     const usdc = findToken("USDC", mainnet.id)!;
     const amount = 100_000_000n; // 100 USDC
     try {
@@ -72,31 +107,15 @@ describe.skipIf(!ANVIL_ETH_URL)("Ethereum fork — Pendle PT and EigenLayer rest
       const slot = keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [account.address, 9n]));
       await testClient.setStorageAt({ address: usdc.address as Address, index: slot, value: pad(toHex(amount)) });
     }
+    await buyPt(usdc, amount, "USDC");
+  }, 180_000);
 
-    const markets = await fetchPendleMarkets(mainnet.id);
-    console.info(`pendle: ${markets.length} eligible markets on Ethereum: ${markets.map((m) => `${m.name}${m.isPrime ? "*" : ""}[${m.categories.join("/")}]`).join(", ")}`);
-    const market = pickPendleMarket(markets, "USDC");
-    expect(market, "no eligible Pendle stablecoin market on Ethereum").toBeDefined();
-    const quote = await fetchPendleBuyQuote({ chainId: mainnet.id, pt: market!.pt, tokenIn: usdc.address as Address, amountIn: amount.toString(), receiver: account.address });
-    expect(quote, `no Pendle quote for PT-${market!.name}`).not.toBeNull();
-
-    await run(
-      {
-        type: "swap",
-        protocol: "pendle",
-        token: usdc.address as Address,
-        symbol: "USDC",
-        amount,
-        chainId: mainnet.id,
-        decimals: 6,
-        routerTx: { to: quote!.tx.to, data: quote!.tx.data, value: quote!.tx.value ? BigInt(quote!.tx.value) : undefined },
-      },
-      `pendle PT-${market!.name} (${market!.impliedApyPct.toFixed(2)}% fixed)`,
-    );
-    const pt = await publicClient.readContract({ address: market!.pt, abi: ERC20_ABI, functionName: "balanceOf", args: [account.address] });
-    expect(pt).toBeGreaterThan(0n);
-    const usdcLeft = await publicClient.readContract({ address: usdc.address as Address, abi: ERC20_ABI, functionName: "balanceOf", args: [account.address] });
-    expect(usdcLeft).toBe(0n);
+  it("buys PT on the best live Pendle ETH market with WETH", async () => {
+    const weth = findToken("WETH", mainnet.id)!;
+    const amount = 50_000_000_000_000_000n; // 0.05 WETH
+    const wrap = await walletClient.sendTransaction({ to: weth.address as Address, value: amount }); // WETH9 fallback = deposit
+    await publicClient.waitForTransactionReceipt({ hash: wrap });
+    await buyPt(weth, amount, "ETH");
   }, 180_000);
 
   it("stakes ETH on Lido, then restakes the stETH into EigenLayer", async () => {

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { fetchAaveYieldSummary } from "@/lib/mcp/aave";
+import { ACTIVE_CHAIN_IDS } from "@/lib/onchain";
 import { PENDLE_CHAINS, fetchPendleMarkets, type PendleMarket } from "@/lib/integrations/pendle";
 import * as haiku from "@/lib/mcp/providers/haiku";
 
@@ -399,14 +400,14 @@ function buildSummary(ctx: Omit<YieldContext, "summary" | "fetchedAt">): string 
   return lines.join("\n");
 }
 
-/** Executable Pendle fixed-rate markets (≥ $1M liquidity, > 14 days to expiry), best fixed APY first. */
+/** Executable Pendle fixed-rate markets (prime or major stablecoin, ≥ $1M liquidity, > 14 days to expiry), best fixed APY first. */
 function pendleSummary(markets: PendleMarket[]): string {
   if (markets.length === 0) return "";
   const chainName: Record<number, string> = { 1: "Ethereum", 42161: "Arbitrum", 8453: "Base" };
-  const lines = ["\n\n### Pendle fixed yield (buy PT, held to expiry) — executable, use asset \"PT-<name>\" and the chain shown"];
+  const lines = ["\n\n### Pendle fixed yield (buy PT, held to expiry; Pendle prime or major-stablecoin markets only) — executable, use asset \"PT-<name>\" and the chain shown. Propose no other Pendle market"];
   for (const m of markets.slice(0, 20)) {
     lines.push(
-      `- PT-${m.name} | ${chainName[m.chainId] ?? m.chainId} | ${m.impliedApyPct.toFixed(2)}% fixed until ${m.expiry.slice(0, 10)} | ${fmtTvl(m.liquidityUsd)} liquidity${m.isPrime ? " | prime" : ""}${m.categories.length ? ` | ${m.categories.join(",")}` : ""}`,
+      `- PT-${m.name} | ${chainName[m.chainId] ?? m.chainId} | ${m.impliedApyPct.toFixed(2)}% fixed until ${m.expiry.slice(0, 10)} | ${fmtTvl(m.liquidityUsd)} liquidity${m.isPrime ? " | prime" : " | major stable"}${m.categories.length ? ` | ${m.categories.join(",")}` : ""}`,
     );
   }
   return lines.join("\n");
@@ -422,7 +423,7 @@ export async function GET() {
     fetchHlpVault(),
     fetchLighterVaults(),
     fetchPhilidorVaults(),
-    fetchAaveYieldSummary([1, 8453, 42161, 10, 137, 43114, 56, 100, 534352, 324, 59144, 5000, 1088, 250, 146, 42220]).catch(() => ""),
+    fetchAaveYieldSummary([...ACTIVE_CHAIN_IDS]).catch(() => ""),
     haiku.fetchYieldOpportunities({ minApy: 1 }).catch(() => []),
     Promise.all(PENDLE_CHAINS.map((c) => fetchPendleMarkets(c))).then((all) => all.flat()),
   ]);
