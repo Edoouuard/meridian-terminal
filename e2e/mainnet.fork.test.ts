@@ -73,7 +73,9 @@ describe.skipIf(!ANVIL_ETH_URL)("Ethereum fork — Pendle PT and EigenLayer rest
       await testClient.setStorageAt({ address: usdc.address as Address, index: slot, value: pad(toHex(amount)) });
     }
 
-    const market = pickPendleMarket(await fetchPendleMarkets(mainnet.id), "USDC");
+    const markets = await fetchPendleMarkets(mainnet.id);
+    console.info(`pendle: ${markets.length} eligible markets on Ethereum: ${markets.map((m) => `${m.name}${m.isPrime ? "*" : ""}[${m.categories.join("/")}]`).join(", ")}`);
+    const market = pickPendleMarket(markets, "USDC");
     expect(market, "no eligible Pendle stablecoin market on Ethereum").toBeDefined();
     const quote = await fetchPendleBuyQuote({ chainId: mainnet.id, pt: market!.pt, tokenIn: usdc.address as Address, amountIn: amount.toString(), receiver: account.address });
     expect(quote, `no Pendle quote for PT-${market!.name}`).not.toBeNull();

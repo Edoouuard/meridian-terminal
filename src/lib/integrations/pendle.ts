@@ -110,14 +110,17 @@ export function isEthMarket(m: Pick<PendleMarket, "name" | "categories">): boole
 /**
  * Pick the market for a leg: an exact name match first (the plan named one),
  * else the highest fixed APY among Pendle "prime" markets of the right kind
- * (stables for a USD leg, ETH for an ETH leg).
+ * (stables for a USD leg, ETH for an ETH leg), else the most liquid one.
  */
 export function pickPendleMarket(markets: PendleMarket[], asset: string): PendleMarket | undefined {
   const name = marketNameFromAsset(asset).toLowerCase();
   const exact = markets.find((m) => m.name.toLowerCase() === name);
   if (exact) return exact;
   const wantEth = /eth/i.test(name);
-  return markets.find((m) => m.isPrime && (wantEth ? isEthMarket(m) : m.categories.includes("stables") && !isEthMarket(m)));
+  const ofKind = markets.filter((m) => (wantEth ? isEthMarket(m) : m.categories.includes("stables") && !isEthMarket(m)));
+  // Pendle's curated "prime" markets by fixed APY first; without one, the
+  // deepest market of the kind — never the highest APY of an uncurated one.
+  return ofKind.find((m) => m.isPrime) ?? [...ofKind].sort((a, b) => b.liquidityUsd - a.liquidityUsd)[0];
 }
 
 export interface PendleBuyQuote {

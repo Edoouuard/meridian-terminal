@@ -53,6 +53,15 @@ describe("pendle — market choice", () => {
     expect(pickPendleMarket(markets, "USDC")?.name).toBe("sUSDS"); // USDai pays more but isn't prime
     expect(pickPendleMarket(markets, "ETH")?.name).toBe("wstETH");
   });
+
+  it("falls back to the most liquid market of the kind when none is prime", () => {
+    const noPrime = parsePendleMarkets(
+      1,
+      { markets: [raw("hot", { apy: 0.3, prime: false, liquidity: 2_000_000 }), raw("deep", { apy: 0.07, prime: false, liquidity: 9_000_000 })] },
+      NOW,
+    );
+    expect(pickPendleMarket(noPrime, "USDC")?.name).toBe("deep");
+  });
 });
 
 describe("pendle — parsePendleConvert", () => {
