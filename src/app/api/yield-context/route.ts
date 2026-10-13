@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { fetchAaveYieldSummary } from "@/lib/mcp/aave";
+import { ACTIVE_CHAIN_IDS } from "@/lib/onchain";
 import { PENDLE_CHAINS, fetchPendleMarkets, type PendleMarket } from "@/lib/integrations/pendle";
 import * as haiku from "@/lib/mcp/providers/haiku";
 
@@ -422,7 +423,7 @@ export async function GET() {
     fetchHlpVault(),
     fetchLighterVaults(),
     fetchPhilidorVaults(),
-    fetchAaveYieldSummary([1, 8453, 42161, 10, 137, 43114, 56, 100, 534352, 324, 59144, 5000, 1088, 250, 146, 42220]).catch(() => ""),
+    fetchAaveYieldSummary([...ACTIVE_CHAIN_IDS]).catch(() => ""),
     haiku.fetchYieldOpportunities({ minApy: 1 }).catch(() => []),
     Promise.all(PENDLE_CHAINS.map((c) => fetchPendleMarkets(c))).then((all) => all.flat()),
   ]);

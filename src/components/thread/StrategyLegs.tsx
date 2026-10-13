@@ -7,6 +7,7 @@ import type { StakeYieldEntry } from "@/app/api/stake-yield/route";
 import { needsLiveCompletion, resolveOrderForLeg, protocolLabel } from "@/lib/assetMap";
 import type { Order } from "@/lib/execution";
 import { chainIdFromName, legChainId } from "@/lib/chains";
+import { ACTIVE_CHAIN_IDS, CHAIN_LABEL, isActiveChain } from "@/lib/onchain";
 import { FundsArrivalGate } from "@/components/thread/FundsArrivalGate";
 import type { TradeLeg, TradePlan } from "@/lib/tradePlan";
 import { explorerUrlFor } from "@/lib/explorer";
@@ -131,8 +132,12 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
           legChain !== undefined &&
           !isBridge &&
           plan.legs.slice(0, i).some((p) => p.side.toLowerCase() === "bridge" && chainIdFromName(p.toChain) === legChain);
-        const execution =
-          dedicated || isUnsupported(resolved) ? (
+        const execution = legChain !== undefined && !isActiveChain(legChain) ? (
+          <NotWired
+            venue={protocolLabel(leg.protocol)}
+            reason={`Meridian executes on ${ACTIVE_CHAIN_IDS.map((id) => CHAIN_LABEL[id]).join(", ")} — not ${leg.chain ?? "this chain"}.`}
+          />
+        ) : dedicated || isUnsupported(resolved) ? (
             !FEATURES.perps && /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "") ? (
               <NotWired venue={leg.protocol} reason="Perps are paused during the beta while spot execution is validated end to end." />
             ) : /hyperliquid/i.test(leg.protocol || "") ? (

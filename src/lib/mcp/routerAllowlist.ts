@@ -1,4 +1,5 @@
 import type { Address } from "viem";
+import { CHAIN_LABEL } from "@/lib/onchain";
 
 /**
  * mcp/routerAllowlist.ts — the ONLY trusted on-chain entrypoints Meridian
@@ -28,13 +29,15 @@ import type { Address } from "viem";
  * from a map is NOT supported for that provider: never guess an address.
  */
 
-/** LI.FI's "LiFiDiamond" entrypoint — verified on these 5 chains only. */
+/** LI.FI's "LiFiDiamond" entrypoint — verified on these chains only (code checked by e2e/onchain.audit.test.ts). */
 export const LIFI_DIAMOND_BY_CHAIN: Record<number, Address> = {
   1: "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE", // Ethereum
   8453: "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE", // Base
   42161: "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE", // Arbitrum
   10: "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE", // Optimism
   137: "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE", // Polygon
+  43114: "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE", // Avalanche
+  56: "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE", // BNB Chain
 };
 
 /** deBridge's "DlnSource" entrypoint (origin-chain side of a DLN order) — verified on these chains only. */
@@ -44,6 +47,8 @@ export const DEBRIDGE_DLN_SOURCE_BY_CHAIN: Record<number, Address> = {
   42161: "0xeF4fB24aD0916217251F553c0596F8Edc630EB66", // Arbitrum
   10: "0xeF4fB24aD0916217251F553c0596F8Edc630EB66", // Optimism
   137: "0xeF4fB24aD0916217251F553c0596F8Edc630EB66", // Polygon
+  43114: "0xeF4fB24aD0916217251F553c0596F8Edc630EB66", // Avalanche
+  56: "0xeF4fB24aD0916217251F553c0596F8Edc630EB66", // BNB Chain
 };
 
 /** True when `address` is the verified LI.FI entrypoint on `chainId`. */
@@ -61,4 +66,10 @@ export function isTrustedDebridgeEntrypoint(chainId: number, address: string): b
 /** Chains Meridian can route a swap/bridge through at all (either provider verified). */
 export function isRoutingSupportedChain(chainId: number): boolean {
   return chainId in LIFI_DIAMOND_BY_CHAIN || chainId in DEBRIDGE_DLN_SOURCE_BY_CHAIN;
+}
+
+/** "Ethereum, Base, …" — the chains Meridian can bridge between, for user-facing text and the chat prompt. */
+export function routingChainNames(): string {
+  const ids = Array.from(new Set([...Object.keys(LIFI_DIAMOND_BY_CHAIN), ...Object.keys(DEBRIDGE_DLN_SOURCE_BY_CHAIN)].map(Number)));
+  return ids.map((id) => CHAIN_LABEL[id] ?? `chain ${id}`).join(", ");
 }

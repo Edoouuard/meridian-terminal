@@ -180,7 +180,7 @@ Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → s
 - [x] `ThreadCard.tsx` découpé : 1 730 → 295 lignes (`components/execute/*`, `components/thread/*`)
 - [x] Couches MCP fusionnées : un module par fournisseur (`lib/mcp/{client,aave,debridge,lifi,router}.ts`) ; `providers/` ne garde que Haiku et Base
 - [x] Surface réduite par flags (`lib/features.ts`) : perps et Solana masqués par défaut (`NEXT_PUBLIC_FEATURE_PERPS=1` / `NEXT_PUBLIC_FEATURE_SOLANA=1` pour les réactiver) ; le chat ne propose plus de perps tant qu'ils sont coupés
-- [ ] Chaînes secondaires : **non fait** — masquer des chaînes cache aussi les fonds de l'utilisateur sur ces chaînes dans le portefeuille ; décision à prendre (D1)
+- [x] Chaînes (D1) : exécution et propositions du chat limitées à 7 chaînes (`ACTIVE_CHAIN_IDS` : Ethereum, Base, Arbitrum, Optimism, Polygon, Avalanche, BNB Chain) ; le portefeuille lit toujours toutes les chaînes (aucun fonds caché) ; bridges LI.FI/deBridge étendus à Avalanche et BNB Chain
 - [x] Double comptage Haiku corrigé : Haiku relisait les mêmes soldes (LI.FI) et positions Aave (Aave MCP) ; seules ses positions hors protocoles déjà suivis sont ajoutées
 - [x] Bug démo corrigé : un wallet connecté sans staking affichait 42 % de concentration staking (valeur démo)
 - [x] `LIFI_API_KEY` ajoutée dans Vercel (production + preview) ; bug d'unité des APY earn corrigé (×100)

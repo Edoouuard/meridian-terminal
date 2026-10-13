@@ -1,5 +1,7 @@
 import { FEATURES } from "@/lib/features";
 import { NextRequest, NextResponse } from "next/server";
+import { ACTIVE_CHAIN_IDS, CHAIN_LABEL } from "@/lib/onchain";
+import { routingChainNames } from "@/lib/mcp/routerAllowlist";
 
 /**
  * POST /api/parse-intent
@@ -22,6 +24,10 @@ const PERPS_DISABLED_NOTE = `
 
 ## CURRENT LIMITATION — PERPS DISABLED
 Perpetual futures (Hyperliquid, Extended, Ondo, Lighter) cannot be executed in Meridian right now. Build every strategy from spot legs only (lending, staking, swaps, bridges, vaults). If the user's goal truly needs a perp (hedge, delta-neutral), say so in variantNote and propose the closest spot-only alternative instead of a perp leg.`;
+
+/** Chains the chat may target, and the subset funds can be bridged between (lib/onchain ACTIVE_CHAIN_IDS, mcp/routerAllowlist). */
+const ACTIVE_CHAINS = ACTIVE_CHAIN_IDS.map((id) => CHAIN_LABEL[id]).join(", ");
+const BRIDGE_CHAINS = routingChainNames();
 
 const SYSTEM_PROMPT = `You are Meridian's DeFi strategy engine. You receive a user's investment thesis and LIVE MARKET DATA, and produce 3 executable strategies.
 
@@ -93,7 +99,7 @@ Use these when user wants passive yield with protocol exposure.
 - **LI.FI**: DEX aggregator comparing 30+ DEXes (1inch, Paraswap, 0x, CowSwap, etc.) for the best swap rate. Same-chain swaps only. Use protocol "LI.FI" for aggregated swaps.
 
 ### Cross-chain Bridge
-- **deBridge**: bridge a token between Ethereum, Base, Arbitrum, Optimism and Polygon (the only chains whose routers Meridian has verified — never propose a bridge leg from or to another chain). Use side "Bridge" with protocol "deBridge". The routing layer compares deBridge DLN and LI.FI and picks the best rate automatically. Estimated delivery: 1-3 minutes.
+- **deBridge**: bridge a token between ${BRIDGE_CHAINS} (the only chains whose routers Meridian has verified — never propose a bridge leg from or to another chain). Use side "Bridge" with protocol "deBridge". The routing layer compares deBridge DLN and LI.FI and picks the best rate automatically. Estimated delivery: 1-3 minutes.
 
 ### Not Yet Live (mark "not yet live" in note if used)
 - **Pendle**: fixed yield by buying PT, held to expiry. ONLY use markets listed under "Pendle fixed yield" in the live data, on the chain shown (Ethereum, Arbitrum or Base): side "Supply", asset "PT-<name>" exactly as listed, protocol "Pendle". Bought with USDC (WETH for ETH markets). The rate is fixed only if held to expiry; say so, and mention that exotic stablecoin markets (high APY) carry the underlying issuer's risk.
@@ -135,7 +141,7 @@ Each leg must map to exactly one on-chain action. Do not combine multiple action
 When a strategy has offsetting legs (long + short for neutrality), both legs MUST have the same sizeUsd.
 When the user's portfolio is provided, ALWAYS size legs based on their FREE BALANCE (idle wallet tokens), NOT the total portfolio value. A user with $50k total but only $8k free should get legs sized from that $8k.
 
-**FUNDS MOVE AUTOMATICALLY between Ethereum, Base, Arbitrum, Optimism and Polygon.** After you answer, Meridian checks each leg against the wallet and adds the bridge and stablecoin-swap steps it needs (e.g. USDT on Arbitrum → USDC on Base), keeping a leg where the funds are when bridging wouldn't pay for itself. So for stablecoin yield, pick the best venue across those five chains by live APY and TVL — not just the chain the funds sit on — and don't add your own bridge or swap legs for funding. Stablecoins (USDC, USDT, DAI) are interchangeable for funding; volatile assets are never converted. A leg on any other chain can only use funds already on that chain.
+**FUNDS MOVE AUTOMATICALLY between ${BRIDGE_CHAINS}.** After you answer, Meridian checks each leg against the wallet and adds the bridge and stablecoin-swap steps it needs (e.g. USDT on Arbitrum → USDC on Base), keeping a leg where the funds are when bridging wouldn't pay for itself. So for stablecoin yield, pick the best venue across those chains by live APY and TVL — not just the chain the funds sit on — and don't add your own bridge or swap legs for funding. Stablecoins (USDC, USDT, DAI) are interchangeable for funding; volatile assets are never converted. 
 When the user gives a total budget, split it sensibly across legs (e.g. $10k total = $10k long + $10k short for neutral, or $7k supply + $3k borrow for a leveraged yield play).
 
 ### Rule 7: Gas cost awareness and chain selection (CRITICAL)
@@ -195,7 +201,7 @@ leverage: only for Long/Short legs. Integer.
 note: MUST include the exact live rate from data (e.g. "Currently 4.23% APY", "Funding +12.3% annualized").
 
 ## Chain of each leg (REQUIRED)
-Every leg MUST set "chain" to the chain where that leg executes, using one of: Ethereum, Base, Arbitrum, Optimism, Polygon, Avalanche, BNB Chain, Gnosis, Scroll, zkSync, Linea, Mantle, Metis, Fantom, Sonic, Celo. If the user names a chain, use it. For a Bridge leg, "chain" is the SOURCE chain and "toChain" (REQUIRED on Bridge legs) is the DESTINATION chain, e.g. { "side": "Bridge", "asset": "USDC", "protocol": "deBridge", "chain": "Arbitrum", "toChain": "Base", "sizeUsd": 100 }. The transaction is built on exactly this chain, so it must match the strategy name and summary.
+Every leg MUST set "chain" to the chain where that leg executes, using one of: ${ACTIVE_CHAINS} — Meridian executes on no other chain; if the user asks for another one, say so in the understanding and use the closest of these. If the user names one of these chains, use it. For a Bridge leg, "chain" is the SOURCE chain and "toChain" (REQUIRED on Bridge legs) is the DESTINATION chain, e.g. { "side": "Bridge", "asset": "USDC", "protocol": "deBridge", "chain": "Arbitrum", "toChain": "Base", "sizeUsd": 100 }. The transaction is built on exactly this chain, so it must match the strategy name and summary.
 
 ## Output Format
 
