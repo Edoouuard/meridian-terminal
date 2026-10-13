@@ -13,7 +13,7 @@ const raw = (name: string, opts: { expiry?: string; liquidity?: number; apy?: nu
 });
 
 describe("pendle — parsePendleMarkets", () => {
-  it("keeps liquid markets with time left, strips the chain prefix, sorts by fixed APY", () => {
+  it("keeps prime, liquid markets with time left, strips the chain prefix, sorts by fixed APY", () => {
     const out = parsePendleMarkets(
       1,
       {
@@ -22,6 +22,7 @@ describe("pendle — parsePendleMarkets", () => {
           raw("sUSDS", { apy: 0.06 }),
           raw("thin", { liquidity: 50_000 }),
           raw("expiring", { expiry: "2026-10-20T00:00:00.000Z" }),
+          raw("uncurated", { apy: 0.3, prime: false }),
           { name: "broken" },
         ],
       },
@@ -44,23 +45,26 @@ describe("pendle — market choice", () => {
     NOW,
   );
 
-  it("takes the market the plan names", () => {
+  it("takes the prime market the plan names, never an uncurated one", () => {
     expect(marketNameFromAsset("PT-sUSDS")).toBe("sUSDS");
-    expect(pickPendleMarket(markets, "PT-USDai")?.name).toBe("USDai");
+    expect(pickPendleMarket(markets, "PT-sUSDS")?.name).toBe("sUSDS");
+    // USDai pays more but isn't prime: named or not, it's never offered.
+    expect(pickPendleMarket(markets, "PT-USDai")?.name).toBe("sUSDS");
   });
 
   it("otherwise picks the best prime market of the leg's kind", () => {
-    expect(pickPendleMarket(markets, "USDC")?.name).toBe("sUSDS"); // USDai pays more but isn't prime
+    expect(pickPendleMarket(markets, "USDC")?.name).toBe("sUSDS");
     expect(pickPendleMarket(markets, "ETH")?.name).toBe("wstETH");
   });
 
-  it("falls back to the most liquid market of the kind when none is prime", () => {
+  it("offers nothing when no market of the kind is prime", () => {
     const noPrime = parsePendleMarkets(
       1,
-      { markets: [raw("hot", { apy: 0.3, prime: false, liquidity: 2_000_000 }), raw("deep", { apy: 0.07, prime: false, liquidity: 9_000_000 })] },
+      { markets: [raw("hot", { apy: 0.3, prime: false }), raw("deep", { apy: 0.07, prime: false, liquidity: 9_000_000 }), raw("wstETH", { cats: ["eth"] })] },
       NOW,
     );
-    expect(pickPendleMarket(noPrime, "USDC")?.name).toBe("deep");
+    expect(pickPendleMarket(noPrime, "USDC")).toBeUndefined();
+    expect(pickPendleMarket(noPrime, "ETH")?.name).toBe("wstETH");
   });
 });
 

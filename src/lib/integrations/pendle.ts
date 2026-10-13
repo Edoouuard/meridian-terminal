@@ -42,7 +42,7 @@ export interface PendleMarket {
   /** Fixed APY locked in by buying PT now (percent). */
   impliedApyPct: number;
   liquidityUsd: number;
-  /** Pendle's own curated flag. */
+  /** Pendle's own curated flag — always true once parsed (non-prime markets are dropped). */
   isPrime: boolean;
   categories: string[];
 }
@@ -66,8 +66,10 @@ function stripChain(id: string | undefined): string | undefined {
 
 /**
  * Parse Pendle's /markets/active payload, keeping only markets a user can
- * sensibly lock into now: at least MIN_VAULT_TVL_USD of liquidity and more
- * than MIN_DAYS_TO_EXPIRY days left. Sorted by implied APY.
+ * sensibly lock into now: Pendle "prime" (its own curated list — uncurated
+ * markets are mostly exotic RWA/points stables), at least MIN_VAULT_TVL_USD of
+ * liquidity and more than MIN_DAYS_TO_EXPIRY days left. Sorted by implied APY.
+ * This is the only gate: the chat, the picker and /api/pendle all see this list.
  */
 export function parsePendleMarkets(chainId: number, body: unknown, now: Date = new Date()): PendleMarket[] {
   const list = (body as { markets?: unknown } | null)?.markets;
@@ -80,7 +82,7 @@ export function parsePendleMarkets(chainId: number, body: unknown, now: Date = n
       const apy = m.details?.impliedApy;
       const liquidity = m.details?.liquidity;
       if (!m.name || !m.address || !pt || !Number.isFinite(expiry) || typeof apy !== "number" || typeof liquidity !== "number") return null;
-      if (expiry < minExpiry || liquidity < MIN_VAULT_TVL_USD || !(apy > 0)) return null;
+      if (m.isPrime !== true || expiry < minExpiry || liquidity < MIN_VAULT_TVL_USD || !(apy > 0)) return null;
       return {
         chainId,
         name: m.name,
@@ -108,9 +110,10 @@ export function isEthMarket(m: Pick<PendleMarket, "name" | "categories">): boole
 }
 
 /**
- * Pick the market for a leg: an exact name match first (the plan named one),
- * else the highest fixed APY among Pendle "prime" markets of the right kind
- * (stables for a USD leg, ETH for an ETH leg), else the most liquid one.
+ * Pick the market for a leg among the prime markets parsePendleMarkets kept:
+ * an exact name match first (the plan named one), else the highest fixed APY
+ * of the right kind (stables for a USD leg, ETH for an ETH leg). None of the
+ * kind → undefined, and the leg says so rather than reaching for another market.
  */
 export function pickPendleMarket(markets: PendleMarket[], asset: string): PendleMarket | undefined {
   const name = marketNameFromAsset(asset).toLowerCase();
@@ -118,9 +121,7 @@ export function pickPendleMarket(markets: PendleMarket[], asset: string): Pendle
   if (exact) return exact;
   const wantEth = /eth/i.test(name);
   const ofKind = markets.filter((m) => (wantEth ? isEthMarket(m) : m.categories.includes("stables") && !isEthMarket(m)));
-  // Pendle's curated "prime" markets by fixed APY first; without one, the
-  // deepest market of the kind — never the highest APY of an uncurated one.
-  return ofKind.find((m) => m.isPrime) ?? [...ofKind].sort((a, b) => b.liquidityUsd - a.liquidityUsd)[0];
+  return ofKind[0]; // already sorted by fixed APY
 }
 
 export interface PendleBuyQuote {

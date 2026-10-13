@@ -333,7 +333,7 @@ const QUOTE_TTL_MS = 60_000;
 /**
  * Pendle fixed yield: buy the PT of a live market and hold it to maturity.
  * The market is the one the plan names (PT-sUSDe…) or, failing that, the best
- * fixed APY among Pendle's curated ("prime") markets of the leg's kind, with
+ * fixed APY of the leg's kind — Pendle "prime" (curated) markets only, with
  * ≥ $1M liquidity and > 14 days left (lib/integrations/pendle.ts). The router
  * call is quoted live by Pendle's API, then signed through the same validated
  * flow as everything else — its target is re-checked against Pendle's router.
@@ -386,7 +386,7 @@ export function PendleExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
     return <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>Loading live Pendle markets on {chainName}…</p>;
   }
   if (!market) {
-    return <NotWired venue="Pendle" reason={`No Pendle market for "${leg.asset}" on ${chainName} with ≥ $1M liquidity and more than 14 days to expiry.`} />;
+    return <NotWired venue="Pendle" reason={`No Pendle prime market for "${leg.asset}" on ${chainName} with ≥ $1M liquidity and more than 14 days to expiry. Meridian only buys PT on Pendle's curated (prime) markets.`} />;
   }
   if (!spend || !amount) {
     return <NotWired venue="Pendle" reason="No live price for the input token — cannot size this order safely." />;
@@ -432,7 +432,7 @@ export function PendleExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
     <>
       <OrderRow label="Market" value={`PT-${market.name} · ${chainName}`} />
       <OrderRow label="Fixed APY" value={`${market.impliedApyPct.toFixed(2)}% until ${expiry}`} valueColor="var(--color-accent-700)" />
-      <OrderRow label="Liquidity" value={`$${Math.round(market.liquidityUsd).toLocaleString()}${market.isPrime ? " · Pendle prime" : ""}`} />
+      <OrderRow label="Liquidity" value={`$${Math.round(market.liquidityUsd).toLocaleString()} · Pendle prime`} />
       {!address ? (
         <NotWired venue="Pendle" reason="Connect a wallet to get a quote." />
       ) : allowance === undefined ? (
