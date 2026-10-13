@@ -1,4 +1,5 @@
-import { http, createConfig } from "wagmi";
+import { createConfig, fallback, http } from "wagmi";
+import { RPC_URLS } from "@/lib/rpc";
 import {
   arbitrum,
   avalanche,
@@ -40,13 +41,13 @@ export const wagmiConfig = createConfig({
   ],
   connectors: [injected()],
   transports: {
-    [mainnet.id]: http(),
-    [base.id]: http(),
-    [arbitrum.id]: http(),
-    [optimism.id]: http(),
-    [polygon.id]: http(),
-    [avalanche.id]: http(),
-    [bsc.id]: http(),
+    [mainnet.id]: fallback(RPC_URLS[mainnet.id].map((url) => http(url))),
+    [base.id]: fallback(RPC_URLS[base.id].map((url) => http(url))),
+    [arbitrum.id]: fallback(RPC_URLS[arbitrum.id].map((url) => http(url))),
+    [optimism.id]: fallback(RPC_URLS[optimism.id].map((url) => http(url))),
+    [polygon.id]: fallback(RPC_URLS[polygon.id].map((url) => http(url))),
+    [avalanche.id]: fallback(RPC_URLS[avalanche.id].map((url) => http(url))),
+    [bsc.id]: fallback(RPC_URLS[bsc.id].map((url) => http(url))),
     [gnosis.id]: http(),
     [scroll.id]: http(),
     [zkSync.id]: http(),
