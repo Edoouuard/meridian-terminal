@@ -140,7 +140,7 @@ describe("mcp/lifi — normalization", () => {
 });
 
 describe("mcp/lifi — earn vaults", () => {
-  // Shape from LI.FI's documented NormalizedVault schema (docs.li.fi/earn/how-it-works).
+  // NormalizedVault shape as served live by earn.li.fi (APY in percent).
   const vault = {
     address: "0x7BfA7C4f149E7415b73bdeDfe609237e29CBF34A",
     network: "base",
@@ -149,11 +149,11 @@ describe("mcp/lifi — earn vaults", () => {
     protocol: { name: "Morpho", url: "https://morpho.org" },
     underlyingTokens: [{ address: "0x8335", symbol: "USDC", decimals: 6, weight: 1.0 }],
     tags: ["stablecoin", "lending"],
-    analytics: { apy: { base: 0.0534, reward: null, total: 0.0534 }, tvl: { usd: "12500000.00" } },
+    analytics: { apy: { base: 5.34, reward: null, total: 5.34 }, tvl: { usd: "12500000.00" } },
     isTransactional: true,
   };
 
-  it("reads { data: NormalizedVault[] } with fractional APY and string TVL", () => {
+  it("reads { data: NormalizedVault[] }, converting percent APY to a fraction and string TVL to a number", () => {
     expect(normalizeLifiEarnVaults({ data: [vault], nextCursor: null, total: 1 })).toEqual([
       {
         address: "0x7BfA7C4f149E7415b73bdeDfe609237e29CBF34A",
@@ -161,7 +161,7 @@ describe("mcp/lifi — earn vaults", () => {
         name: "Morpho USDC Vault",
         protocol: "Morpho",
         asset: "USDC",
-        apy: 0.0534,
+        apy: expect.closeTo(0.0534, 10),
         tvlUsd: 12_500_000,
         tags: ["stablecoin", "lending"],
         isTransactional: true,

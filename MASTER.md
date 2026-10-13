@@ -40,9 +40,9 @@ Un utilisateur DeFi déjà équipé d'un wallet (MetaMask, Rabby…) qui gère q
 | Rate limit API + mot de passe bêta | ✅ | PR #16, testé en local |
 | Mobile | 🟡 codé, jamais vu sur téléphone | PR #16 |
 | Chat IA (`parse-intent`, OpenRouter / Gemini Flash) | 🟡 non vérifié en prod | clé en Production uniquement, prod derrière mot de passe |
-| Exécution (validation → approve exact → simulation → signature) | 🟡 **jamais testée avec un vrai wallet** | uniquement tests unitaires |
+| Exécution (validation → approve exact → simulation → signature) | 🟡 prouvée sur un fork de Base (vrais contrats Aave/USDC), **pas encore avec un vrai wallet** | CI `fork` + tests unitaires |
 | Positions utilisateur | 🟡 non vérifiées | liste vide sur l'adresse de test |
-| Coffres earn LI.FI | ❌ vides | `LIFI_API_KEY` manquante |
+| Coffres earn LI.FI | ✅ données live (clé ajoutée le 2026-10-13, APY corrigés : l'API renvoie des %) | `/api/haiku?action=yields` |
 | Routes deBridge avec swap | ❌ refusées | CrosschainForwarder hors allowlist (volontaire) |
 | Portefeuille sans wallet | ✅ affiche « — » et invite à connecter un wallet (faux portefeuille supprimé) | Phase 1 |
 
@@ -139,7 +139,7 @@ Diagnostic honnête du code (≈ 22 000 lignes, 80 commits, 16 PR) :
 |---|---|---|
 | `OPENROUTER_API_KEY` | Chat IA | Production uniquement |
 | `BETA_PASSWORD` (ou `NEXT_PUBLIC_BETA_PASSWORD`) | Accès bêta | à renommer en `BETA_PASSWORD` |
-| `LIFI_API_KEY` | Coffres earn LI.FI | **manquante** |
+| `LIFI_API_KEY` | Coffres earn LI.FI + quotas LI.FI | présente (sensible, production + preview) |
 | `BLOB_READ_WRITE_TOKEN` | Stockage | présent |
 | RPC dédiés | Fiabilité des lectures | **absents** (RPC publics par défaut) |
 
@@ -160,7 +160,8 @@ Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → s
 - [ ] Exécuter le parcours d'or avec un vrai wallet, petit montant (**toi**)
 - [ ] Corriger tout ce qui casse pendant ce test (**moi**, sur retour d'erreur)
 - [ ] Vérifier que la position Aave apparaît après confirmation
-- [ ] Remplacer le faux portefeuille de 128 400 $ par un état « connecte ton wallet » clair
+- [x] Remplacer le faux portefeuille de 128 400 $ par un état « connecte ton wallet » clair (Phase 1)
+- [x] Preuve sans wallet : le parcours d'or exécuté par le vrai code contre les vrais contrats Aave + USDC sur un **fork de Base** en CI (`e2e/aaveSupply.fork.test.ts`, aucun argent réel). *Preuve : CI run [38393651681](https://github.com/Edoouuard/meridian-terminal/actions/runs/38393651681) — approve exact → supply → `CONFIRMED`, allowance consommée à 0, collatéral ≈ 100 $ visible dans Aave ; refus avant signature si solde insuffisant.* Ne remplace pas le test avec ton wallet (UI, wallet, réseau réel), mais la logique d'exécution est prouvée.
 - [ ] Deuxième parcours : bridge 5 USDC Arbitrum → Base
 
 **Critère de sortie :** 2 transactions réelles confirmées (supply Aave + bridge), visibles dans l'app, sans intervention manuelle.
@@ -178,7 +179,7 @@ Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → s
 - [ ] Chaînes secondaires : **non fait** — masquer des chaînes cache aussi les fonds de l'utilisateur sur ces chaînes dans le portefeuille ; décision à prendre (D1)
 - [x] Double comptage Haiku corrigé : Haiku relisait les mêmes soldes (LI.FI) et positions Aave (Aave MCP) ; seules ses positions hors protocoles déjà suivis sont ajoutées
 - [x] Bug démo corrigé : un wallet connecté sans staking affichait 42 % de concentration staking (valeur démo)
-- [ ] Ajouter `LIFI_API_KEY` (coffres earn) — **action Vercel de ta part**
+- [x] `LIFI_API_KEY` ajoutée dans Vercel (production + preview) ; bug d'unité des APY earn corrigé (×100)
 
 **Critère de sortie :** un seul hook d'exécution, `ThreadCard` < 500 lignes, aucun module mort, les parcours de la Phase 0 passent toujours.
 
@@ -189,8 +190,8 @@ Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → s
 - [ ] RPC dédiés (Alchemy / Infura) pour les chaînes gardées
 - [ ] Observabilité : journal serveur des exécutions (succès / échec / raison), suivi d'erreurs (Sentry ou équivalent)
 - [ ] Rate limit strict via Vercel WAF (le limiteur actuel est par instance)
-- [ ] Test e2e automatisé du parcours d'or sur un fork (Anvil) en CI
-- [ ] CI GitHub : lint + typecheck + tests + build sur chaque PR
+- [x] Test e2e automatisé du parcours d'or sur un fork (Anvil) en CI — voir Phase 0
+- [x] CI GitHub : lint + typecheck + tests + build sur chaque push (`.github/workflows/ci.yml`)
 - [ ] Onboarding : 3 prompts suggérés, états vides propres, messages d'erreur compréhensibles
 - [ ] Décision deBridge CrosschainForwarder (routes avec swap)
 

@@ -289,7 +289,9 @@ export function normalizeLifiEarnVaults(payload: unknown): LifiEarnVault[] {
       name: typeof v.name === "string" ? v.name : v.address,
       protocol: typeof protocol.name === "string" ? protocol.name : "Unknown",
       asset: symbols.length > 0 ? symbols.join("/") : "?",
-      apy: toNum(apy.total ?? apy.base),
+      // The live Earn API reports APY in percent (5.82 = 5.82%), verified
+      // 2026-10-13 against Morpho/Aave USDC on Base; normalize to a fraction.
+      apy: toNum(apy.total ?? apy.base) / 100,
       tvlUsd: toNum(tvl.usd),
       tags: Array.isArray(v.tags) ? v.tags.filter((t): t is string => typeof t === "string") : [],
       isTransactional: v.isTransactional === true,

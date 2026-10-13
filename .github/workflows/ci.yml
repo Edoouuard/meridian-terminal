@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Lint, typecheck, unit tests, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  fork:
+    name: Golden path on a Base fork (real Aave + USDC)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - uses: foundry-rs/foundry-toolchain@v1
+      - name: Start anvil (fork of Base)
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
+        run: |
+          anvil --fork-url "${BASE_RPC_URL:-https://mainnet.base.org}" --port 8545 --silent &
+          for i in $(seq 1 30); do
+            curl -sf -X POST -H 'content-type: application/json' \
+              -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' http://127.0.0.1:8545 && exit 0
+            sleep 1
+          done
+          echo "anvil did not start" && exit 1
+      - run: npm run test:fork
+        env:
+          ANVIL_URL: http://127.0.0.1:8545
