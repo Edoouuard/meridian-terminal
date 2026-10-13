@@ -36,12 +36,25 @@ export interface LLMStrategy {
   variantNote: string;
   summary: string;
   legs: LLMLeg[];
+  /** Blended expected APY (percent) from the live data. */
+  apy?: number;
+  /** How to exit ("Instant", "Locked until …"). */
+  exit?: string;
+  /** Who this suits, one line. */
+  fit?: string;
+  /** Main risks, short items. */
+  risks?: string[];
 }
 
 export interface ParseIntentResponse {
   understanding: string;
   strategies: LLMStrategy[];
+  /** Index of the strategy the planner recommends for this user. */
+  recommended?: number;
 }
+
+const cleanText = (v: unknown, max: number): string | undefined =>
+  typeof v === "string" && v.trim() ? v.trim().slice(0, max) : undefined;
 
 /* ------------------------------------------------------------------ */
 /*  Mapping helpers                                                    */
@@ -129,7 +142,7 @@ function strategyToTradePlan(strategy: LLMStrategy): TradePlan & { riskTier: LLM
     intent,
     asset,
     direction: hasShort && !hasLong ? "short" : hasLong ? "long" : undefined,
-    sizeUsd: legs.reduce((sum, l) => sum + (l.sizeUsd ?? 0), 0) || undefined,
+    sizeUsd: positionSizeUsd(legs),
     leverage: legs.find((l) => l.leverage)?.leverage,
     protocol: legs[0]?.protocol,
     legs,
@@ -137,7 +150,27 @@ function strategyToTradePlan(strategy: LLMStrategy): TradePlan & { riskTier: LLM
     variantLabel: strategy.name,
     variantNote: strategy.variantNote,
     riskTier: strategy.risk,
+    apyPct: typeof strategy.apy === "number" && Number.isFinite(strategy.apy) && strategy.apy > -100 && strategy.apy < 1000 ? strategy.apy : undefined,
+    exit: cleanText(strategy.exit, 80),
+    fit: cleanText(strategy.fit, 160),
+    risks: Array.isArray(strategy.risks)
+      ? strategy.risks.map((r) => cleanText(r, 120)).filter((r): r is string => !!r).slice(0, 4)
+      : undefined,
   };
+}
+
+/**
+ * Capital the strategy deploys. A Bridge or Swap leg moves the same money a
+ * later leg deposits, so summing every leg double-counts it: count the legs
+ * that end in a position, and fall back to the largest leg when none does.
+ */
+export function positionSizeUsd(legs: TradeLeg[]): number | undefined {
+  const moves = new Set(["bridge", "swap", "transfer"]);
+  const positions = legs.filter((l) => !moves.has(l.side.toLowerCase()));
+  const total = positions.reduce((sum, l) => sum + (l.sizeUsd ?? 0), 0);
+  if (total > 0) return total;
+  const largest = Math.max(0, ...legs.map((l) => l.sizeUsd ?? 0));
+  return largest > 0 ? largest : undefined;
 }
 
 /* ------------------------------------------------------------------ */
@@ -196,11 +229,18 @@ export async function routeThesisAsync(rawText: string, portfolio?: PortfolioCon
 
     const threadType = intentToThreadType(defaultPlan.intent);
 
+    const recommendedIndex =
+      typeof data.recommended === "number" && Number.isInteger(data.recommended) && data.recommended >= 0 && data.recommended < variants.length
+        ? data.recommended
+        : undefined;
+
     return {
       type: threadType,
       text,
-      plan: defaultPlan,
+      plan: recommendedIndex !== undefined ? variants[recommendedIndex] : defaultPlan,
       variants: variants.length > 1 ? variants : undefined,
+      understanding: cleanText(data.understanding, 240),
+      recommendedIndex,
     };
   } catch (err) {
     console.warn("[intentEngine] LLM parsing failed, falling back to regex parser:", err);

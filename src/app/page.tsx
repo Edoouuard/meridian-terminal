@@ -19,7 +19,7 @@ import { BridgePanel } from "@/components/BridgePanel";
 import { LiveAsset, LivePortfolio, useLivePortfolio } from "@/hooks/useLivePortfolio";
 import { useHaikuPortfolio } from "@/hooks/useHaikuPortfolio";
 import { NewsFeed } from "@/components/NewsFeed";
-import { CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
+import { ACTIVE_CHAIN_IDS, CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
 import { FEATURES } from "@/lib/features";
 import { routeThesis, type TradePlan } from "@/lib/routeThesis";
 import { routeThesisAsync, type PortfolioContext } from "@/lib/intentEngine";
@@ -70,6 +70,58 @@ function buildLiveAllocation(live: LivePortfolio): { label: string; pct: number;
     pct: Math.round((s.usd / total) * 1000) / 10,
     color: ALLOCATION_COLORS[i],
   }));
+}
+
+interface QuickPrompt {
+  label: string;
+  hint: string;
+  thesis: string;
+}
+
+const STABLES = new Set(["USDC", "USDT", "DAI", "USDS", "USDE", "GHO", "PYUSD", "USDC.E"]);
+
+function fmtAmount(n: number): string {
+  return n >= 100 ? Math.round(n).toLocaleString("en-US") : n >= 1 ? n.toFixed(2) : n.toPrecision(2);
+}
+
+/**
+ * The three suggested starts. Generic without a wallet; with one, the stable
+ * and ETH prompts quote what the wallet holds ("Put my 1,250 USDC to work").
+ */
+function buildQuickPrompts(assets: { symbol: string; balance: number; usd: number }[]): QuickPrompt[] {
+  const stables = assets.filter((a) => STABLES.has(a.symbol.toUpperCase()));
+  const stableUsd = stables.reduce((sum, a) => sum + a.usd, 0);
+  const mainStable = [...stables].sort((a, b) => b.usd - a.usd)[0]?.symbol ?? "USDC";
+  const eth = assets.filter((a) => /^(ETH|WETH)$/i.test(a.symbol)).reduce((sum, a) => sum + a.balance, 0);
+  return [
+    stableUsd >= 10
+      ? {
+          label: `Put my $${fmtAmount(stableUsd)} of stablecoins to work`,
+          hint: "Best live rate across 7 chains, bridging only when it pays",
+          thesis: `Find the best yield on my $${fmtAmount(stableUsd)} of stablecoins (mostly ${mainStable}) across all chains. Bridge or swap only if it pays off.`,
+        }
+      : {
+          label: "Best yield on my stablecoins",
+          hint: "Aave, Morpho, Pendle — across 7 chains, bridging only when it pays",
+          thesis: "Find the best yield on my stablecoins across all chains. Bridge or swap only if it pays off.",
+        },
+    eth >= 0.005
+      ? {
+          label: `Stake my ${fmtAmount(eth)} ETH`,
+          hint: "Lido staking, optional EigenLayer restaking",
+          thesis: `I want to stake my ${fmtAmount(eth)} ETH for yield: Lido, and restaking on EigenLayer if it makes sense.`,
+        }
+      : {
+          label: "Stake my ETH",
+          hint: "Lido staking, optional EigenLayer restaking",
+          thesis: "I want to stake my ETH for yield: Lido, and restaking on EigenLayer if it makes sense.",
+        },
+    {
+      label: "Lock a fixed rate",
+      hint: "Pendle PT on major stablecoins, held to maturity",
+      thesis: `Lock a fixed rate on my ${stableUsd >= 10 ? mainStable : "USDC"} with Pendle, on a major stablecoin market.`,
+    },
+  ];
 }
 
 export default function TerminalApp() {
@@ -186,29 +238,15 @@ export default function TerminalApp() {
 
   // Three starting points, each one an end-to-end path Meridian has proven on
   // forks (lend, stake/restake, fixed rate) — the first thing a new user tries
-  // should be something that works.
-  const QUICK_PROMPTS = [
-    {
-      label: "Best yield on my stablecoins",
-      hint: "Aave, Morpho, Pendle — across 7 chains, bridging only when it pays",
-      thesis: "Find the best yield on my stablecoins across all chains. Bridge or swap only if it pays off.",
-    },
-    {
-      label: "Stake my ETH",
-      hint: "Lido staking, optional EigenLayer restaking",
-      thesis: "I want to stake my ETH for yield: Lido, and restaking on EigenLayer if it makes sense.",
-    },
-    {
-      label: "Lock a fixed rate",
-      hint: "Pendle PT on major stablecoins, held to maturity",
-      thesis: "Lock a fixed rate on my USDC with Pendle, on a major stablecoin market.",
-    },
-  ];
+  // should be something that works. With a wallet connected, they name what
+  // the wallet actually holds.
+  const QUICK_PROMPTS = buildQuickPrompts(isConnected ? live.assets : []);
 
   const FOLLOW_UPS = [
     { label: "Lower risk", thesis: "Same idea but more conservative, less leverage" },
     { label: "More yield", thesis: "I want to push for higher yield, I can take more risk" },
-    { label: "On Arbitrum", thesis: "Show me the same strategies but on Arbitrum" },
+    { label: "Stay on one chain", thesis: "Same goal, but keep everything on the chain where my funds already are — no bridge" },
+    { label: "Explain the risks", thesis: "Explain the risks of these strategies in plain words, and what could make me lose money" },
     { label: "Delta neutral", thesis: "Make it delta neutral, I don't want directional exposure", perps: true },
   ].filter((p) => FEATURES.perps || !("perps" in p));
 
@@ -220,7 +258,7 @@ export default function TerminalApp() {
           Meridian
         </Link>
         <span className="text-muted" style={{ fontSize: 13 }}>
-          {isConnected ? `${SUPPORTED_CHAINS.length} chains · connected` : `${SUPPORTED_CHAINS.length} chains · not connected`}
+          {isConnected ? `${ACTIVE_CHAIN_IDS.length} chains · connected` : `${ACTIVE_CHAIN_IDS.length} chains · not connected`}
         </span>
         <WalletConnectButton />
         <span className="tag tag-neutral" style={{ fontVariantNumeric: "tabular-nums" }}>
@@ -411,21 +449,13 @@ export default function TerminalApp() {
                   {QUICK_PROMPTS.map((qp) => (
                     <button
                       key={qp.label}
-                      className="btn btn-secondary"
-                      style={{
-                        fontSize: 12,
-                        padding: "10px 12px",
-                        textAlign: "left",
-                        justifyContent: "flex-start",
-                        borderRadius: "var(--radius-lg)",
-                      }}
+                      className="btn btn-secondary quick-prompt"
                       disabled={isAnalyzing}
                       onClick={() => submitThesis(qp.thesis)}
                     >
-                      <span style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                        <span style={{ fontWeight: 600 }}>{qp.label}</span>
-                        <span className="text-muted" style={{ fontSize: 11, lineHeight: 1.4 }}>{qp.hint}</span>
-                      </span>
+                      <span className="quick-prompt__label">{qp.label}</span>
+                      <span className="quick-prompt__hint">{qp.hint}</span>
+                      <span className="quick-prompt__go" aria-hidden="true">→</span>
                     </button>
                   ))}
                 </div>

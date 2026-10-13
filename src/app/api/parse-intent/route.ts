@@ -190,6 +190,7 @@ Before returning your JSON, verify each strategy against this checklist:
 - [ ] Does every leg have a valid side from the allowed list?
 - [ ] Are spot legs (Supply/Stake/Swap/Buy) free of leverage fields?
 - [ ] Does every summary quote exact rates from the live data?
+- [ ] Does each strategy's "apy" match the rates in its leg notes, and is "exit" honest about lock-ups and queues?
 
 ## Leg Format (STRICT)
 
@@ -207,21 +208,32 @@ Every leg MUST set "chain" to the chain where that leg executes, using one of: $
 
 Return ONLY valid JSON (no markdown, no text before/after):
 {
-  "understanding": "One sentence restating the user's goal",
+  "understanding": "One sentence restating the user's goal in their terms, with the amount and asset (e.g. 'You want the best yield on your 5,000 USDC, moving chains only when it pays.')",
+  "recommended": 1,
   "strategies": [
     {
-      "name": "Descriptive Name",
+      "name": "Short name, max 4 words (e.g. 'Aave USDC on Base')",
       "risk": "conservative",
-      "variantNote": "Specific risk of this strategy",
-      "summary": "2-3 sentences with exact live rates and expected outcome.",
+      "apy": 4.8,
+      "exit": "Instant",
+      "fit": "One line: who this suits (e.g. 'You want a blue-chip lender and to withdraw any time.')",
+      "risks": ["Short risk 1", "Short risk 2"],
+      "variantNote": "The single most important caveat of this strategy",
+      "summary": "2-3 sentences with exact live rates and the expected outcome in dollars per year.",
       "legs": [
         { "side": "Supply", "asset": "USDC", "protocol": "Aave", "chain": "Ethereum", "sizeUsd": 10000, "note": "Currently X.XX% APY on Ethereum" }
       ]
     },
-    { "name": "...", "risk": "moderate", "variantNote": "...", "summary": "...", "legs": [...] },
-    { "name": "...", "risk": "aggressive", "variantNote": "...", "summary": "...", "legs": [...] }
+    { "name": "...", "risk": "moderate", "apy": 0, "exit": "...", "fit": "...", "risks": ["..."], "variantNote": "...", "summary": "...", "legs": [...] },
+    { "name": "...", "risk": "aggressive", "apy": 0, "exit": "...", "fit": "...", "risks": ["..."], "variantNote": "...", "summary": "...", "legs": [...] }
   ]
-}`;
+}
+
+Field rules:
+- "apy": the strategy's blended expected APY in percent as a number (size-weighted over the legs that earn), computed ONLY from rates in the live data; omit it when the strategy has no yield (a swap, a hedge).
+- "exit": how and how fast the user gets their money back: "Instant", "~1-5 days (Lido withdrawal queue)", "Locked until 26 Mar 2027 (or sell PT at market)", "~14 days (EigenLayer queue)".
+- "risks": 2 to 4 short items, each under 8 words, specific to this strategy (protocol, depeg, curator, lock-up, bridge, variable rate). No generic filler.
+- "recommended": index (0-based) of the strategy that best fits THIS user's goal and wallet; when unsure, the moderate one.`;
 
 /** Fetch live yield context from our own aggregator route (server-side internal call). */
 async function fetchYieldContext(baseUrl: string): Promise<string> {

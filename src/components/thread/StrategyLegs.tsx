@@ -172,9 +172,11 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
         return (
           <div key={i} className="leg-card" style={{ opacity: building ? 0.55 : 1 }}>
             <div className="leg-card__header">
+              {plan.legs.length > 1 && <span className="leg-card__step" aria-label={`Step ${i + 1}`}>{i + 1}</span>}
               <span className="leg-card__side">{leg.side}</span>
               <span className="leg-card__detail">{legRowValue(leg)}</span>
             </div>
+            {leg.note && <span className="leg-card__note">{leg.note}</span>}
             <LegRiskBadge leg={leg} />
             <StakeYieldBadge leg={leg} />
             {fundedByBridge && legChain !== undefined ? (
@@ -183,9 +185,6 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
               </FundsArrivalGate>
             ) : (
               execution
-            )}
-            {leg.note && (
-              <span className="text-muted" style={{ fontSize: 10 }}>{leg.note}</span>
             )}
           </div>
         );
