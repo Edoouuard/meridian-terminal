@@ -153,6 +153,12 @@ export async function fetchPositions(userAddress: Address): Promise<YieldPositio
 }
 
 /**
+ * Vaults below this TVL are never suggested: sorted by APY, the earn feed
+ * otherwise leads with tiny or reward-inflated vaults (e.g. $1.4k TVL).
+ */
+export const MIN_VAULT_TVL_USD = 1_000_000;
+
+/**
  * Fetch yield opportunities via LI.FI earn vaults + Aave markets.
  */
 export async function fetchYieldOpportunities(opts?: {
@@ -165,7 +171,7 @@ export async function fetchYieldOpportunities(opts?: {
   // LI.FI Earn vaults (one query per requested chain, or one global query)
   const earnQueries = opts?.chainIds?.length ? opts.chainIds.map((chainId) => ({ chainId })) : [{}];
   const earnResults = await Promise.all(
-    earnQueries.map((q) => fetchLifiEarnVaults({ ...q, asset: opts?.asset, limit: 30 })),
+    earnQueries.map((q) => fetchLifiEarnVaults({ ...q, asset: opts?.asset, minTvlUsd: MIN_VAULT_TVL_USD, limit: 30 })),
   );
   for (const v of earnResults.flat()) {
     const apyPct = v.apy * 100;

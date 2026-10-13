@@ -307,6 +307,12 @@ export interface LifiEarnVaultQuery {
   limit?: number;
 }
 
+/** Drop vaults below the query's TVL floor (the MCP path has no server-side filter; REST's is best-effort). */
+export function applyEarnVaultFilters(vaults: LifiEarnVault[], query: Pick<LifiEarnVaultQuery, "minTvlUsd">): LifiEarnVault[] {
+  const min = query.minTvlUsd ?? 0;
+  return min > 0 ? vaults.filter((v) => v.tvlUsd >= min) : vaults;
+}
+
 let warnedMissingEarnKey = false;
 
 /** Earn vaults sorted by APY (desc). Returns [] on failure — never throws. */
@@ -318,7 +324,7 @@ export async function fetchLifiEarnVaults(query: LifiEarnVaultQuery = {}): Promi
 
   try {
     const vaults = normalizeLifiEarnVaults(parseMcpToolResult<unknown>(await callLifiTool("get-earn-vaults", params)));
-    if (vaults.length > 0) return vaults;
+    if (vaults.length > 0) return applyEarnVaultFilters(vaults, query);
   } catch {
     // Expected while LI.FI's MCP earn tools 404 upstream — fall through to REST.
   }
@@ -340,7 +346,7 @@ export async function fetchLifiEarnVaults(query: LifiEarnVaultQuery = {}): Promi
       headers: { "x-lifi-api-key": key },
     });
     if (!res.ok) throw new Error(`earn.li.fi /vaults → HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    return normalizeLifiEarnVaults(await res.json());
+    return applyEarnVaultFilters(normalizeLifiEarnVaults(await res.json()), query);
   } catch (err) {
     console.warn("[mcp/lifi] fetchLifiEarnVaults failed:", err);
     return [];
