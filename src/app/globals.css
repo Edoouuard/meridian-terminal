@@ -276,6 +276,270 @@ textarea.input { overflow-y: auto; max-height: 120px; }
   color: color-mix(in srgb, var(--color-text) 55%, transparent);
 }
 
+/* ————— terminal chrome ————— */
+
+.topbar { gap: var(--space-3); }
+.topbar .nav-brand { margin-right: 0; font-size: 20px; letter-spacing: -0.01em; }
+.topbar__spacer { flex: 1; }
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--color-divider);
+  font-size: 12px;
+  color: color-mix(in srgb, var(--color-text) 70%, transparent);
+  white-space: nowrap;
+}
+.status-pill__dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-neutral-400);
+}
+.status-pill--on .status-pill__dot {
+  background: var(--risk-good);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--risk-good) 20%, transparent);
+}
+.status-pill__sep { opacity: 0.5; }
+.topbar__value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  font-family: var(--font-heading);
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+.topbar__value-label {
+  font-family: var(--font-body);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-neutral-600);
+}
+
+/* Side columns: a stack of cards instead of one long scroll of text */
+.side-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+}
+.panel-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  border: 1px solid var(--color-divider);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-surface) 55%, var(--color-bg));
+}
+.panel-card__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+.panel-card__title {
+  margin: 0;
+  color: var(--color-accent);
+}
+.live-chip {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 8px;
+  border-radius: 999px;
+  color: var(--color-neutral-700);
+  background: var(--color-neutral-200);
+}
+.live-chip--on {
+  color: var(--risk-good);
+  background: color-mix(in srgb, var(--risk-good) 12%, transparent);
+}
+.portfolio-value {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1.1;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+.empty-hint {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.empty-hint p {
+  margin: 0;
+  font-size: 12px;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+.alloc-bar {
+  display: flex;
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  gap: 2px;
+}
+.alloc-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+.alloc-legend li {
+  display: grid;
+  grid-template-columns: 10px 1fr auto;
+  align-items: center;
+  gap: 8px;
+}
+.alloc-legend__swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+.position-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.position-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--color-divider);
+}
+.position-row:last-child { border-bottom: 0; }
+.position-row__main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.position-row__asset {
+  font-size: 13px;
+  font-weight: 600;
+}
+.position-row__venue {
+  font-size: 11px;
+  color: var(--color-neutral-600);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.position-row__amount {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+.side-tabs {
+  align-self: stretch;
+  width: 100%;
+  display: grid !important;
+  grid-template-columns: repeat(3, 1fr);
+  position: sticky;
+  top: calc(-1 * var(--space-3));
+  z-index: 2;
+  background: var(--color-bg);
+}
+.side-tabs .seg-opt span { display: block; width: 100%; text-align: center; }
+.how-computed,
+.system-status {
+  font-size: 11px;
+}
+.how-computed summary,
+.system-status summary {
+  cursor: pointer;
+  color: var(--color-neutral-600);
+  font-size: 11px;
+  list-style-position: inside;
+}
+.how-computed p {
+  margin: 6px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.system-status > :not(summary) { margin-top: 8px; }
+.suggestion-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--color-divider);
+  background: var(--color-bg);
+}
+.ask-btn {
+  all: unset;
+  align-self: flex-start;
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 11.5px;
+  color: var(--color-accent-700);
+  padding: 2px 0;
+  border-bottom: 1px solid transparent;
+  transition: color 0.15s, border-color 0.15s;
+}
+.ask-btn:hover {
+  color: var(--color-accent-800);
+  border-bottom-color: currentColor;
+}
+.ask-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.chain-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--color-divider);
+}
+.chain-row__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.chain-row__name {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 15px;
+}
+.chain-row__tvl {
+  font-size: 11px;
+  color: var(--color-neutral-600);
+  font-variant-numeric: tabular-nums;
+}
+.chain-row .ask-btn { margin-top: 3px; }
+kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  padding: 0 4px;
+  border: 1px solid var(--color-divider);
+  border-bottom-width: 2px;
+  border-radius: 3px;
+}
+
+.followups {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: var(--space-2);
+}
+
 /* Suggested starting prompts on the empty chat */
 .quick-prompt {
   display: flex !important;
@@ -702,6 +966,13 @@ body {
     align-items: flex-start;
     text-align: left;
   }
+  .followups {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+  .followups > * { flex: none; }
+  .composer-hint { display: none; }
   .user-bubble {
     max-width: 90%;
   }

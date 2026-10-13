@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import type { LiveChainOverview } from "@/app/api/chains/route";
+import { AskButton } from "@/components/AskButton";
 
 /** Compact USD formatting: $900, $12.3k, $456M, $2.1B. */
 function fmtUsd(n?: number): string {
@@ -32,34 +33,34 @@ export function ChainOverview({ hideDivider }: { hideDivider?: boolean } = {}) {
     <>
       {!hideDivider && <div className="hr" style={{ margin: "var(--space-3) 0" }} />}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <h6 style={{ color: "var(--color-accent)", margin: 0 }}>Chains · live coverage</h6>
+        <h6 className="panel-card__title">Chains</h6>
         <span className="text-muted" style={{ fontSize: 11 }}>
-          {live ? "DefiLlama" : isLoading ? "loading…" : "static"}
+          {live ? "DefiLlama · live" : isLoading ? "loading…" : "offline"}
         </span>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", marginTop: "var(--space-2)" }}>
+        {!live && !isLoading && chains.length > 0 && (
+          <p className="text-muted" style={{ fontSize: 11, margin: "0 0 var(--space-2)" }}>
+            Live TVL is unavailable right now. Strategies still use live rates.
+          </p>
+        )}
         {chains.map((chain) => (
-          <div key={chain.id} style={{ padding: "6px 0", borderBottom: "1px solid var(--color-divider)", fontSize: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-              <span style={{ fontFamily: "var(--font-heading)", fontWeight: 600 }}>{chain.name}</span>
-              <span className="text-muted" style={{ fontSize: 11 }}>
-                TVL {fmtUsd(chain.tvlUsd)}
-              </span>
+          <div key={chain.id} className="chain-row">
+            <div className="chain-row__head">
+              <span className="chain-row__name">{chain.name}</span>
+              {chain.tvlUsd ? <span className="chain-row__tvl">TVL {fmtUsd(chain.tvlUsd)}</span> : null}
             </div>
-            {chain.topProtocols.length === 0 ? (
-              <p className="text-muted" style={{ margin: "3px 0 0", fontSize: 11 }}>
-                no live data — static registry only
-              </p>
-            ) : (
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+            {chain.topProtocols.length > 0 && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}>
                 {chain.topProtocols.map((p) => (
-                  <span key={p.name} className="tag" style={{ fontSize: 11 }}>
+                  <span key={p.name} className="protocol-pill">
                     {p.name} · {fmtUsd(p.tvlUsd)}
                   </span>
                 ))}
               </div>
             )}
+            <AskButton label={`Best yield on ${chain.name}`} prompt={`What's the best yield on my stablecoins on ${chain.name} right now? Compare the options there.`} />
           </div>
         ))}
         {isLoading && (

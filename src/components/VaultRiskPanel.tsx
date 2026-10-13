@@ -1,6 +1,7 @@
 "use client";
 
 import { useVaultRisk } from "@/hooks/useVaultRisk";
+import { AskButton } from "@/components/AskButton";
 import type { RiskTier } from "@/lib/integrations/philidor";
 
 /** Compact USD formatting: $900, $12.3k, $456M, $2.1B. */
@@ -40,12 +41,11 @@ export function VaultRiskPanel() {
   const vaults = data ?? [];
 
   return (
-    <>
-      <div className="hr" style={{ margin: "var(--space-3) 0" }} />
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <h6 style={{ color: "var(--color-accent)", margin: 0 }}>Vault risk · live</h6>
+    <section className="panel-card">
+      <div className="panel-card__head">
+        <h6 className="panel-card__title">Vault risk</h6>
         <span className="text-muted" style={{ fontSize: 11 }}>
-          {vaults.length > 0 ? "Philidor" : isLoading ? "loading…" : "unavailable"}
+          {vaults.length > 0 ? "Philidor · live" : isLoading ? "loading…" : "unavailable"}
         </span>
       </div>
 
@@ -68,6 +68,10 @@ export function VaultRiskPanel() {
                 TVL {fmtUsd(v.tvlUsd)} · {fmtPct(v.aprNet)} net
               </span>
             </div>
+            <AskButton
+              label="Ask about this vault"
+              prompt={`Is the ${v.name} vault (${v.protocol} on ${v.chain}, ${v.riskTier} risk ${v.riskScore.toFixed(1)}/10) a good place for my stablecoins? Compare it with the safest alternatives.`}
+            />
           </div>
         ))}
         {!isLoading && vaults.length === 0 && (
@@ -85,6 +89,6 @@ export function VaultRiskPanel() {
         Risk scores (0–10, Prime/Core/Edge) from Philidor&apos;s free vault risk API — 40% asset quality, 40% platform
         code maturity, 20% governance.
       </p>
-    </>
+    </section>
   );
 }
