@@ -13,6 +13,9 @@
  *     the same protocol pays on the source chain too and the extra APY would
  *     take longer than BRIDGE_PAYBACK_DAYS to repay the live bridge cost,
  *     the leg moves to the source chain instead;
+ *   - a stablecoin leg with no such token anywhere → fund it from another
+ *     stable: a Uniswap swap on the same chain, or a swapping bridge route
+ *     (USDT on Arbitrum → USDC on Base in one transaction);
  *   - not available anywhere → size the leg down to what the chain holds, or
  *     say plainly that the wallet has none.
  *
@@ -24,6 +27,7 @@ import { CHAIN_LABEL } from "@/lib/onchain";
 import { chainIdFromName } from "@/lib/chains";
 import { findToken } from "@/lib/assetMap";
 import { isRoutingSupportedChain } from "@/lib/mcp/routerAllowlist";
+import { UNISWAP_SWAP_ROUTER02_BY_CHAIN } from "@/lib/integrations/uniswap";
 import type { TradeLeg, TradePlan } from "@/lib/tradePlan";
 
 /** A bridge has to pay for itself in extra yield within this many days. */
@@ -44,6 +48,13 @@ const DUST_USD = 1;
 
 /** Tokens bridged between the verified routing chains (same symbol on both ends). */
 const BRIDGEABLE = new Set(["USDC", "USDT", "DAI", "WETH"]);
+
+/**
+ * Stablecoins treated as interchangeable for funding: a USDC leg can be fed
+ * from USDT or DAI through a swap (same chain) or a swapping bridge route
+ * (cross-chain). Never volatile assets — that would change the user's exposure.
+ */
+const STABLES = new Set(["USDC", "USDT", "DAI"]);
 
 export interface WalletAsset {
   symbol: string;
@@ -72,7 +83,9 @@ const round2Down = (x: number) => Math.floor(x * 100) / 100;
 export function spentSymbol(leg: TradeLeg, chainId: number): string | null {
   const side = leg.side.toLowerCase();
   if (!SPENDING_SIDES.has(side)) return null;
-  const raw = (side === "swap" ? leg.asset.split("→")[0] : leg.asset).trim().replace(/\s*(PERP|PT)$/i, "");
+  const raw = (side === "swap" ? leg.asset.split("→")[0] : side === "bridge" ? (leg.fromAsset ?? leg.asset) : leg.asset)
+    .trim()
+    .replace(/\s*(PERP|PT)$/i, "");
   if (!raw) return null;
   if (side === "stake" && /lido/i.test(leg.protocol)) return "ETH";
   if (side === "transfer" && raw.toUpperCase() === "ETH") return "ETH";
@@ -182,6 +195,50 @@ export async function fundPlan(plan: TradePlan, deps: FundingDeps): Promise<Trad
       continue;
     }
 
+    // No same-token funds elsewhere: a stablecoin leg can still be fed from
+    // another stable — swapped on this chain (Uniswap), or swapped and bridged
+    // in one route from a verified chain.
+    const alt = !isBridge && STABLES.has(symbol) ? bestStableSource(symbol, chainId) : undefined;
+    if (alt) {
+      const altLabel = CHAIN_LABEL[alt.chainId] ?? `chain ${alt.chainId}`;
+      const convertUsd = round2Down(Math.min(shortfall, alt.usd * BALANCE_MARGIN));
+      const sameChain = alt.chainId === chainId;
+      legs.push(
+        sameChain
+          ? {
+              side: "Swap",
+              asset: `${alt.symbol} → ${symbol}`,
+              protocol: "Uniswap",
+              chain: chainLabel,
+              sizeUsd: convertUsd,
+              note: `Added by Meridian: swaps your ${alt.symbol} into ${symbol} for the next step.`,
+            }
+          : {
+              side: "Bridge",
+              asset: symbol,
+              fromAsset: alt.symbol,
+              protocol: "deBridge",
+              chain: altLabel,
+              toChain: chainLabel,
+              sizeUsd: convertUsd,
+              note: `Added by Meridian: moves your ${alt.symbol} from ${altLabel} and delivers ${symbol} on ${chainLabel} in one route.`,
+            },
+      );
+      add(alt.chainId, alt.symbol, -convertUsd);
+      const arriving = convertUsd * (1 - BRIDGE_FEE_BUFFER);
+      const funded = round2Down(Math.min(size, (have + arriving) * BALANCE_MARGIN));
+      if (funded < size) leg.sizeUsd = funded;
+      add(chainId, symbol, arriving - funded);
+      legs.push(leg);
+      notes.push(
+        (sameChain
+          ? `Your stables on ${chainLabel} are ${alt.symbol}, not ${symbol}: a $${convertUsd} swap was added first`
+          : `Your ${alt.symbol} on ${altLabel} funds this: a $${convertUsd} route was added that swaps it to ${symbol} and bridges it to ${chainLabel}`) +
+          (funded < size ? `, and the ${leg.side.toLowerCase()} is sized to $${funded} (what arrives after fees).` : "."),
+      );
+      continue;
+    }
+
     // Nothing to bridge from: use what this chain holds, or say there's none.
     if (have >= DUST_USD) {
       leg.sizeUsd = round2Down(have * BALANCE_MARGIN);
@@ -202,9 +259,28 @@ export async function fundPlan(plan: TradePlan, deps: FundingDeps): Promise<Trad
     legs.push(leg);
   }
 
-  function creditBridge(leg: TradeLeg, symbol: string, usd: number) {
+  function creditBridge(leg: TradeLeg, spent: string, usd: number) {
     const to = chainIdFromName(leg.toChain);
-    if (to !== undefined) add(to, symbol, usd * (1 - BRIDGE_FEE_BUFFER));
+    if (to === undefined) return;
+    const delivered = leg.fromAsset ? (findToken(leg.asset, to)?.symbol ?? leg.asset).toUpperCase() : spent;
+    add(to, delivered, usd * (1 - BRIDGE_FEE_BUFFER));
+  }
+
+  /** Another stable that can fund `symbol` on `targetChainId`: on that chain if Uniswap can swap there, else the largest holding on a verified routing chain. */
+  function bestStableSource(symbol: string, targetChainId: number): { chainId: number; symbol: string; usd: number } | undefined {
+    let sameChain: { chainId: number; symbol: string; usd: number } | undefined;
+    let remote: { chainId: number; symbol: string; usd: number } | undefined;
+    for (const [k, usd] of balances) {
+      const [idStr, sym] = k.split(":");
+      const id = Number(idStr);
+      if (sym === symbol || !STABLES.has(sym) || usd < DUST_USD) continue;
+      if (id === targetChainId) {
+        if (UNISWAP_SWAP_ROUTER02_BY_CHAIN[id] && (!sameChain || usd > sameChain.usd)) sameChain = { chainId: id, symbol: sym, usd };
+      } else if (isRoutingSupportedChain(id) && isRoutingSupportedChain(targetChainId) && (!remote || usd > remote.usd)) {
+        remote = { chainId: id, symbol: sym, usd };
+      }
+    }
+    return sameChain ?? remote;
   }
 
   function bestSource(symbol: string, targetChainId: number): { chainId: number; usd: number } | undefined {

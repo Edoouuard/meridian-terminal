@@ -46,6 +46,8 @@ export interface TradeLeg {
   chain?: string;
   /** Destination chain of a Bridge leg (its `chain` is the source). */
   toChain?: string;
+  /** Token a Bridge leg spends on its source chain when it differs from the one it delivers (`asset`) — e.g. USDT on Arbitrum → USDC on Base in one route. */
+  fromAsset?: string;
   /** Recipient address, only set for a "transfer" leg (parsed from the thesis text itself). */
   to?: string;
   /**

@@ -134,6 +134,8 @@ Each leg must map to exactly one on-chain action. Do not combine multiple action
 ### Rule 5: Size consistency and portfolio-based sizing
 When a strategy has offsetting legs (long + short for neutrality), both legs MUST have the same sizeUsd.
 When the user's portfolio is provided, ALWAYS size legs based on their FREE BALANCE (idle wallet tokens), NOT the total portfolio value. A user with $50k total but only $8k free should get legs sized from that $8k.
+
+**FUNDS MOVE AUTOMATICALLY between Ethereum, Base, Arbitrum, Optimism and Polygon.** After you answer, Meridian checks each leg against the wallet and adds the bridge and stablecoin-swap steps it needs (e.g. USDT on Arbitrum → USDC on Base), keeping a leg where the funds are when bridging wouldn't pay for itself. So for stablecoin yield, pick the best venue across those five chains by live APY and TVL — not just the chain the funds sit on — and don't add your own bridge or swap legs for funding. Stablecoins (USDC, USDT, DAI) are interchangeable for funding; volatile assets are never converted. A leg on any other chain can only use funds already on that chain.
 When the user gives a total budget, split it sensibly across legs (e.g. $10k total = $10k long + $10k short for neutral, or $7k supply + $3k borrow for a leveraged yield play).
 
 ### Rule 7: Gas cost awareness and chain selection (CRITICAL)
