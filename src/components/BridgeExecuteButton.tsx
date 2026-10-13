@@ -2,7 +2,7 @@
 
 import { useAccount } from "wagmi";
 import type { TradeLeg } from "@/lib/tradePlan";
-import type { Order } from "@/lib/execution";
+import { bridgeOrderFromQuote } from "@/lib/bridgeOrder";
 import { CHAIN_LABEL } from "@/lib/onchain";
 import { findToken } from "@/lib/assetMap";
 import { resolvePriceFromList, usdToTokenAmount, type PriceEntry } from "@/lib/quote";
@@ -66,20 +66,7 @@ export function BridgeExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
   }
 
   if (best) {
-    const order: Order = {
-      type: "swap",
-      protocol: best.provider,
-      token: fromToken.address,
-      symbol: fromToken.symbol,
-      amount: quote.amountBase,
-      chainId: fromChainId,
-      decimals: fromToken.decimals,
-      routerTx: {
-        to: best.tx.to as `0x${string}`,
-        data: best.tx.data as `0x${string}`,
-        value: best.tx.value !== undefined ? BigInt(best.tx.value) : undefined,
-      },
-    };
+    const order = bridgeOrderFromQuote(best, fromToken, quote.amountBase, fromChainId);
     return (
       <>
         <p className="text-muted" style={{ fontSize: 11, margin: "0 0 4px" }}>
