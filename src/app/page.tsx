@@ -25,7 +25,7 @@ import { routeThesisAsync, type PortfolioContext } from "@/lib/intentEngine";
 import { recordExecution } from "@/lib/history";
 
 // Expose the local order-history API on the page module so real execution
-// sites (ThreadCard's useExecute / useHyperliquid) can log orders going
+// sites (lib/orderRunner, useHyperliquid) can log orders going
 // forward: `recordExecution({ type, label, amount, asset, protocol, chainId, status, hash })`.
 export { recordExecution };
 

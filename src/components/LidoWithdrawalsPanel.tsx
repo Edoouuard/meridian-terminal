@@ -2,10 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useAccount, usePublicClient } from "wagmi";
-import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { useExecute } from "@/hooks/useExecute";
+import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
 import { formatBaseUnits } from "@/lib/quote";
-import type { Order } from "@/lib/execution";
 import {
   LIDO_GET_WITHDRAWAL_REQUESTS_ABI,
   LIDO_GET_WITHDRAWAL_STATUS_ABI,
@@ -29,9 +27,6 @@ export function LidoWithdrawalsPanel() {
   const [requests, setRequests] = useState<LidoWithdrawalRequest[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [claiming, setClaiming] = useState<LidoWithdrawalRequest | null>(null);
-
-  const { status, data: claimTxHash, error: claimError, execute, reset } = useExecute();
 
   const refresh = useCallback(async () => {
     if (!address || !publicClient) return;
@@ -124,58 +119,16 @@ export function LidoWithdrawalsPanel() {
               </span>
             </div>
             {isClaimable(r) && (
-              <button
-                className="btn btn-secondary"
-                style={{ fontSize: 10, padding: "2px 8px", alignSelf: "flex-end" }}
-                onClick={() => setClaiming(r)}
-              >
-                Claim
-              </button>
+              <ValidatedExecuteButton
+                order={{ type: "claim", protocol: "lido", amount: "0", decimals: 18, chainId: 1, requestId: r.id, symbol: "ETH" }}
+                label="Claim ETH"
+                onConfirmed={() => void refresh()}
+              />
             )}
           </div>
         ))}
       </div>
 
-      {status !== "idle" && (
-        <p style={{ fontSize: 11, marginTop: 6 }}>
-          {status === "confirming"
-            ? "Awaiting wallet signature…"
-            : status === "confirmed" && claimTxHash
-              ? `Claimed: ${claimTxHash.slice(0, 10)}…`
-              : `Error: ${claimError instanceof Error ? claimError.message : String(claimError ?? "failed")}`}
-          <button
-            onClick={() => {
-              reset();
-              refresh();
-            }}
-            style={{ marginLeft: 6, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 10 }}
-          >
-            clear
-          </button>
-        </p>
-      )}
-
-      <ConfirmDialog
-        open={!!claiming}
-        title={claiming ? `Claim withdrawal #${claiming.id}` : "Claim"}
-        body={
-          claiming ? (
-            <div>
-              Send the finalized {formatBaseUnits(claiming.amountOfStETH, 18)} ETH from request #{claiming.id.toString()} to your
-              wallet.
-            </div>
-          ) : null
-        }
-        confirmLabel="Claim ETH"
-        warning="Moves real ETH to your wallet."
-        onConfirm={() => {
-          if (!claiming) return;
-          const order: Order = { type: "claim", protocol: "lido", amount: "0", decimals: 18, chainId: 1, requestId: claiming.id };
-          setClaiming(null);
-          execute(order);
-        }}
-        onCancel={() => setClaiming(null)}
-      />
     </>
   );
 }

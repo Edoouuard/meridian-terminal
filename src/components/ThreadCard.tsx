@@ -5,11 +5,11 @@ import { useQuery } from "@tanstack/react-query";
 import { useAccount, useBalance, useSimulateContract } from "wagmi";
 import type { StakeYieldEntry } from "@/app/api/stake-yield/route";
 import { ThreadItem, fmtUsd } from "@/lib/data";
-import { resolveOrderForLeg, protocolLabel, approveOrderFor, findToken, DEFAULT_CHAIN_ID } from "@/lib/assetMap";
+import { resolveOrderForLeg, protocolLabel, findToken, DEFAULT_CHAIN_ID } from "@/lib/assetMap";
 import { CHAIN_LABEL, STETH_ADDRESS } from "@/lib/onchain";
 import type { Order } from "@/lib/execution";
 import type { TradeLeg, TradePlan } from "@/lib/tradePlan";
-import { useExecute, explorerUrlFor, type UseExecuteResult } from "@/hooks/useExecute";
+import { explorerUrlFor } from "@/lib/explorer";
 import { useStrategyExecutor, type LegStatus } from "@/hooks/useStrategyExecutor";
 import { useHyperliquid } from "@/hooks/useHyperliquid";
 import { useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
@@ -24,7 +24,6 @@ import { useLivePrices } from "@/hooks/useLivePrices";
 import { useVaultRisk } from "@/hooks/useVaultRisk";
 import { useBestYield } from "@/hooks/useBestYield";
 import { useHlpApr, useLlpApr } from "@/hooks/useVaultYields";
-import type { BestYieldEntry } from "@/app/api/best-yield/route";
 import { PHILIDOR_PROTOCOL_ID, type RiskTier } from "@/lib/integrations/philidor";
 import { MIN_MORPHO_RISK_SCORE } from "@/lib/integrations/morpho";
 import {
@@ -36,28 +35,9 @@ import {
 } from "@/lib/integrations/uniswap";
 import { formatBaseUnits, resolvePriceFromList, usdToTokenAmount, type PriceEntry } from "@/lib/quote";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
-import { assessHealthFactorGuardrail } from "@/lib/safety";
-import { recordExecution, type OrderRecordType } from "@/lib/history";
+import { recordExecution } from "@/lib/history";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
 import { BridgeExecuteButton } from "@/components/BridgeExecuteButton";
-
-/** Map an execution Order type to a coarse history record type. */
-function recordTypeFor(orderType: string): OrderRecordType {
-  switch (orderType) {
-    case "supply":
-    case "stake":
-      return "deposit";
-    case "repay":
-    case "borrow":
-    case "withdraw":
-    case "transfer":
-      return "withdraw";
-    case "swap":
-      return "swap";
-    default:
-      return "custom";
-  }
-}
 
 function OrderRow({ label, value, valueColor }: { label: string; value: React.ReactNode; valueColor?: string }) {
   return (
@@ -98,196 +78,6 @@ function NotWired({ venue, reason }: { venue: string; reason: string }) {
         {reason}
       </span>
     </div>
-  );
-}
-
-/** Human-readable confirm dialog title for an order. */
-function confirmTitle(order: Order): string {
-  const p = order.protocol;
-  const t = order.type;
-  const label = p === "aave" ? "Aave" : p === "spark" ? "Spark" : p === "compound" ? "Compound"
-    : p === "morpho" ? "Morpho" : p === "lido" ? "Lido" : p === "uniswap" ? "Uniswap"
-    : p === "maker" ? "Maker DSR" : p === "rocketpool" ? "Rocket Pool" : p === "frax" ? "Frax"
-    : p === "weth" ? "WETH" : p === "erc20" ? "Token" : p === "eth" ? "Native" : String(p);
-  if (t === "supply" && (p === "aave" || p === "spark" || p === "compound" || p === "morpho" || p === "maker")) return `Approve & Supply on ${label}`;
-  if (t === "stake" && p === "lido") return "Stake on Lido";
-  if (t === "stake" && p === "rocketpool") return "Stake on Rocket Pool";
-  if (t === "stake" && p === "frax") return "Stake on Frax";
-  if (t === "unstake") return `Approve & Unstake on ${label}`;
-  if (t === "claim") return `Claim ${label} Withdrawal`;
-  if (t === "swap" && p === "uniswap") return "Approve & Swap on Uniswap";
-  if (t === "supply" && p === "weth") return "Wrap ETH → WETH";
-  if (t === "withdraw" && p === "weth") return "Unwrap WETH → ETH";
-  if (t === "withdraw") return `Withdraw from ${label}`;
-  if (t === "borrow") return `Borrow from ${label}`;
-  if (t === "transfer") return `Send ${order.symbol ?? "tokens"}`;
-  return "Confirm on-chain action";
-}
-
-/**
- * Real Execute button. Uses the wagmi harness (`useExecute`): on click it builds
- * the order and asks the wallet to sign (Aave v3 supply/repay, native transfer).
- * Renders the true wallet state — idle / awaiting signature / confirmed (linked
- * to the block explorer by chainId) / error. Execution only ever happens on this
- * explicit click; the harness never auto-submits.
- */
-function ExecuteButton({ order, label }: { order: Order; label: string }) {
-  const { isConnected } = useAccount();
-  const { status, data, error, execute, executeWithApproval, reset } = useExecute();
-  const [confirming, setConfirming] = useState(false);
-  const recordedRef = useRef<string | null>(null);
-
-  // Health-factor guardrail for REAL-money Aave borrow/withdraw. No live health
-  // factor is available at signing time in this harness, so the helper honestly
-  // reports computable=false and requires an explicit extra confirmation for
-  // any HF-lowering action. The ConfirmDialog surfaces that warning.
-  const guardrail = useMemo(() => assessHealthFactorGuardrail({ orderType: order.type }), [order.type]);
-
-  // Log real outcomes to the local order-history store (guarded so a render
-  // doesn't double-record the same hash).
-  useEffect(() => {
-    if (status === "confirmed" && data && recordedRef.current !== data) {
-      recordedRef.current = data;
-      recordExecution({
-        type: recordTypeFor(order.type),
-        label: `Signed ${order.type}${order.symbol ? " " + order.symbol : ""}`,
-        amount: typeof order.amount === "bigint" ? formatBaseUnits(order.amount, order.decimals ?? 18) : String(order.amount),
-        asset: order.symbol,
-        protocol: String(order.protocol),
-        chainId: order.chainId,
-        status: "confirmed",
-        hash: data,
-      });
-    } else if (status === "error" && recordedRef.current !== "error") {
-      recordedRef.current = "error";
-      recordExecution({
-        type: recordTypeFor(order.type),
-        label: `${order.type}${order.symbol ? " " + order.symbol : ""} (failed)`,
-        amount: typeof order.amount === "bigint" ? formatBaseUnits(order.amount, order.decimals ?? 18) : String(order.amount),
-        asset: order.symbol,
-        protocol: String(order.protocol),
-        chainId: order.chainId,
-        status: "error",
-      });
-    }
-  }, [status, data, error, order]);
-
-  if (status === "confirming") {
-    return (
-      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>
-        Awaiting wallet signature…
-      </p>
-    );
-  }
-
-  if (status === "confirmed" && data) {
-    const url = explorerUrlFor(order.chainId, data);
-    return (
-      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-accent-700)" }}>
-        Signed onchain ·{" "}
-        <a href={url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "underline" }}>
-          view {data.slice(0, 10)}…
-        </a>
-        <button onClick={reset} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 11 }}>
-          clear
-        </button>
-      </p>
-    );
-  }
-
-  if (status === "error") {
-    const raw = error instanceof Error ? error.message : String(error);
-    const msg =
-      raw === "wallet not connected"
-        ? "Connect a wallet to execute"
-        : /reject|declined|user denied|4001/i.test(raw)
-          ? "Signature rejected in your wallet."
-          : `Transaction failed: ${raw}`;
-    return (
-      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--risk-bad, #c0392b)" }}>
-        {msg}
-        <button onClick={reset} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 11 }}>
-          clear
-        </button>
-      </p>
-    );
-  }
-
-  return (
-    <>
-      <button
-        className="btn btn-primary"
-        style={{ fontSize: 13, marginTop: 6, cursor: "pointer" }}
-        onClick={() => setConfirming(true)}
-        title={isConnected ? undefined : "Connect a wallet first"}
-      >
-        {label}
-      </button>
-      <ConfirmDialog
-        open={confirming}
-        title={confirmTitle(order)}
-        body={
-          <div>
-            Sign and broadcast <strong>{order.type}</strong> of{" "}
-            {typeof order.amount === "bigint"
-              ? formatBaseUnits(order.amount, order.decimals ?? 18)
-              : String(order.amount)}{" "}
-            {order.symbol ?? ""} on {String(order.protocol)} ·{" "}
-            {CHAIN_LABEL[order.chainId] ?? `chain ${order.chainId}`}.
-            {order.protocol === "aave" && order.type === "supply" && (
-              <> This will first <strong>approve</strong> Aave to spend the token, then <strong>supply</strong> it.</>
-            )}
-            {order.protocol === "lido" && order.type === "stake" && (
-              <> This sends ETH directly to Lido and mints <strong>stETH</strong> 1:1 — no separate approval step.</>
-            )}
-            {order.protocol === "uniswap" && order.type === "swap" && (
-              <>
-                {" "}
-                This will first <strong>approve</strong> the Uniswap router, then <strong>swap</strong>, enforcing the
-                minimum-received amount previewed above (0.5% slippage from a live quote).
-              </>
-            )}
-            {order.protocol === "morpho" && order.type === "supply" && (
-              <>
-                {" "}
-                This will first <strong>approve</strong> the vault previewed above, then <strong>deposit</strong> into it.
-              </>
-            )}
-            {order.protocol === "morpho" && order.type === "withdraw" && (
-              <> This withdraws directly from the vault back to your wallet — no approval step needed.</>
-            )}
-            {order.protocol === "lido" && order.type === "unstake" && (
-              <>
-                {" "}
-                This will first <strong>approve</strong> Lido&apos;s withdrawal queue, then lock your stETH into a{" "}
-                <strong>withdrawal request</strong>. It is not instant — Lido&apos;s oracle finalizes requests
-                (typically a few days), after which you can claim the ETH from the Lido panel.
-              </>
-            )}
-            {order.protocol === "lido" && order.type === "claim" && (
-              <> Sends the finalized ETH from this request straight to your wallet.</>
-            )}
-          </div>
-        }
-        confirmLabel={
-          order.type === "supply" ? "Approve & Supply"
-            : order.type === "swap" ? "Approve & Swap"
-            : order.type === "stake" ? "Stake"
-            : order.type === "unstake" ? "Approve & Unstake"
-            : order.type === "claim" ? "Claim"
-            : order.type === "transfer" ? "Send"
-            : "Sign"
-        }
-        warning="This moves real funds from your wallet."
-        guardrail={guardrail}
-        onConfirm={async () => {
-          setConfirming(false);
-          const approving = approveOrderFor(order);
-          await executeWithApproval(approving, order);
-        }}
-        onCancel={() => setConfirming(false)}
-      />
-    </>
   );
 }
 
