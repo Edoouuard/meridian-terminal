@@ -74,6 +74,8 @@ export interface TradePlan {
   variantNote?: string;
   /** Risk tier from the LLM strategy engine. */
   riskTier?: "conservative" | "moderate" | "aggressive";
+  /** How the plan was adjusted to the wallet's real balances (bridges added, legs resized or moved) — see fundingPlanner.ts. */
+  fundingNotes?: string[];
 }
 
 /** Augment ThreadItem with an optional parsed plan (keeps data.ts untouched). */

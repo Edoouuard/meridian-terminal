@@ -185,6 +185,8 @@ Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → s
 - [x] Bug démo corrigé : un wallet connecté sans staking affichait 42 % de concentration staking (valeur démo)
 - [x] `LIFI_API_KEY` ajoutée dans Vercel (production + preview) ; bug d'unité des APY earn corrigé (×100)
 - [x] Coffres earn : jamais proposés sous **1 M$ de TVL** (`MIN_VAULT_TVL_USD`, appliqué au chat et à `/api/haiku?action=yields`)
+- [x] Audit protocole × chaîne × action (560 combinaisons) + audit on-chain de toutes les adresses (`npm run audit:onchain`, workflow dédié) : prix WETH manquant, alias MATIC→WETH, adresses fausses (wstETH OP, USDC Mantle, AAVE Avalanche, Uniswap Scroll/Linea), checksums invalides, Uniswap multi-niveaux de frais, venues sans contrat retirées
+- [x] Plan ajusté au wallet (`lib/fundingPlanner.ts`) : chaque étape est financée par les soldes réels — bridge ajouté depuis la chaîne où sont les fonds, étape gardée sur place si le bridge ne se rembourse pas en 90 jours de rendement en plus (devis live + APY DefiLlama), montant réduit sinon ; l'étape suivant un bridge attend l'arrivée des fonds (`FundsArrivalGate`)
 
 **Critère de sortie :** un seul hook d'exécution, `ThreadCard` < 500 lignes, aucun module mort, les parcours de la Phase 0 passent toujours.
 
