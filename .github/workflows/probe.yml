@@ -22,15 +22,19 @@ jobs:
           USDC=0xaf88d065e77c8cC2239327C5EDb3A432268e5831
           R=0xd8dA6BF26964aF9D7eEd9e03E53415D37aA96045
           curl -s "https://api-v2.pendle.finance/core/v2/sdk/42161/markets/$M/swap?receiver=$R&slippage=0.01&enableAggregator=true&tokenIn=$USDC&tokenOut=${PT#*-}&amountIn=100000000" -w "\nstatus %{http_code}\n" | head -c 3000; echo
-          curl -s "https://api-v2.pendle.finance/core/v2/sdk/42161/convert?receiver=$R&slippage=0.01&enableAggregator=true&tokensIn=$USDC&amountsIn=100000000&tokensOut=${PT#*-}" -w "\nstatus %{http_code}\n" | head -c 3000; echo
+          curl -s "https://api-v2.pendle.finance/core/v2/sdk/42161/convert?receiver=$R&slippage=0.01&enableAggregator=true&tokensIn=$USDC&amountsIn=100000000&tokensOut=${PT#*-}" -o conv.json
+          jq -c 'keys' conv.json
+          jq -c '.routes[0] | keys' conv.json
+          jq -c '.routes[0] | del(.contractParamInfo) | .tx.data |= .[0:20]' conv.json
+          jq -c '.requiredApprovals' conv.json
       - name: Pendle router code
         run: |
-          for rpc in https://arb1.arbitrum.io/rpc https://mainnet.base.org https://eth.llamarpc.com; do
+          for rpc in https://arb1.arbitrum.io/rpc https://mainnet.base.org https://ethereum-rpc.publicnode.com; do
             cast code 0x888888888889758F76e7103c6CbF23ABbF58F946 --rpc-url $rpc | head -c 20; echo " $rpc"
           done
       - name: EigenLayer stETH deposit on a mainnet fork
         run: |
-          anvil --fork-url https://eth.llamarpc.com --port 8547 --silent &
+          anvil --fork-url https://ethereum-rpc.publicnode.com --port 8547 --silent &
           sleep 8
           RPC=http://127.0.0.1:8547
           K=0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
