@@ -12,6 +12,7 @@
 import { callMcpTool, listMcpTools, parseMcpToolResult as parseResult } from "../client";
 import { fetchAavePositions, fetchAaveReserves } from "../aave";
 import { fetchLifiEarnVaults } from "../lifi";
+import { MIN_VAULT_TVL_USD } from "@/lib/vaultPolicy";
 import type {
   McpProviderId,
   McpProviderStatus,
@@ -152,11 +153,7 @@ export async function fetchPositions(userAddress: Address): Promise<YieldPositio
   );
 }
 
-/**
- * Vaults below this TVL are never suggested: sorted by APY, the earn feed
- * otherwise leads with tiny or reward-inflated vaults (e.g. $1.4k TVL).
- */
-export const MIN_VAULT_TVL_USD = 1_000_000;
+export { MIN_VAULT_TVL_USD };
 
 /**
  * Fetch yield opportunities via LI.FI earn vaults + Aave markets.

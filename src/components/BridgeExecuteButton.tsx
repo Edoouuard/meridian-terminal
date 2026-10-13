@@ -2,11 +2,13 @@
 
 import { useAccount } from "wagmi";
 import type { TradeLeg } from "@/lib/tradePlan";
-import type { Order } from "@/lib/execution";
+import { bridgeOrderFromQuote } from "@/lib/bridgeOrder";
+import { isRoutingSupportedChain } from "@/lib/mcp/routerAllowlist";
 import { CHAIN_LABEL } from "@/lib/onchain";
 import { findToken } from "@/lib/assetMap";
 import { resolvePriceFromList, usdToTokenAmount, type PriceEntry } from "@/lib/quote";
 import { useBridgeSwapQuote } from "@/hooks/useBridgeSwapQuote";
+import { chainIdFromName, legChainId } from "@/lib/chains";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
 
 /** Reverse-match a free-text chain name (from the thesis, e.g. "to Arbitrum") against CHAIN_LABEL. */
@@ -34,8 +36,9 @@ function matchChainIdByName(text: string): number | undefined {
  */
 export function BridgeExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry[] }) {
   const { address, chain } = useAccount();
-  const fromChainId = chain?.id;
-  const toChainId = matchChainIdByName(leg.protocol || "");
+  // The plan names both ends; fall back to the wallet's chain / free text only for older plans.
+  const fromChainId = legChainId(leg, chain?.id);
+  const toChainId = chainIdFromName(leg.toChain) ?? matchChainIdByName(`${leg.protocol ?? ""} ${leg.note ?? ""}`);
   const { best, isLoading, error, fetchQuote } = useBridgeSwapQuote();
 
   if (!address || !fromChainId) {
@@ -45,7 +48,11 @@ export function BridgeExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
     return <NotWiredLine reason={`Couldn't identify a destination chain from "${leg.protocol}".`} />;
   }
   if (toChainId === fromChainId) {
-    return <NotWiredLine reason={`You're already on ${CHAIN_LABEL[toChainId] ?? `chain ${toChainId}`}.`} />;
+    return <NotWiredLine reason={`Source and destination are both ${CHAIN_LABEL[toChainId] ?? `chain ${toChainId}`} — nothing to bridge.`} />;
+  }
+
+  if (!isRoutingSupportedChain(fromChainId)) {
+    return <NotWiredLine reason={`Bridging from ${CHAIN_LABEL[fromChainId] ?? `chain ${fromChainId}`} isn't supported yet — Meridian only signs against routers it has verified on Ethereum, Base, Arbitrum, Optimism and Polygon.`} />;
   }
 
   const fromToken = findToken(leg.asset, fromChainId);
@@ -64,20 +71,7 @@ export function BridgeExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
   }
 
   if (best) {
-    const order: Order = {
-      type: "swap",
-      protocol: best.provider,
-      token: fromToken.address,
-      symbol: fromToken.symbol,
-      amount: quote.amountBase,
-      chainId: fromChainId,
-      decimals: fromToken.decimals,
-      routerTx: {
-        to: best.tx.to as `0x${string}`,
-        data: best.tx.data as `0x${string}`,
-        value: best.tx.value !== undefined ? BigInt(best.tx.value) : undefined,
-      },
-    };
+    const order = bridgeOrderFromQuote(best, fromToken, quote.amountBase, fromChainId);
     return (
       <>
         <p className="text-muted" style={{ fontSize: 11, margin: "0 0 4px" }}>

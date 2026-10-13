@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   approveOrderFor,
   humanAmountForLeg,
+  needsLiveCompletion,
   resolveOrderForLeg,
   type PriceEntry,
 } from "@/lib/assetMap";
@@ -307,3 +308,20 @@ describe("assetMap — humanAmountForLeg", () => {
     expect(humanAmountForLeg(leg(), undefined, BASE_CHAIN_ID)).toBe("");
   });
 });
+describe("assetMap — needsLiveCompletion", () => {
+  it("flags the shell orders only a dedicated venue button can complete", () => {
+    const morpho = resolveOrderForLeg({ side: "Supply", asset: "USDC", protocol: "Morpho", sizeUsd: 100 }, undefined, USDC_PRICE, BASE_CHAIN_ID);
+    expect(isOrder(morpho) && needsLiveCompletion(morpho)).toBe(true);
+    const bridge = resolveOrderForLeg({ side: "Bridge", asset: "USDC", protocol: "deBridge", sizeUsd: 100 }, undefined, USDC_PRICE, BASE_CHAIN_ID);
+    expect(isOrder(bridge) && needsLiveCompletion(bridge)).toBe(true);
+  });
+
+  it("lets plain protocol orders through", () => {
+    const aave = resolveOrderForLeg({ side: "Supply", asset: "USDC", protocol: "Aave", sizeUsd: 100 }, undefined, USDC_PRICE, BASE_CHAIN_ID);
+    expect(isOrder(aave) && needsLiveCompletion(aave)).toBe(false);
+  });
+});
+
+function isOrder(r: Order | { unsupported: string }): r is Order {
+  return !("unsupported" in r);
+}

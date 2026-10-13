@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useAccount } from "wagmi";
 import { resolveOrderForLeg } from "@/lib/assetMap";
 import type { Order } from "@/lib/execution";
+import { legChainId } from "@/lib/chains";
 import type { TradeLeg } from "@/lib/tradePlan";
 import { useLivePrices } from "@/hooks/useLivePrices";
 import { useBestYield } from "@/hooks/useBestYield";
@@ -16,8 +17,8 @@ import { NotWired, OrderRow, isUnsupported } from "@/components/thread/shared";
 function YieldOptionRow({ option, asset, sizeUsd }: { option: MergedYieldOption; asset: string; sizeUsd: number }) {
   const { data: prices } = useLivePrices();
   const { chain } = useAccount();
-  const leg: TradeLeg = { side: "Supply", asset, protocol: option.protocol, sizeUsd };
-  const resolved = resolveOrderForLeg(leg, undefined, prices, chain?.id);
+  const leg: TradeLeg = { side: "Supply", asset, protocol: option.protocol, sizeUsd, chain: option.chain };
+  const resolved = resolveOrderForLeg(leg, undefined, prices, legChainId(leg, chain?.id));
   const isMorpho = option.protocol === "Morpho";
   const wired = option.wired && (isMorpho || !isUnsupported(resolved));
 

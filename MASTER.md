@@ -39,7 +39,7 @@ Un utilisateur DeFi déjà équipé d'un wallet (MetaMask, Rabby…) qui gère q
 | Devis bridge comparés deBridge vs LI.FI | ✅ | ARB→BASE 10 USDC : LI.FI 9,97 vs deBridge 9,68, LI.FI choisi |
 | Rate limit API + mot de passe bêta | ✅ | PR #16, testé en local |
 | Mobile | 🟡 codé, jamais vu sur téléphone | PR #16 |
-| Chat IA (`parse-intent`, OpenRouter / Gemini Flash) | 🟡 non vérifié en prod | clé en Production uniquement, prod derrière mot de passe |
+| Chat IA (`parse-intent`, OpenRouter / Gemini Flash) | ✅ vérifié en prod | 3 prompts types, 3 stratégies chacun |
 | Exécution (validation → approve exact → simulation → signature) | 🟡 prouvée sur un fork de Base (vrais contrats Aave/USDC), **pas encore avec un vrai wallet** | CI `fork` + tests unitaires |
 | Positions utilisateur | 🟡 non vérifiées | liste vide sur l'adresse de test |
 | Coffres earn LI.FI | ✅ données live (clé ajoutée le 2026-10-13, APY corrigés : l'API renvoie des %) | `/api/haiku?action=yields` |
@@ -138,7 +138,7 @@ Diagnostic honnête du code (≈ 22 000 lignes, 80 commits, 16 PR) :
 | Variable | Rôle | État |
 |---|---|---|
 | `OPENROUTER_API_KEY` | Chat IA | Production uniquement |
-| `BETA_PASSWORD` (ou `NEXT_PUBLIC_BETA_PASSWORD`) | Accès bêta | à renommer en `BETA_PASSWORD` |
+| `BETA_PASSWORD` | Accès bêta | présent (sensible, production) ; `NEXT_PUBLIC_BETA_PASSWORD` obsolète, à supprimer |
 | `LIFI_API_KEY` | Coffres earn LI.FI + quotas LI.FI | présente (sensible, production + preview) |
 | `BLOB_READ_WRITE_TOKEN` | Stockage | présent |
 | RPC dédiés | Fiabilité des lectures | **absents** (RPC publics par défaut) |
@@ -155,14 +155,18 @@ Règle : **on ne commence pas une phase tant que la précédente n'a pas atteint
 
 Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → signature → position visible dans le portefeuille.
 
-- [ ] Renommer `NEXT_PUBLIC_BETA_PASSWORD` → `BETA_PASSWORD` (Vercel)
-- [ ] Vérifier le chat IA en prod (connexion bêta, 3 prompts types)
+- [x] Mot de passe bêta : nouveau `BETA_PASSWORD` (sensible, production) ; l'ancien `NEXT_PUBLIC_BETA_PASSWORD` est ignoré (à supprimer dans Vercel)
+- [x] Chat IA vérifié en prod (2026-10-13) : connexion bêta OK, 3 prompts → 3 stratégies chacun en 5–20 s
+- [x] Bug corrigé : chaque étape du plan porte sa chaîne (`leg.chain`) ; l'ordre est construit sur cette chaîne (et non celle du wallet), le bouton propose « Switch wallet to Base » si besoin
 - [ ] Exécuter le parcours d'or avec un vrai wallet, petit montant (**toi**)
 - [ ] Corriger tout ce qui casse pendant ce test (**moi**, sur retour d'erreur)
 - [ ] Vérifier que la position Aave apparaît après confirmation
 - [x] Remplacer le faux portefeuille de 128 400 $ par un état « connecte ton wallet » clair (Phase 1)
 - [x] Preuve sans wallet : le parcours d'or exécuté par le vrai code contre les vrais contrats Aave + USDC sur un **fork de Base** en CI (`e2e/aaveSupply.fork.test.ts`, aucun argent réel). *Preuve : CI run [38393651681](https://github.com/Edoouuard/meridian-terminal/actions/runs/38393651681) — approve exact → supply → `CONFIRMED`, allowance consommée à 0, collatéral ≈ 100 $ visible dans Aave ; refus avant signature si solde insuffisant.* Ne remplace pas le test avec ton wallet (UI, wallet, réseau réel), mais la logique d'exécution est prouvée.
-- [ ] Deuxième parcours : bridge 5 USDC Arbitrum → Base
+- [x] Bug corrigé (retour du test wallet) : « morpho supply requires a vaultAddress » / « deBridge order requires routerTx » — les étapes Morpho, bridge, Uniswap et perps passent par leur bouton dédié (données live : coffre ≥ 1 M$ TVL, route cotée, prix) ; « Execute Strategy » n'apparaît que si toutes les étapes sont signables ; le bridge cote de `leg.chain` vers `leg.toChain` (PR #20)
+- [x] Preuve sans wallet du bridge : devis live deBridge + LI.FI → même constructeur d'ordre que le bouton (`lib/bridgeOrder.ts`) → vrai `orderRunner` sur un **fork d'Arbitrum** en CI (`e2e/bridge.fork.test.ts`) : approve exact au routeur vérifié, calldata acceptée on-chain, 5 USDC sortis du wallet, allowance à 0. *Preuve : CI run [38428480844](https://github.com/Edoouuard/meridian-terminal/actions/runs/38428480844).* L'arrivée sur Base (remplie par le bridge) reste à voir avec ton wallet.
+- [x] Position visible : le portefeuille lit `getUserAccountData` du pool Aave Base (le même appel vérifié par la preuve fork) et se rafraîchit après chaque confirmation
+- [ ] Deuxième parcours : bridge 5 USDC Arbitrum → Base (**toi**)
 
 **Critère de sortie :** 2 transactions réelles confirmées (supply Aave + bridge), visibles dans l'app, sans intervention manuelle.
 

@@ -4,8 +4,9 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAccount } from "wagmi";
 import type { StakeYieldEntry } from "@/app/api/stake-yield/route";
-import { resolveOrderForLeg, protocolLabel } from "@/lib/assetMap";
+import { needsLiveCompletion, resolveOrderForLeg, protocolLabel } from "@/lib/assetMap";
 import type { Order } from "@/lib/execution";
+import { legChainId } from "@/lib/chains";
 import type { TradeLeg, TradePlan } from "@/lib/tradePlan";
 import { explorerUrlFor } from "@/lib/explorer";
 import { useStrategyExecutor, type LegStatus } from "@/hooks/useStrategyExecutor";
@@ -98,15 +99,21 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
       {plan.legs.map((leg, i) => {
-        const resolved = resolveOrderForLeg(leg, undefined, prices, chain?.id);
+        const resolved = resolveOrderForLeg(leg, undefined, prices, legChainId(leg, chain?.id));
         const legSide = (leg.side || "").toLowerCase();
         const isMorpho = /morpho/i.test(leg.protocol || "");
         const isLido = /lido/i.test(leg.protocol || "");
         const isLidoWithdraw = isLido && (legSide === "withdraw" || legSide === "unstake");
-        const isBridge = legSide === "bridge";
+        const isBridge = legSide === "bridge" || /debridge/i.test(leg.protocol || "");
+        const isLifiSwap = /li\.?fi/i.test(leg.protocol || "") && !isBridge;
         const isLidoStake = isLido && legSide === "stake";
-        const liveVenue =
-          /hyperliquid|extended|ondo|lighter|uniswap/i.test(leg.protocol || "") || isMorpho || isLidoWithdraw || isLidoStake || isBridge;
+        const isPerp = /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "");
+        const isUniswap = /uniswap/i.test(leg.protocol || "");
+        // These venues need live data (vault, route, on-chain quote, perp
+        // signing) that only their dedicated button fetches — never hand their
+        // shell order to the generic button.
+        const dedicated = isPerp || isUniswap || isMorpho || isLidoWithdraw || isBridge || isLifiSwap;
+        const liveVenue = dedicated || isLidoStake;
         const building = isUnsupported(resolved) && !liveVenue;
         return (
           <div key={i} className="leg-card" style={{ opacity: building ? 0.55 : 1 }}>
@@ -116,7 +123,7 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
             </div>
             <LegRiskBadge leg={leg} />
             <StakeYieldBadge leg={leg} />
-            {isUnsupported(resolved) ? (
+            {dedicated || isUnsupported(resolved) ? (
               !FEATURES.perps && /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "") ? (
                 <NotWired venue={leg.protocol} reason="Perps are paused during the beta while spot execution is validated end to end." />
               ) : /hyperliquid/i.test(leg.protocol || "") ? (
@@ -135,9 +142,11 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
                 <LidoUnstakeButton leg={leg} prices={prices} />
               ) : isBridge ? (
                 <BridgeExecuteButton leg={leg} prices={prices} />
-              ) : (
+              ) : isLifiSwap ? (
+                <NotWired venue="LI.FI" reason="Same-chain LI.FI swaps aren't wired yet — cross-chain moves use the Bridge step." />
+              ) : isUnsupported(resolved) ? (
                 <NotWired venue={protocolLabel(leg.protocol)} reason={resolved.unsupported} />
-              )
+              ) : null
             ) : (
               <>
                 <OrderRow label="Amount" value={orderAmountDisplay(resolved)} valueColor="var(--color-accent-700)" />
@@ -181,18 +190,20 @@ export function ExecuteStrategyButton({ plan }: { plan: TradePlan }) {
   const { progress, executeAll, cancel, reset } = useStrategyExecutor();
   const [confirming, setConfirming] = useState(false);
 
-  // Resolve all legs to orders, filtering out unsupported ones
+  // One-click execution only when EVERY leg resolves to a directly signable
+  // order: running a subset (e.g. "supply on Optimism" without its bridge)
+  // could leave the user half-way through a strategy.
+  const connectedChainId = chain?.id;
   const resolvedOrders = useMemo(() => {
     const results: { leg: TradeLeg; order: Order; legIndex: number }[] = [];
-    for (let i = 0; i < plan.legs.length; i++) {
-      const leg = plan.legs[i];
-      const resolved = resolveOrderForLeg(leg, undefined, prices, chain?.id);
-      if (!isUnsupported(resolved)) {
-        results.push({ leg, order: resolved, legIndex: i });
-      }
-    }
-    return results;
-  }, [plan.legs, prices, chain?.id]);
+    let allSignable = true;
+    plan.legs.forEach((leg, i) => {
+      const resolved = resolveOrderForLeg(leg, undefined, prices, legChainId(leg, connectedChainId));
+      if (isUnsupported(resolved) || needsLiveCompletion(resolved)) allSignable = false;
+      else results.push({ leg, order: resolved, legIndex: i });
+    });
+    return allSignable ? results : [];
+  }, [plan.legs, prices, connectedChainId]);
 
   if (resolvedOrders.length === 0) return null;
 

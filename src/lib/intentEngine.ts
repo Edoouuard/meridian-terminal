@@ -24,6 +24,10 @@ export interface LLMLeg {
   sizeUsd?: number;
   leverage?: number;
   note?: string;
+  /** Chain the leg executes on ("Base", "Arbitrum", …). */
+  chain?: string;
+  /** Destination chain of a Bridge leg. */
+  toChain?: string;
 }
 
 export interface LLMStrategy {
@@ -112,6 +116,8 @@ function strategyToTradePlan(strategy: LLMStrategy): TradePlan & { riskTier: LLM
     sizeUsd: l.sizeUsd,
     leverage: l.leverage,
     note: l.note,
+    chain: typeof l.chain === "string" && l.chain.trim() ? l.chain.trim() : undefined,
+    toChain: typeof l.toChain === "string" && l.toChain.trim() ? l.toChain.trim() : undefined,
   }));
 
   const intent = inferIntent(legs);

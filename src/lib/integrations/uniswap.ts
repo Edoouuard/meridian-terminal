@@ -1,5 +1,5 @@
 import type { Address } from "viem";
-import { mainnet, base, arbitrum, optimism, polygon, avalanche, bsc, celo, scroll, linea, mantle, zkSync } from "wagmi/chains";
+import { mainnet, base, arbitrum, optimism, polygon, avalanche, bsc, celo, scroll, linea } from "wagmi/chains";
 
 /**
  * uniswap.ts — Uniswap v3 SwapRouter02 + QuoterV2 integration.
@@ -27,8 +27,11 @@ import { mainnet, base, arbitrum, optimism, polygon, avalanche, bsc, celo, scrol
 
 /**
  * SwapRouter02 addresses per chain. Verified 2026-10 against Uniswap docs.
- * Shared CREATE2 address on most chains; separate deployments on Base,
- * Avalanche, BNB, Celo, and zkSync.
+ * Shared CREATE2 address on Ethereum/Arbitrum/Optimism/Polygon; separate
+ * deployments on Base, Avalanche, BNB, Celo, Scroll and Linea. Not listed:
+ * Mantle (no official deployment) and zkSync (no code at the documented
+ * addresses). Checked on-chain by e2e/onchain.audit.test.ts
+ * (router and quoter must report the same factory, and quote live).
  */
 export const UNISWAP_SWAP_ROUTER02_BY_CHAIN: Record<number, Address> = {
   [mainnet.id]: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
@@ -39,10 +42,8 @@ export const UNISWAP_SWAP_ROUTER02_BY_CHAIN: Record<number, Address> = {
   [avalanche.id]: "0xbb00FF08d01D300023C629E8fFfFcb65A5a578cE",
   [bsc.id]: "0xB971eF87ede563556b2ED4b1C0b0019111Dd85d2",
   [celo.id]: "0x5615CDAb10dc425a742d643d949a7F474C01abc4",
-  [scroll.id]: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
-  [linea.id]: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
-  [mantle.id]: "0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45",
-  [zkSync.id]: "0x99c56385dB8a3515b31fABDc48B7b4b2E4f3b01F",
+  [scroll.id]: "0xfc30937f5cDe93Df8d48aCAF7e6f5D8D8A31F636",
+  [linea.id]: "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
 };
 
 /**
@@ -57,10 +58,8 @@ export const UNISWAP_QUOTER_V2_BY_CHAIN: Record<number, Address> = {
   [avalanche.id]: "0xbe0F5544EC67e9B3b2D979aaA43f18Fd87E6257F",
   [bsc.id]: "0x78D78E420Da98ad378D7799bE8f4AF69033EB077",
   [celo.id]: "0x82825d0554fA07f7FC52Ab63c961F330fdEFa8E8",
-  [scroll.id]: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
-  [linea.id]: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
-  [mantle.id]: "0x61fFE014bA17989E743c5F6cB21bF9697530B21e",
-  [zkSync.id]: "0x8Cb537fc92E26d8EBF4d51ac5BC4f0e0b58993e9",
+  [scroll.id]: "0x2566e082Cb1656d22BCbe5644F5b997D194b5299",
+  [linea.id]: "0x42bE4D6527829FeFA1493e1fb9F3676d2425C3C1",
 };
 
 /**
@@ -95,6 +94,30 @@ export const QUOTER_V2_QUOTE_EXACT_INPUT_SINGLE_ABI = [
     ],
   },
 ] as const;
+
+/**
+ * The same quoter call typed as a read: QuoterV2 is `nonpayable` only because
+ * it simulates the swap internally — a plain eth_call returns the quote, so
+ * wagmi's batched `useReadContracts` can quote several fee tiers at once.
+ */
+export const QUOTER_V2_QUOTE_READ_ABI = [{ ...QUOTER_V2_QUOTE_EXACT_INPUT_SINGLE_ABI[0], stateMutability: "view" }] as const;
+
+/** Fee tiers quoted for every swap; the pool with the best output wins. */
+export const QUOTE_FEE_TIERS = [100, 500, 3000, 10000] as const;
+
+/**
+ * Pick the fee tier with the highest quoted output. Tiers whose pool doesn't
+ * exist (the quote reverted) or quoted nothing are skipped; null when none
+ * quoted. Pure — the hook does the reads.
+ */
+export function pickBestFeeQuote(quotes: { fee: number; amountOut: bigint | undefined }[]): { fee: number; amountOut: bigint } | null {
+  let best: { fee: number; amountOut: bigint } | null = null;
+  for (const q of quotes) {
+    if (q.amountOut === undefined || q.amountOut <= BigInt(0)) continue;
+    if (!best || q.amountOut > best.amountOut) best = { fee: q.fee, amountOut: q.amountOut };
+  }
+  return best;
+}
 
 /** SwapRouter02.exactInputSingle — single-hop exact-input swap, payable, no `deadline` param (SwapRouter02 dropped it vs v1 SwapRouter). */
 export const SWAP_ROUTER02_EXACT_INPUT_SINGLE_ABI = [

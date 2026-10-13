@@ -6,6 +6,7 @@ import {
   FEE_TIER_STABLE,
   FEE_TIER_STANDARD,
   parseSwapAsset,
+  pickBestFeeQuote,
   UNISWAP_SWAP_ROUTER02_BY_CHAIN,
   UNISWAP_QUOTER_V2_BY_CHAIN,
 } from "@/lib/integrations/uniswap";
@@ -71,10 +72,27 @@ describe("uniswap — parseSwapAsset", () => {
 
 describe("uniswap — address tables", () => {
   it("covers all chains where Uniswap v3 is deployed", () => {
-    const chains = [1, 8453, 42161, 10, 137, 43114, 56, 42220, 534352, 59144, 5000, 324];
+    const chains = [1, 8453, 42161, 10, 137, 43114, 56, 42220, 534352, 59144]; // not Mantle (5000) or zkSync (324)
     for (const id of chains) {
       expect(UNISWAP_SWAP_ROUTER02_BY_CHAIN[id]).toBeDefined();
       expect(UNISWAP_QUOTER_V2_BY_CHAIN[id]).toBeDefined();
     }
+  });
+});
+
+describe("uniswap — pickBestFeeQuote", () => {
+  it("keeps the tier with the highest output and skips tiers without a pool", () => {
+    expect(
+      pickBestFeeQuote([
+        { fee: 100, amountOut: undefined },
+        { fee: 500, amountOut: BigInt(39_776) },
+        { fee: 3000, amountOut: BigInt(39_663) },
+        { fee: 10000, amountOut: BigInt(0) },
+      ]),
+    ).toEqual({ fee: 500, amountOut: BigInt(39_776) });
+  });
+
+  it("returns null when no tier quotes", () => {
+    expect(pickBestFeeQuote([{ fee: 500, amountOut: undefined }])).toBeNull();
   });
 });

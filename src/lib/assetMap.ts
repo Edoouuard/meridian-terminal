@@ -110,7 +110,6 @@ const SYMBOL_ALIASES: Record<string, string> = {
   s: "WS",
   metis: "METIS",
   celo: "CELO",
-  matic: "WETH", // Polygon uses WETH, not WMATIC for Aave
   avax: "WAVAX",
   btc: "WBTC",
 };
@@ -763,4 +762,18 @@ export function approveOrderFor(order: Order): Order | null {
     };
   }
   return null;
+}
+
+/**
+ * True when an order resolved from a plan leg is only a shell that a dedicated
+ * venue button must complete with live data before it can be signed: a Morpho
+ * vault picked live, a deBridge/LI.FI route quoted live, a Uniswap minimum
+ * output quoted on-chain, or a perp venue with its own signing flow.
+ */
+export function needsLiveCompletion(order: Order): boolean {
+  const p = String(order.protocol);
+  if (p === "morpho") return !order.vaultAddress && order.type !== "approve";
+  if (p === "debridge" || p === "lifi") return !order.routerTx;
+  if (p === "uniswap") return order.type === "swap" && !order.amountOutMinimum;
+  return /hyperliquid|extended|ondo|lighter/.test(p);
 }
