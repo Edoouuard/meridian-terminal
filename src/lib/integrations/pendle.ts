@@ -30,6 +30,18 @@ export function isTrustedPendleRouter(chainId: number, address: string): boolean
   return (PENDLE_CHAINS as readonly number[]).includes(chainId) && address.toLowerCase() === PENDLE_ROUTER_V4.toLowerCase();
 }
 
+/**
+ * Major stablecoins (or their native savings wrappers) whose Pendle markets
+ * are offered even when Pendle hasn't flagged them prime. Exact market names,
+ * case-insensitive — exotic RWA/points stables never pass.
+ */
+export const MAJOR_STABLE_MARKETS = ["USDC", "USDT", "DAI", "sDAI", "USDS", "sUSDS", "USDe", "sUSDe", "GHO", "PYUSD"] as const;
+
+export function isMajorStableMarket(name: string): boolean {
+  const n = name.trim().toLowerCase();
+  return MAJOR_STABLE_MARKETS.some((s) => s.toLowerCase() === n);
+}
+
 /** Markets closer than this to expiry aren't offered: too little time to earn the fixed rate. */
 export const MIN_DAYS_TO_EXPIRY = 14;
 
@@ -42,8 +54,10 @@ export interface PendleMarket {
   /** Fixed APY locked in by buying PT now (percent). */
   impliedApyPct: number;
   liquidityUsd: number;
-  /** Pendle's own curated flag — always true once parsed (non-prime markets are dropped). */
+  /** Pendle's own curated flag. */
   isPrime: boolean;
+  /** Underlying is a major stablecoin (MAJOR_STABLE_MARKETS). Every parsed market is prime, major-stable, or both. */
+  majorStable: boolean;
   categories: string[];
 }
 
@@ -66,8 +80,9 @@ function stripChain(id: string | undefined): string | undefined {
 
 /**
  * Parse Pendle's /markets/active payload, keeping only markets a user can
- * sensibly lock into now: Pendle "prime" (its own curated list — uncurated
- * markets are mostly exotic RWA/points stables), at least MIN_VAULT_TVL_USD of
+ * sensibly lock into now: Pendle "prime" (its own curated list) or a major
+ * stablecoin market (MAJOR_STABLE_MARKETS) — the rest are mostly exotic
+ * RWA/points stables — with at least MIN_VAULT_TVL_USD of
  * liquidity and more than MIN_DAYS_TO_EXPIRY days left. Sorted by implied APY.
  * This is the only gate: the chat, the picker and /api/pendle all see this list.
  */
@@ -82,7 +97,8 @@ export function parsePendleMarkets(chainId: number, body: unknown, now: Date = n
       const apy = m.details?.impliedApy;
       const liquidity = m.details?.liquidity;
       if (!m.name || !m.address || !pt || !Number.isFinite(expiry) || typeof apy !== "number" || typeof liquidity !== "number") return null;
-      if (m.isPrime !== true || expiry < minExpiry || liquidity < MIN_VAULT_TVL_USD || !(apy > 0)) return null;
+      const majorStable = isMajorStableMarket(m.name);
+      if ((m.isPrime !== true && !majorStable) || expiry < minExpiry || liquidity < MIN_VAULT_TVL_USD || !(apy > 0)) return null;
       return {
         chainId,
         name: m.name,
@@ -92,6 +108,7 @@ export function parsePendleMarkets(chainId: number, body: unknown, now: Date = n
         impliedApyPct: apy * 100,
         liquidityUsd: liquidity,
         isPrime: m.isPrime === true,
+        majorStable,
         categories: m.categoryIds ?? [],
       };
     })
@@ -110,7 +127,7 @@ export function isEthMarket(m: Pick<PendleMarket, "name" | "categories">): boole
 }
 
 /**
- * Pick the market for a leg among the prime markets parsePendleMarkets kept:
+ * Pick the market for a leg among those parsePendleMarkets kept (prime or major stable):
  * an exact name match first (the plan named one), else the highest fixed APY
  * of the right kind (stables for a USD leg, ETH for an ETH leg). None of the
  * kind → undefined, and the leg says so rather than reaching for another market.
@@ -120,7 +137,7 @@ export function pickPendleMarket(markets: PendleMarket[], asset: string): Pendle
   const exact = markets.find((m) => m.name.toLowerCase() === name);
   if (exact) return exact;
   const wantEth = /eth/i.test(name);
-  const ofKind = markets.filter((m) => (wantEth ? isEthMarket(m) : m.categories.includes("stables") && !isEthMarket(m)));
+  const ofKind = markets.filter((m) => (wantEth ? isEthMarket(m) : (m.categories.includes("stables") || m.majorStable) && !isEthMarket(m)));
   return ofKind[0]; // already sorted by fixed APY
 }
 

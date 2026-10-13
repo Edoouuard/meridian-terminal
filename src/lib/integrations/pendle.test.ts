@@ -13,7 +13,7 @@ const raw = (name: string, opts: { expiry?: string; liquidity?: number; apy?: nu
 });
 
 describe("pendle — parsePendleMarkets", () => {
-  it("keeps prime, liquid markets with time left, strips the chain prefix, sorts by fixed APY", () => {
+  it("keeps prime or major-stable, liquid markets with time left, strips the chain prefix, sorts by fixed APY", () => {
     const out = parsePendleMarkets(
       1,
       {
@@ -23,12 +23,14 @@ describe("pendle — parsePendleMarkets", () => {
           raw("thin", { liquidity: 50_000 }),
           raw("expiring", { expiry: "2026-10-20T00:00:00.000Z" }),
           raw("uncurated", { apy: 0.3, prime: false }),
+          raw("USDe", { apy: 0.055, prime: false }), // major stable: kept without the prime flag
           { name: "broken" },
         ],
       },
       NOW,
     );
-    expect(out.map((m) => m.name)).toEqual(["sUSDS", "sUSDe"]);
+    expect(out.map((m) => m.name)).toEqual(["sUSDS", "USDe", "sUSDe"]);
+    expect(out.find((m) => m.name === "USDe")).toMatchObject({ isPrime: false, majorStable: true });
     expect(out[0]).toMatchObject({ chainId: 1, pt: "0x" + "b".repeat(40), impliedApyPct: 6 });
   });
 
@@ -57,14 +59,20 @@ describe("pendle — market choice", () => {
     expect(pickPendleMarket(markets, "ETH")?.name).toBe("wstETH");
   });
 
-  it("offers nothing when no market of the kind is prime", () => {
+  it("falls to a major-stable market when no stablecoin market is prime", () => {
     const noPrime = parsePendleMarkets(
       1,
-      { markets: [raw("hot", { apy: 0.3, prime: false }), raw("deep", { apy: 0.07, prime: false, liquidity: 9_000_000 }), raw("wstETH", { cats: ["eth"] })] },
+      { markets: [raw("hot", { apy: 0.3, prime: false }), raw("sUSDe", { apy: 0.07, prime: false }), raw("wstETH", { cats: ["eth"] })] },
       NOW,
     );
-    expect(pickPendleMarket(noPrime, "USDC")).toBeUndefined();
+    expect(pickPendleMarket(noPrime, "USDC")?.name).toBe("sUSDe");
     expect(pickPendleMarket(noPrime, "ETH")?.name).toBe("wstETH");
+  });
+
+  it("offers nothing when no market of the kind is prime or a major stable", () => {
+    const exotic = parsePendleMarkets(1, { markets: [raw("hot", { apy: 0.3, prime: false }), raw("reUSD", { prime: false })] }, NOW);
+    expect(exotic).toEqual([]);
+    expect(pickPendleMarket(exotic, "USDC")).toBeUndefined();
   });
 });
 

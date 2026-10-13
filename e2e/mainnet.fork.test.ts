@@ -1,7 +1,8 @@
 /**
  * Fixed yield and restaking on an Ethereum fork, executed by the real
  * lib/orderRunner against the real contracts:
- *   - Pendle: live prime markets + a live router quote from Pendle's API, WETH → PT;
+ *   - Pendle: live eligible markets (prime or major stable) + a live router
+ *     quote from Pendle's API: USDC → PT on a stable market, WETH → PT-wstETH;
  *   - EigenLayer: ETH → stETH through Lido, then stETH restaked into
  *     EigenLayer's stETH strategy.
  *
@@ -11,7 +12,17 @@
  * to Pendle's API. Skipped without ANVIL_ETH_URL.
  */
 import { describe, expect, it } from "vitest";
-import { createPublicClient, createWalletClient, http, type Address } from "viem";
+import {
+  createPublicClient,
+  createTestClient,
+  createWalletClient,
+  encodeAbiParameters,
+  http,
+  keccak256,
+  pad,
+  toHex,
+  type Address,
+} from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { mainnet } from "viem/chains";
 import { ERC20_ABI } from "@/lib/onchain";
@@ -34,6 +45,7 @@ function withoutChainId(args: Record<string, unknown>): Record<string, unknown> 
 describe.skipIf(!ANVIL_ETH_URL)("Ethereum fork — Pendle PT and EigenLayer restaking", () => {
   const transport = http(ANVIL_ETH_URL);
   const publicClient = createPublicClient({ chain: mainnet, transport });
+  const testClient = createTestClient({ chain: mainnet, mode: "anvil", transport });
   const walletClient = createWalletClient({ chain: mainnet, transport, account });
 
   const deps = (): OrderRunnerDeps => ({
@@ -52,45 +64,58 @@ describe.skipIf(!ANVIL_ETH_URL)("Ethereum fork — Pendle PT and EigenLayer rest
     console.info(`${label} → CONFIRMED (tx ${result.hash})`);
   }
 
-  it("buys PT on the best live Pendle prime ETH market with WETH", async () => {
-    // Pendle prime only: on Ethereum the prime list is ETH markets (wstETH),
-    // no stablecoin market is prime — so the proof buys with WETH.
-    const weth = findToken("WETH", mainnet.id)!;
-    const amount = 50_000_000_000_000_000n; // 0.05 WETH
-    const wrap = await walletClient.sendTransaction({ to: weth.address as Address, value: amount }); // WETH9 fallback = deposit
-    await publicClient.waitForTransactionReceipt({ hash: wrap });
-
+  async function buyPt(spend: { address: string; symbol: string; decimals: number }, amount: bigint, kind: "USDC" | "ETH") {
     const markets = await fetchPendleMarkets(mainnet.id);
-    console.info(`pendle: ${markets.length} prime markets on Ethereum: ${markets.map((m) => `${m.name}[${m.categories.join("/")}]`).join(", ")}`);
-    expect(markets.every((m) => m.isPrime)).toBe(true);
-    const market = pickPendleMarket(markets, "ETH");
-    expect(market, "no eligible Pendle prime ETH market on Ethereum").toBeDefined();
+    console.info(`pendle: ${markets.length} eligible markets on Ethereum: ${markets.map((m) => `${m.name}${m.isPrime ? "*" : ""}${m.majorStable ? "$" : ""}`).join(", ")}`);
+    expect(markets.every((m) => m.isPrime || m.majorStable)).toBe(true);
+    const market = pickPendleMarket(markets, kind);
+    expect(market, `no eligible Pendle ${kind} market on Ethereum`).toBeDefined();
     // Same order as PendleExecuteButton: approve the router first, then quote
     // and sign straight away — the route's aggregator leg expires quickly.
+    const token = spend.address as Address;
     await run(
-      { type: "approve", protocol: "pendle", token: weth.address as Address, symbol: "WETH", amount, chainId: mainnet.id, decimals: 18, spender: PENDLE_ROUTER_V4 },
-      "pendle approve WETH",
+      { type: "approve", protocol: "pendle", token, symbol: spend.symbol, amount, chainId: mainnet.id, decimals: spend.decimals, spender: PENDLE_ROUTER_V4 },
+      `pendle approve ${spend.symbol}`,
     );
-    const quote = await fetchPendleBuyQuote({ chainId: mainnet.id, pt: market!.pt, tokenIn: weth.address as Address, amountIn: amount.toString(), receiver: account.address });
+    const quote = await fetchPendleBuyQuote({ chainId: mainnet.id, pt: market!.pt, tokenIn: token, amountIn: amount.toString(), receiver: account.address });
     expect(quote, `no Pendle quote for PT-${market!.name}`).not.toBeNull();
-
     await run(
       {
         type: "swap",
         protocol: "pendle",
-        token: weth.address as Address,
-        symbol: "WETH",
+        token,
+        symbol: spend.symbol,
         amount,
         chainId: mainnet.id,
-        decimals: 18,
+        decimals: spend.decimals,
         routerTx: { to: quote!.tx.to, data: quote!.tx.data, value: quote!.tx.value ? BigInt(quote!.tx.value) : undefined },
       },
-      `pendle PT-${market!.name} (${market!.impliedApyPct.toFixed(2)}% fixed)`,
+      `pendle PT-${market!.name} (${market!.impliedApyPct.toFixed(2)}% fixed, ${market!.isPrime ? "prime" : "major stable"})`,
     );
     const pt = await publicClient.readContract({ address: market!.pt, abi: ERC20_ABI, functionName: "balanceOf", args: [account.address] });
     expect(pt).toBeGreaterThan(0n);
-    const wethLeft = await publicClient.readContract({ address: weth.address as Address, abi: ERC20_ABI, functionName: "balanceOf", args: [account.address] });
-    expect(wethLeft).toBe(0n);
+    const left = await publicClient.readContract({ address: token, abi: ERC20_ABI, functionName: "balanceOf", args: [account.address] });
+    expect(left).toBe(0n);
+  }
+
+  it("buys PT on the best live Pendle stablecoin market (prime or major stable) with USDC", async () => {
+    const usdc = findToken("USDC", mainnet.id)!;
+    const amount = 100_000_000n; // 100 USDC
+    try {
+      await testClient.request({ method: "anvil_dealERC20" as never, params: [usdc.address, account.address, toHex(amount)] as never });
+    } catch {
+      const slot = keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [account.address, 9n]));
+      await testClient.setStorageAt({ address: usdc.address as Address, index: slot, value: pad(toHex(amount)) });
+    }
+    await buyPt(usdc, amount, "USDC");
+  }, 180_000);
+
+  it("buys PT on the best live Pendle ETH market with WETH", async () => {
+    const weth = findToken("WETH", mainnet.id)!;
+    const amount = 50_000_000_000_000_000n; // 0.05 WETH
+    const wrap = await walletClient.sendTransaction({ to: weth.address as Address, value: amount }); // WETH9 fallback = deposit
+    await publicClient.waitForTransactionReceipt({ hash: wrap });
+    await buyPt(weth, amount, "ETH");
   }, 180_000);
 
   it("stakes ETH on Lido, then restakes the stETH into EigenLayer", async () => {
