@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { AlphaEntry, AlphaTag } from "@/app/api/alpha/route";
 import { ChainOverview } from "@/components/ChainOverview";
 import { AskButton } from "@/components/AskButton";
+import { YieldsPanel } from "@/components/YieldsPanel";
 
 const ALPHA_TAG_CLASS: Record<AlphaTag, string> = {
   "New protocol": "tag-neutral",
@@ -62,7 +63,7 @@ function useAlpha() {
  * stale content that looks live but isn't.
  */
 export function NewsFeed() {
-  const [tab, setTab] = useState<"chains" | "alpha">("chains");
+  const [tab, setTab] = useState<"yields" | "chains" | "alpha">("yields");
   const now = useNowTick();
 
   const alpha = useAlpha();
@@ -70,7 +71,11 @@ export function NewsFeed() {
 
   return (
     <>
-      <div className="seg side-tabs" style={{ gridTemplateColumns: "repeat(2, 1fr)" }}>
+      <div className="seg side-tabs" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+        <label className="seg-opt">
+          <input type="radio" name="feed-tab" checked={tab === "yields"} onChange={() => setTab("yields")} />
+          <span>Yields</span>
+        </label>
         <label className="seg-opt">
           <input type="radio" name="feed-tab" checked={tab === "chains"} onChange={() => setTab("chains")} />
           <span>Chains</span>
@@ -81,7 +86,9 @@ export function NewsFeed() {
         </label>
       </div>
 
-      {tab === "chains" ? (
+      {tab === "yields" ? (
+        <YieldsPanel />
+      ) : tab === "chains" ? (
         <section className="panel-card">
           <ChainOverview hideDivider />
         </section>

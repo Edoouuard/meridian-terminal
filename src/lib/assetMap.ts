@@ -1,7 +1,8 @@
 import type { Address } from "viem";
 import type { Order } from "@/lib/execution";
 import type { TradeLeg } from "@/lib/tradePlan";
-import { TRACKED_TOKENS_BY_CHAIN, SPARK_POOL_BY_CHAIN, SDAI_VAULT } from "@/lib/onchain";
+import { CHAIN_LABEL, TRACKED_TOKENS_BY_CHAIN, SPARK_POOL_BY_CHAIN, SDAI_VAULT } from "@/lib/onchain";
+import { VAULTS, findVault, vaultProtocolFor } from "@/lib/protocols/vaults";
 import {
   type PriceEntry,
   resolvePriceFromList,
@@ -425,6 +426,33 @@ export function resolveOrderForLeg(
     };
   }
 
+  // --- Verified ERC-4626 savings vaults (Fluid, Sky sUSDS, Spark Savings, Ethena) ---
+  const vaultProtocol = vaultProtocolFor(leg.protocol);
+  if (vaultProtocol && !(vaultProtocol === "Sky" && /^s?dai$/i.test(bareSymbol(leg.asset)))) {
+    const vault = findVault(leg.protocol, bareSymbol(leg.asset), resolveChainId);
+    if (!vault) {
+      const where = VAULTS.filter((v) => v.protocol === vaultProtocol)
+        .map((v) => `${v.shareSymbol} (${CHAIN_LABEL[v.chainId] ?? v.chainId})`)
+        .join(", ");
+      return { unsupported: `${vaultProtocol}: no verified vault for ${leg.asset} on this chain. Meridian deposits into ${where}.` };
+    }
+    if (side !== "supply" && side !== "deposit" && side !== "stake" && side !== "withdraw" && side !== "approve") {
+      return { unsupported: `${vaultProtocol} supports deposit and withdraw, not "${leg.side}".` };
+    }
+    const quote = quoteFor(vault.assetSymbol, vault.assetDecimals);
+    if (!quote) return { unsupported: `No live price for ${vault.assetSymbol} — cannot size this order safely.` };
+    return {
+      type: side === "withdraw" ? "withdraw" : "supply",
+      protocol: "vault",
+      symbol: vault.assetSymbol,
+      token: vault.assetAddress,
+      amount: quote.amountBase,
+      chainId: vault.chainId,
+      decimals: vault.assetDecimals,
+      vaultAddress: vault.vault,
+    };
+  }
+
   // --- Maker/Sky sDAI (DAI Savings Rate, ERC-4626) -------------------------
   if (protocol === "maker" || protocol === "sky" || protocol === "sdai") {
     if (side !== "supply" && side !== "withdraw" && side !== "stake" && side !== "deposit" && side !== "approve") {
@@ -711,6 +739,18 @@ export function approveOrderFor(order: Order): Order | null {
       amount: order.amount,
       chainId: order.chainId,
       decimals: order.decimals,
+    };
+  }
+  if (order.protocol === "vault" && order.type === "supply" && order.token && order.vaultAddress) {
+    return {
+      type: "approve",
+      protocol: "vault",
+      token: order.token,
+      symbol: order.symbol,
+      amount: order.amount,
+      chainId: order.chainId,
+      decimals: order.decimals,
+      vaultAddress: order.vaultAddress,
     };
   }
   if (order.protocol === "morpho" && order.type === "supply" && order.token && order.vaultAddress) {

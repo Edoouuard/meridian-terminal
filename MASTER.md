@@ -121,6 +121,7 @@ Diagnostic honnête du code (≈ 22 000 lignes, 80 commits, 16 PR) :
 | Sécurité | `lib/onchain.ts`, `lib/mcp/routerAllowlist.ts`, `lib/safety.ts` | Allowlist d'adresses, garde-fou HF |
 | Routage | `lib/mcp/router.ts`, `lib/mcp/{debridge,lifi}.ts` | Devis comparés, tx de bridge/swap |
 | MCP | `lib/mcp/client.ts`, `lib/mcp/aave.ts` | Client MCP robuste (timeouts, coercition, replis) |
+| Protocoles | `lib/protocols/registry.ts`, `lib/protocols/vaults.ts`, `lib/protocols/opportunities.ts`, `app/api/opportunities` | Couverture DefiLlama (slug → nom, catégorie, exécutable ou comparaison), vaults ERC-4626 vérifiés, classement des meilleurs rendements |
 | Portefeuille | `hooks/useLivePortfolio.ts`, `app/api/positions` | Soldes et positions on-chain |
 | Infra | `proxy.ts`, `lib/rateLimit.ts`, `lib/betaGate.ts`, `lib/features.ts` | Rate limit, accès bêta, feature flags |
 
@@ -207,6 +208,14 @@ Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → s
 - [x] Décision deBridge CrosschainForwarder (routes avec swap) : **non** (D2). Les routes swap + bridge passent par LI.FI, déjà autorisé, qui agrège lui-même deBridge ; le Forwarder exécuterait des appels arbitraires vers des agrégateurs, pour un gain marginal
 
 **Critère de sortie :** 10 utilisateurs, ≥ 20 transactions réelles, taux d'échec < 10 % avec cause connue pour chaque échec.
+
+### Couverture des protocoles (DefiLlama)
+
+- **Exécutables (intégration dédiée)** : Aave, Compound, Morpho, Spark (SparkLend), Lido, Rocket Pool, Pendle, EigenLayer.
+- **Exécutables (vaults ERC-4626 vérifiés, un seul chemin de signature)** : Fluid (fUSDC/fUSDT/fWETH sur Ethereum, Arbitrum, Base), Sky sUSDS (Ethereum), Spark Savings sUSDC (Ethereum, Base, Arbitrum), Ethena sUSDe (Ethereum, sortie en 7 jours). Chaque vault : `asset()` vérifié on-chain avant ajout et à chaque audit, dépôt prouvé sur fork en CI.
+- **Comparaison seulement** : Maple, ether.fi, cbETH, wBETH, Kelp, Renzo, StakeWise, mETH, Liquid Collective, Aave v4, Yearn, Curve LlamaLend, Venus, Lista, Dolomite, Euler, Silo, Benqi, Moonwell, Centrifuge.
+- Onglet **Yields** (colonne droite) et contexte du planner : meilleurs rendements mono-actif ≥ 5 M$ de TVL sur les 7 chaînes, séparés « exécutable » / « comparaison ».
+- Ajouter un protocole = une ligne dans `registry.ts` (et, pour un vault ERC-4626, une ligne vérifiée dans `vaults.ts`).
 
 ### Phase 3 — Produit (après la bêta)
 

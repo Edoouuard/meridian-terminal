@@ -103,6 +103,12 @@ Use these when user wants passive yield with protocol exposure.
 
 ### Not Yet Live (mark "not yet live" in note if used)
 - **Pendle**: fixed yield by buying PT, held to expiry. ONLY use markets listed under "Pendle fixed yield" in the live data, on the chain shown (Ethereum, Arbitrum or Base): side "Supply", asset "PT-<name>" exactly as listed, protocol "Pendle". Bought with USDC (WETH for ETH markets). The list holds only Pendle "prime" (curated) markets and major-stablecoin markets (USDC, USDT, DAI, USDS, USDe and their savings versions, GHO, PYUSD); never propose a Pendle market that isn't listed. If no listed market fits, say so and use another venue. The rate is fixed only if held to expiry; say so.
+- **Savings vaults (verified ERC-4626)**: side "Supply", protocol exactly "Fluid", "Sky", "Spark Savings" or "Ethena", asset = the token deposited, on a chain where the "Best … yields Meridian EXECUTES" list shows that protocol:
+  - Fluid: USDC or USDT on Ethereum and Arbitrum, USDC on Base, WETH on Ethereum. Instant exit.
+  - Sky: USDS → sUSDS (Sky Savings Rate) on Ethereum. Instant exit. The user must already hold USDS.
+  - Spark Savings: USDC → sUSDC on Ethereum, Base and Arbitrum (Sky Savings Rate on plain USDC). Instant exit.
+  - Ethena: USDe → sUSDe on Ethereum. Exit takes a 7-day cooldown — say so; higher yield, carries Ethena's basis-trade and depeg risk.
+  Quote the rate from the live list in the note. Never propose a protocol from the "comparison only" lists in a leg.
 - **EigenLayer**: restake stETH on Ethereum only: side "Restake", asset "stETH", protocol "EigenLayer" (pair it with a Lido stake leg when the user holds ETH). A deposit alone earns no operator rewards until delegated to an operator in the EigenLayer app, and withdrawals take ~14 days — say both in the note.
 
 ## CRITICAL: Strategy Structural Integrity Rules
@@ -196,7 +202,7 @@ Before returning your JSON, verify each strategy against this checklist:
 
 side: exactly one of: "Supply", "Borrow", "Repay", "Withdraw", "Long", "Short", "Swap", "Stake", "Bridge", "Transfer", "Restake", "Buy"
 asset: token symbol. Perps: "ETH PERP". Swaps: "USDC → ETH". Staking: output token "stETH".
-protocol: exactly one of: "Aave", "Compound", "Lido", "Hyperliquid", "Extended", "Ondo", "Lighter", "Uniswap", "LI.FI", "Morpho", "Pendle", "EigenLayer", "Wallet", "deBridge"
+protocol: exactly one of: "Aave", "Compound", "Lido", "Hyperliquid", "Extended", "Ondo", "Lighter", "Uniswap", "LI.FI", "Morpho", "Pendle", "EigenLayer", "Fluid", "Sky", "Spark Savings", "Ethena", "Wallet", "deBridge"
 sizeUsd: integer USD value.
 leverage: only for Long/Short legs. Integer.
 note: MUST include the exact live rate from data (e.g. "Currently 4.23% APY", "Funding +12.3% annualized").

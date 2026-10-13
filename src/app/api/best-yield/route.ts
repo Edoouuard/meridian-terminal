@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { PROTOCOLS } from "@/lib/protocols/registry";
 
 export const revalidate = 600;
 
@@ -26,19 +27,8 @@ interface RawPool {
   url?: string;
 }
 
-/** DefiLlama project slug -> display name, for projects we're willing to surface in a "best yield" search. */
-const KNOWN_PROJECTS: Record<string, string> = {
-  "aave-v3": "Aave",
-  "compound-v3": "Compound",
-  morpho: "Morpho",
-  "morpho-blue": "Morpho",
-  spark: "Spark",
-  "sky-lending": "Sky",
-  fluid: "Fluid",
-  "uniswap-v3": "Uniswap",
-  curve: "Curve",
-  "curve-dex": "Curve",
-};
+/** Protocols surfaced in a "best yield" search: the registry Meridian covers (lib/protocols/registry.ts). */
+const KNOWN_PROJECTS: Record<string, string> = Object.fromEntries(Object.entries(PROTOCOLS).map(([slug, info]) => [slug, info.name]));
 
 /** Floors out dust/scam-sized pools — same philosophy as /api/alpha. */
 const MIN_TVL_USD = 500_000;

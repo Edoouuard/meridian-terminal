@@ -3,6 +3,7 @@ import { parseUnits, zeroAddress } from "viem";
 import { AAVE_V3_POOL_BY_CHAIN, CHAIN_LABEL, COMPOUND_V3_USDC_COMET_BY_CHAIN, STETH_ADDRESS, SPARK_POOL_BY_CHAIN, SDAI_VAULT, ROCKET_DEPOSIT_POOL, FRXETH_MINTER } from "./onchain";
 import { SWAP_ROUTER02_EXACT_INPUT_SINGLE_ABI, UNISWAP_SWAP_ROUTER02_BY_CHAIN } from "./integrations/uniswap";
 import { ERC4626_DEPOSIT_ABI, ERC4626_WITHDRAW_ABI } from "./integrations/morpho";
+import { isTrustedVault } from "./protocols/vaults";
 import {
   LIDO_CLAIM_WITHDRAWAL_ABI,
   LIDO_REQUEST_WITHDRAWALS_ABI,
@@ -30,7 +31,7 @@ import { EIGENLAYER_DEPOSIT_ABI, EIGENLAYER_RISK_NOTE, EIGENLAYER_STETH_STRATEGY
  */
 
 export type OrderType = "supply" | "repay" | "borrow" | "withdraw" | "transfer" | "approve" | "stake" | "swap" | "unstake" | "claim";
-export type OrderProtocol = "aave" | "eth" | "erc20" | "lido" | "uniswap" | "morpho" | "compound" | "spark" | "maker" | "weth" | "rocketpool" | "frax" | "debridge" | "lifi" | "hyperliquid" | "extended" | "ondo" | "lighter" | "pendle" | "eigenlayer" | "variational";
+export type OrderProtocol = "aave" | "eth" | "erc20" | "lido" | "uniswap" | "morpho" | "compound" | "spark" | "maker" | "weth" | "rocketpool" | "frax" | "debridge" | "lifi" | "hyperliquid" | "extended" | "ondo" | "lighter" | "pendle" | "eigenlayer" | "variational" | "vault";
 
 /**
  * Protocol-agnostic order produced by the trade engine. Carries enough to build a
@@ -823,6 +824,50 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         };
       }
       return fail(`Maker DSR does not yet support order type '${order.type}'`);
+    }
+
+    case "vault": {
+      // Generic ERC-4626 savings vault (Fluid, Sky sUSDS, Spark Savings, Ethena
+      // sUSDe). Only vaults in the verified registry (lib/protocols/vaults.ts)
+      // can be signed: approve and deposit both target that exact address.
+      const vaultAddr = order.vaultAddress;
+      if (!vaultAddr) return fail("vault order requires a vaultAddress");
+      const entry = isTrustedVault(chainId, vaultAddr);
+      if (!entry) return fail(`Vault ${vaultAddr} on ${chainLabel} isn't in Meridian's verified vault list`);
+      const token = order.token;
+      if (!token || token.toLowerCase() !== entry.assetAddress.toLowerCase()) {
+        return fail(`${entry.shareSymbol} takes ${entry.assetSymbol}, not ${assetLabel}`);
+      }
+      const amount = normalizeAmount(order.amount, entry.assetDecimals);
+      if ("error" in amount) return amount;
+      const name = `${entry.protocol} ${entry.shareSymbol}`;
+
+      if (order.type === "approve") {
+        return {
+          chainId, address: token, abi: ERC20_APPROVE_ABI, functionName: "approve",
+          args: [entry.vault, amount.value],
+          description: `Approve ${name} to spend up to ${order.amount} ${entry.assetSymbol} on ${chainLabel}`,
+          riskNote: `Approval lets the ${name} vault transfer up to this amount of ${entry.assetSymbol}, nothing more.`,
+        };
+      }
+      if (order.type === "supply") {
+        return {
+          chainId, address: entry.vault, abi: ERC4626_DEPOSIT_ABI, functionName: "deposit",
+          args: [amount.value, zeroAddress], senderIndex: 1,
+          description: `Deposit ${order.amount} ${entry.assetSymbol} into ${name} on ${chainLabel}`,
+          riskNote: `Moves real funds into ${name}. Exit: ${entry.exit}.`,
+        };
+      }
+      if (order.type === "withdraw") {
+        if (!entry.instantWithdraw) return fail(`${name} withdrawals go through a cooldown (${entry.exit}) — do it in the ${entry.protocol} app`);
+        return {
+          chainId, address: entry.vault, abi: ERC4626_WITHDRAW_ABI, functionName: "withdraw",
+          args: [amount.value, zeroAddress, zeroAddress], senderIndices: [1, 2],
+          description: `Withdraw ${order.amount} ${entry.assetSymbol} from ${name} on ${chainLabel}`,
+          riskNote: `Withdraws from ${name} back to your wallet.`,
+        };
+      }
+      return fail(`${name} does not support order type '${order.type}'`);
     }
 
     case "weth": {

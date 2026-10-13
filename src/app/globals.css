@@ -540,6 +540,87 @@ kbd {
   margin-bottom: var(--space-2);
 }
 
+.yields-filters {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.seg--sm .seg-opt span { font-size: 11px; padding: 3px 10px; }
+.yields-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--color-neutral-700);
+  cursor: pointer;
+}
+.yield-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+.yield-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--color-divider);
+}
+.yield-row__head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.yield-row__name {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 15px;
+  line-height: 1.2;
+}
+.yield-row__where {
+  font-family: var(--font-body);
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--color-neutral-600);
+}
+.yield-row__apy {
+  font-family: var(--font-heading);
+  font-weight: 600;
+  font-size: 20px;
+  font-variant-numeric: lining-nums tabular-nums;
+}
+.yield-row__meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 10.5px;
+  color: var(--color-neutral-600);
+}
+.coverage-badge {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 999px;
+}
+.coverage-badge--execute {
+  color: var(--risk-good);
+  background: color-mix(in srgb, var(--risk-good) 12%, transparent);
+}
+.coverage-badge--watch {
+  color: var(--color-neutral-700);
+  background: var(--color-neutral-200);
+}
+
 /* Suggested starting prompts on the empty chat */
 .quick-prompt {
   display: flex !important;
