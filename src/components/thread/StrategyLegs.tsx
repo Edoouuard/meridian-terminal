@@ -193,16 +193,17 @@ export function ExecuteStrategyButton({ plan }: { plan: TradePlan }) {
   // One-click execution only when EVERY leg resolves to a directly signable
   // order: running a subset (e.g. "supply on Optimism" without its bridge)
   // could leave the user half-way through a strategy.
+  const connectedChainId = chain?.id;
   const resolvedOrders = useMemo(() => {
     const results: { leg: TradeLeg; order: Order; legIndex: number }[] = [];
-    for (let i = 0; i < plan.legs.length; i++) {
-      const leg = plan.legs[i];
-      const resolved = resolveOrderForLeg(leg, undefined, prices, legChainId(leg, chain?.id));
-      if (isUnsupported(resolved) || needsLiveCompletion(resolved)) return [];
-      results.push({ leg, order: resolved, legIndex: i });
-    }
-    return results;
-  }, [plan.legs, prices, chain?.id]);
+    let allSignable = true;
+    plan.legs.forEach((leg, i) => {
+      const resolved = resolveOrderForLeg(leg, undefined, prices, legChainId(leg, connectedChainId));
+      if (isUnsupported(resolved) || needsLiveCompletion(resolved)) allSignable = false;
+      else results.push({ leg, order: resolved, legIndex: i });
+    });
+    return allSignable ? results : [];
+  }, [plan.legs, prices, connectedChainId]);
 
   if (resolvedOrders.length === 0) return null;
 
