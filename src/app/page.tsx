@@ -29,14 +29,11 @@ import { recordExecution } from "@/lib/history";
 // forward: `recordExecution({ type, label, amount, asset, protocol, chainId, status, hash })`.
 export { recordExecution };
 
+/** Protocols useLivePortfolio already reads on-chain (lending pools + Morpho indexer). */
+const LIVE_TRACKED_PROTOCOLS = /aave|spark|compound|morpho/i;
+
 const CHAIN_NAMES = SUPPORTED_CHAINS.map((c) => CHAIN_LABEL[c.id]).join(", ");
-import {
-  ALLOCATION,
-  PORTFOLIO_VALUE,
-  POSITIONS,
-  ThreadItem,
-  fmtUsd,
-} from "@/lib/data";
+import { ThreadItem, fmtUsd } from "@/lib/data";
 
 const ALLOCATION_COLORS = [
   "var(--color-accent-700)",
@@ -89,9 +86,14 @@ export default function TerminalApp() {
   const live = useLivePortfolio();
   const haikuData = useHaikuPortfolio();
 
-  // Merge Haiku MCP data into portfolio value when available
-  const haikuExtraUsd = haikuData.totalBalancesUsd + haikuData.totalPositionsUsd;
-  const displayPortfolioValue = isConnected ? live.netUsd + haikuExtraUsd : PORTFOLIO_VALUE;
+  // Haiku reads the same wallet balances (LI.FI) and Aave positions (Aave MCP)
+  // that useLivePortfolio reads on-chain, so only its positions in protocols
+  // the live reader doesn't track are added — never its balances.
+  const haikuExtraPositions = haikuData.positions.filter(
+    (p) => p.depositedUsd > 1 && !LIVE_TRACKED_PROTOCOLS.test(p.protocol),
+  );
+  const haikuExtraUsd = haikuExtraPositions.reduce((sum, p) => sum + p.depositedUsd, 0);
+  const portfolioValue = isConnected ? live.netUsd + haikuExtraUsd : null;
 
   // Build live positions from on-chain data + Haiku MCP enrichment
   const livePositions = [
@@ -101,16 +103,14 @@ export default function TerminalApp() {
       ...(p.debtUsd > 0 ? [{ asset: `${p.protocol} borrow`, venue: p.chain, amount: "-" + fmtUsd(p.debtUsd) }] : []),
     ]),
     // Haiku MCP: DeFi positions from protocols not tracked by wagmi multicall
-    ...haikuData.positions
-      .filter((p) => p.depositedUsd > 1)
-      .map((p) => ({
+    ...haikuExtraPositions.map((p) => ({
         asset: `${p.protocol} ${p.type}`,
         venue: `${p.asset} · chain ${p.chainId}`,
         amount: fmtUsd(p.depositedUsd),
       })),
   ];
-  const displayPositions = isConnected ? livePositions : POSITIONS;
-  const displayAllocation = isConnected ? buildLiveAllocation(live) : ALLOCATION;
+  const displayPositions = isConnected ? livePositions : [];
+  const displayAllocation = isConnected ? buildLiveAllocation(live) : [];
 
   // Auto-scroll to bottom when thread changes or analysis starts
   useEffect(() => {
@@ -190,7 +190,7 @@ export default function TerminalApp() {
         </span>
         <WalletConnectButton />
         <span className="tag tag-neutral" style={{ fontVariantNumeric: "tabular-nums" }}>
-          {fmtUsd(displayPortfolioValue)}
+          {portfolioValue === null ? "—" : fmtUsd(portfolioValue)}
         </span>
       </div>
 
@@ -200,7 +200,7 @@ export default function TerminalApp() {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
             <h6 style={{ color: "var(--color-accent)", margin: 0 }}>Portfolio</h6>
             <span className="text-muted" style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>
-              {isConnected ? "Live" : "Example"}
+              {isConnected ? "Live" : "Not connected"}
             </span>
           </div>
           <p
@@ -211,8 +211,13 @@ export default function TerminalApp() {
               fontVariantNumeric: "tabular-nums",
             }}
           >
-            {fmtUsd(displayPortfolioValue)}
+            {portfolioValue === null ? "—" : fmtUsd(portfolioValue)}
           </p>
+          {!isConnected && (
+            <p className="text-muted" style={{ fontSize: 12, margin: "0 0 var(--space-3)" }}>
+              Connect a wallet to see your balances and positions across {SUPPORTED_CHAINS.length} chains.
+            </p>
+          )}
 
           {displayAllocation.length > 0 && (
             <>
