@@ -2,9 +2,10 @@
 
 import { useAccount, useBalance, useSimulateContract } from "wagmi";
 import { findToken, DEFAULT_CHAIN_ID } from "@/lib/assetMap";
-import { CHAIN_LABEL, STETH_ADDRESS } from "@/lib/onchain";
+import { CHAIN_LABEL, STETH_ADDRESS, SUPPORTED_CHAINS } from "@/lib/onchain";
 import type { Order } from "@/lib/execution";
 import type { TradeLeg } from "@/lib/tradePlan";
+import { legChainId } from "@/lib/chains";
 import { useIndexedPositions } from "@/hooks/useIndexedPositions";
 import { useVaultRisk } from "@/hooks/useVaultRisk";
 import { MIN_MORPHO_RISK_SCORE } from "@/lib/integrations/morpho";
@@ -25,7 +26,7 @@ import { NotWired, OrderRow, RISK_TIER_COLOR } from "@/components/thread/shared"
  */
 export function SwapExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry[] }) {
   const { chain } = useAccount();
-  const chainId = chain?.id ?? DEFAULT_CHAIN_ID;
+  const chainId = legChainId(leg, chain?.id) ?? DEFAULT_CHAIN_ID;
 
   const parsed = parseSwapAsset(leg.asset);
   const tokenIn = parsed ? findToken(parsed.from, chainId) : undefined;
@@ -49,7 +50,7 @@ export function SwapExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: Pri
       tokenIn && tokenOut && fee !== undefined && inQuote
         ? [{ tokenIn: tokenIn.address, tokenOut: tokenOut.address, amountIn: inQuote.amountBase, fee, sqrtPriceLimitX96: BigInt(0) }]
         : undefined,
-    chainId,
+    chainId: chainId as (typeof SUPPORTED_CHAINS)[number]["id"],
     query: { enabled: quoteEnabled },
   });
 
@@ -121,7 +122,7 @@ export function SwapExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: Pri
  */
 export function MorphoExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry[] }) {
   const { chain } = useAccount();
-  const chainId = chain?.id ?? DEFAULT_CHAIN_ID;
+  const chainId = legChainId(leg, chain?.id) ?? DEFAULT_CHAIN_ID;
   const chainName = CHAIN_LABEL[chainId];
   const symbol = (leg.asset || "").trim();
 
@@ -203,7 +204,7 @@ export function MorphoExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
  */
 export function MorphoWithdrawButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry[] }) {
   const { chain, address } = useAccount();
-  const chainId = chain?.id ?? DEFAULT_CHAIN_ID;
+  const chainId = legChainId(leg, chain?.id) ?? DEFAULT_CHAIN_ID;
   const symbol = (leg.asset || "").trim();
 
   const { vaults, loading } = useIndexedPositions(address, !!address);
@@ -271,7 +272,7 @@ export function MorphoWithdrawButton({ leg, prices }: { leg: TradeLeg; prices?: 
  */
 export function LidoUnstakeButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry[] }) {
   const { chain, address } = useAccount();
-  const chainId = chain?.id ?? DEFAULT_CHAIN_ID;
+  const chainId = legChainId(leg, chain?.id) ?? DEFAULT_CHAIN_ID;
   const { data: balance, isLoading } = useBalance({
     address,
     token: STETH_ADDRESS,

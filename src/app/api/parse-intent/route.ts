@@ -193,7 +193,7 @@ leverage: only for Long/Short legs. Integer.
 note: MUST include the exact live rate from data (e.g. "Currently 4.23% APY", "Funding +12.3% annualized").
 
 ## Chain of each leg (REQUIRED)
-Every leg MUST set "chain" to the chain where that leg executes, using one of: Ethereum, Base, Arbitrum, Optimism, Polygon, Avalanche, BNB Chain, Gnosis, Scroll, zkSync, Linea, Mantle, Metis, Fantom, Sonic, Celo. If the user names a chain, use it. For a Bridge leg, "chain" is the SOURCE chain. The transaction is built on exactly this chain, so it must match the strategy name and summary.
+Every leg MUST set "chain" to the chain where that leg executes, using one of: Ethereum, Base, Arbitrum, Optimism, Polygon, Avalanche, BNB Chain, Gnosis, Scroll, zkSync, Linea, Mantle, Metis, Fantom, Sonic, Celo. If the user names a chain, use it. For a Bridge leg, "chain" is the SOURCE chain and "toChain" (REQUIRED on Bridge legs) is the DESTINATION chain, e.g. { "side": "Bridge", "asset": "USDC", "protocol": "deBridge", "chain": "Arbitrum", "toChain": "Base", "sizeUsd": 100 }. The transaction is built on exactly this chain, so it must match the strategy name and summary.
 
 ## Output Format
 

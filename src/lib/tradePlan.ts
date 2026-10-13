@@ -44,6 +44,8 @@ export interface TradeLeg {
   note?: string;
   /** Chain this leg executes on, as named by the plan (e.g. "Base"). Unset → the wallet's current chain. */
   chain?: string;
+  /** Destination chain of a Bridge leg (its `chain` is the source). */
+  toChain?: string;
   /** Recipient address, only set for a "transfer" leg (parsed from the thesis text itself). */
   to?: string;
   /**
