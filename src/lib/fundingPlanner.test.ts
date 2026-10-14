@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fundPlan, spentSymbol, type FundingDeps } from "@/lib/fundingPlanner";
+import { fundPlan, producedToken, spentSymbol, type FundingDeps } from "@/lib/fundingPlanner";
 import type { TradeLeg, TradePlan } from "@/lib/tradePlan";
 
 const plan = (...legs: TradeLeg[]): TradePlan => ({ intent: "unknown", legs, summary: "" });
@@ -26,7 +26,36 @@ describe("fundingPlanner — spentSymbol", () => {
   });
 });
 
+describe("fundingPlanner — producedToken", () => {
+  it("names what a leg leaves in the wallet", () => {
+    expect(producedToken({ side: "Borrow", asset: "ETH", protocol: "Aave" }, 8453)).toEqual({ symbol: "WETH", keep: 1 });
+    expect(producedToken({ side: "Swap", asset: "WETH → wstETH", protocol: "Uniswap" }, 8453)?.symbol).toBe("WSTETH");
+    expect(producedToken({ side: "Stake", asset: "stETH", protocol: "Lido" }, 1)?.symbol).toBe("STETH");
+    expect(producedToken({ side: "Supply", asset: "USDC", protocol: "Aave" }, 8453)).toBeNull();
+  });
+});
+
 describe("fundingPlanner — fundPlan", () => {
+  it("funds later legs from what earlier legs produce (borrow-hedged ETH yield)", async () => {
+    const p = plan(
+      supply("Base", 1000),
+      { side: "Borrow", asset: "WETH", protocol: "Aave", chain: "Base", sizeUsd: 450 },
+      { side: "Swap", asset: "WETH → wstETH", protocol: "Uniswap", chain: "Base", sizeUsd: 450 },
+      supply("Base", 440, "Aave", "wstETH"),
+    );
+    const out = await fundPlan(p, deps([{ symbol: "USDC", chain: "Base", usd: 1200 }]));
+    expect(out).toBe(p);
+  });
+
+  it("counts the stETH from a Lido stake for the EigenLayer restake after it", async () => {
+    const p = plan(
+      { side: "Stake", asset: "stETH", protocol: "Lido", chain: "Ethereum", sizeUsd: 2000 },
+      { side: "Restake", asset: "stETH", protocol: "EigenLayer", chain: "Ethereum", sizeUsd: 2000 },
+    );
+    const out = await fundPlan(p, deps([{ symbol: "ETH", chain: "Ethereum", usd: 2500 }]));
+    expect(out).toBe(p);
+  });
+
   it("leaves a leg the wallet can already fund", async () => {
     const p = plan(supply("Base", 100));
     const out = await fundPlan(p, deps([{ symbol: "USDC", chain: "Base", usd: 150 }]));

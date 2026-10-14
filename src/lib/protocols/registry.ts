@@ -39,6 +39,7 @@ export const PROTOCOLS: Record<string, ProtocolInfo> = {
   "sky-lending": { name: "Sky", category: "savings", coverage: "vault" },
   "spark-savings": { name: "Spark Savings", category: "savings", coverage: "vault" },
   "ethena-usde": { name: "Ethena", category: "savings", coverage: "vault" },
+  "yearn-finance": { name: "Yearn", category: "savings", coverage: "vault" },
   // Watched: live rates for comparison only
   maple: { name: "Maple", category: "credit", coverage: "watch" },
   "ether.fi-stake": { name: "ether.fi", category: "staking", coverage: "watch" },
@@ -50,7 +51,6 @@ export const PROTOCOLS: Record<string, ProtocolInfo> = {
   "meth-protocol": { name: "Mantle mETH", category: "staking", coverage: "watch" },
   "liquid-collective": { name: "Liquid Collective", category: "staking", coverage: "watch" },
   "aave-v4": { name: "Aave v4", category: "lending", coverage: "watch" },
-  "yearn-finance": { name: "Yearn", category: "savings", coverage: "watch" },
   "curve-llamalend": { name: "Curve LlamaLend", category: "lending", coverage: "watch" },
   "venus-core-pool": { name: "Venus", category: "lending", coverage: "watch" },
   "lista-lending": { name: "Lista", category: "lending", coverage: "watch" },

@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { parseOpportunities, type Opportunity } from "@/lib/protocols/opportunities";
-import { fetchAaveYieldSummary } from "@/lib/mcp/aave";
+import { aaveYieldSummary, fetchAaveReservesByChain, type AaveReserve } from "@/lib/mcp/aave";
+import { neutralCarryRows, neutralCarrySummary, type CarryRow } from "@/lib/neutralCarry";
+import { findToken } from "@/lib/assetMap";
+import { UNISWAP_SWAP_ROUTER02_BY_CHAIN } from "@/lib/integrations/uniswap";
 import { ACTIVE_CHAIN_IDS, CHAIN_LABEL } from "@/lib/onchain";
 import { PENDLE_CHAINS, fetchPendleMarkets, type PendleMarket } from "@/lib/integrations/pendle";
 import * as haiku from "@/lib/mcp/providers/haiku";
@@ -495,17 +498,47 @@ function opportunitiesSummary(pools: unknown[]): string {
   return lines.join("\n");
 }
 
+/* ---------- Beta-neutral carry (spot only) ---------- */
+
+/** DefiLlama staking pool (project + symbol on Ethereum) behind each LST's yield. */
+const LST_STAKING_POOL: Record<string, { project: string; symbol: string }> = {
+  WSTETH: { project: "lido", symbol: "STETH" },
+  WEETH: { project: "ether.fi-stake", symbol: "WEETH" },
+  RETH: { project: "rocket-pool", symbol: "RETH" },
+  CBETH: { project: "coinbase-wrapped-staked-eth", symbol: "CBETH" },
+};
+
+function carryRows(perChain: { chainId: number; reserves: AaveReserve[] }[], pools: DefiLlamaPool[]): CarryRow[] {
+  const staking: Record<string, number> = {};
+  for (const [lst, src] of Object.entries(LST_STAKING_POOL)) {
+    const pool = pools.find((p) => p.project === src.project && p.chain === "Ethereum" && (p.symbol ?? "").toUpperCase() === src.symbol);
+    const apy = pool?.apyBase ?? pool?.apy;
+    if (typeof apy === "number" && Number.isFinite(apy) && apy > 0 && apy < 15) staking[lst] = apy;
+  }
+  const rows: CarryRow[] = [];
+  for (const { chainId, reserves } of perChain) {
+    // Every leg must be executable here: Aave, a tracked LST and a Uniswap router.
+    if (!UNISWAP_SWAP_ROUTER02_BY_CHAIN[chainId] || !findToken("WETH", chainId)) continue;
+    const swappable = ["wstETH", "weETH", "rETH", "cbETH"].filter((s) => findToken(s, chainId)?.symbol.toUpperCase() === s.toUpperCase());
+    const carry = reserves.map((r) => ({ symbol: r.symbol, supplyApy: r.supplyAPY * 100, borrowApy: r.borrowAPY * 100, totalSupplyUsd: r.totalSupply }));
+    rows.push(...neutralCarryRows(CHAIN_LABEL[chainId] ?? String(chainId), carry, staking, swappable));
+  }
+  // Only the best chain + LST: given one row per chain, the planner filled all
+  // three strategies with the same carry on three chains.
+  return rows.sort((a, b) => b.netApy - a.netApy).slice(0, 1);
+}
+
 /* ---------- Handler ---------- */
 
 export async function GET() {
   // Fetch ALL sources in parallel — each is independently null-safe
-  const [defiLlama, funding, hlp, lighterVaults, philidor, aaveMcp, haikuYields, pendleMarkets, morphoVaults] = await Promise.all([
+  const [defiLlama, funding, hlp, lighterVaults, philidor, aaveReserves, haikuYields, pendleMarkets, morphoVaults] = await Promise.all([
     fetchDefiLlama(),
     fetchFundingRates(),
     fetchHlpVault(),
     fetchLighterVaults(),
     fetchPhilidorVaults(),
-    fetchAaveYieldSummary([...ACTIVE_CHAIN_IDS]).catch(() => ""),
+    fetchAaveReservesByChain([...ACTIVE_CHAIN_IDS]).catch(() => [] as { chainId: number; reserves: AaveReserve[] }[]),
     haiku.fetchYieldOpportunities({ minApy: 1 }).catch(() => []),
     Promise.all(PENDLE_CHAINS.map((c) => fetchPendleMarkets(c))).then((all) => all.flat()),
     fetchMorphoExecutableVaults(),
@@ -545,8 +578,14 @@ export async function GET() {
     summary: "",
   };
   // Build summary with optional Aave MCP enrichment appended
+  const aaveMcp = aaveYieldSummary(aaveReserves);
   ctx.summary =
-    buildSummary(ctx) + morphoVaults + opportunitiesSummary(defiLlama.pools) + pendleSummary(pendleMarkets) + (aaveMcp ? `\n${aaveMcp}` : "");
+    buildSummary(ctx) +
+    morphoVaults +
+    opportunitiesSummary(defiLlama.pools) +
+    pendleSummary(pendleMarkets) +
+    neutralCarrySummary(carryRows(aaveReserves, defiLlama.pools)) +
+    (aaveMcp ? `\n${aaveMcp}` : "");
 
   return NextResponse.json(ctx);
 }

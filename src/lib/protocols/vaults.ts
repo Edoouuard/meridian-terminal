@@ -14,7 +14,7 @@ import type { Address } from "viem";
 
 export interface VaultEntry {
   /** Protocol name as the planner and the UI write it. */
-  protocol: "Fluid" | "Sky" | "Spark Savings" | "Ethena";
+  protocol: "Fluid" | "Sky" | "Spark Savings" | "Ethena" | "Yearn";
   /** DefiLlama project slug, for live rates. */
   llamaProject: string;
   /** DefiLlama pool symbol for this vault (the underlying for Fluid/Spark, the share token for sUSDS/sUSDe). */
@@ -45,14 +45,23 @@ export const VAULTS: VaultEntry[] = [
   // Sky Savings Rate (sUSDS) — USDS earns the Sky Savings Rate.
   { protocol: "Sky", llamaProject: "sky-lending", llamaSymbol: "SUSDS", chainId: 1, vault: "0xa3931d71877C0E7a3148CB7Eb4463524FEc27fbD", shareSymbol: "sUSDS", assetSymbol: "USDS", assetAddress: "0xdC035D45d973E3EC169d2276DDab16f1e407384F", assetDecimals: 18, exit: "Instant", instantWithdraw: true },
 
-  // Spark Savings sUSDC — USDC routed into the Sky Savings Rate by Spark.
-  { protocol: "Spark Savings", llamaProject: "spark-savings", llamaSymbol: "USDC", chainId: 1, vault: "0xBc65ad17c5C0a2A4D159fa5a503f4992c7B545FE", shareSymbol: "sUSDC", assetSymbol: "USDC", assetAddress: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", assetDecimals: 6, exit: "Instant", instantWithdraw: true },
+  // Spark Savings v2 on Ethereum (spUSDC, spUSDT, spETH) — the vaults DefiLlama's
+  // spark-savings Ethereum rows track (TVL matched on-chain: $307M, $740M, 20k ETH).
+  { protocol: "Spark Savings", llamaProject: "spark-savings", llamaSymbol: "USDC", chainId: 1, vault: "0x28B3a8fb53B741A8Fd78c0fb9A6B2393d896a43d", shareSymbol: "spUSDC", assetSymbol: "USDC", assetAddress: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", assetDecimals: 6, exit: "Instant (vault liquidity permitting)", instantWithdraw: true },
+  { protocol: "Spark Savings", llamaProject: "spark-savings", llamaSymbol: "USDT", chainId: 1, vault: "0xe2e7a17dFf93280dec073C995595155283e3C372", shareSymbol: "spUSDT", assetSymbol: "USDT", assetAddress: "0xdAC17F958D2ee523a2206206994597C13D831ec7", assetDecimals: 6, exit: "Instant (vault liquidity permitting)", instantWithdraw: true },
+  { protocol: "Spark Savings", llamaProject: "spark-savings", llamaSymbol: "ETH", chainId: 1, vault: "0xfE6eb3b609a7C8352A241f7F3A21CEA4e9209B8f", shareSymbol: "spETH", assetSymbol: "WETH", assetAddress: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", assetDecimals: 18, exit: "Instant (vault liquidity permitting)", instantWithdraw: true },
   // On Base and Arbitrum DefiLlama lists Spark Savings under USDS; sUSDC earns the same Sky Savings Rate.
   { protocol: "Spark Savings", llamaProject: "spark-savings", llamaSymbol: "USDS", chainId: 8453, vault: "0x3128a0F7f0ea68E7B7c9B00AFa7E41045828e858", shareSymbol: "sUSDC", assetSymbol: "USDC", assetAddress: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", assetDecimals: 6, exit: "Instant", instantWithdraw: true },
   { protocol: "Spark Savings", llamaProject: "spark-savings", llamaSymbol: "USDS", chainId: 42161, vault: "0x940098b108fB7D0a7E374f6eDED7760787464609", shareSymbol: "sUSDC", assetSymbol: "USDC", assetAddress: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", assetDecimals: 6, exit: "Instant", instantWithdraw: true },
 
   // Ethena staked USDe — deposits are open; withdrawals go through a cooldown.
   { protocol: "Ethena", llamaProject: "ethena-usde", llamaSymbol: "SUSDE", chainId: 1, vault: "0x9D39A5DE30e57443BfF2A8307A4256c8797A3497", shareSymbol: "sUSDe", assetSymbol: "USDe", assetAddress: "0x4c9EDD5852cd905f086C759E8383e09bff1E68B3", assetDecimals: 18, exit: "7-day cooldown (or sell sUSDe on market)", instantWithdraw: false },
+
+  // Yearn v3 multi-strategy vaults on Ethereum (TVL matched on-chain to DefiLlama's
+  // deepest yearn-finance row per asset: $19M USDC, 7.3k WETH, $9.8M USDS).
+  { protocol: "Yearn", llamaProject: "yearn-finance", llamaSymbol: "USDC", chainId: 1, vault: "0xBe53A109B494E5c9f97b9Cd39Fe969BE68BF6204", shareSymbol: "yvUSDC-1", assetSymbol: "USDC", assetAddress: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48", assetDecimals: 6, exit: "Instant (vault liquidity permitting)", instantWithdraw: true },
+  { protocol: "Yearn", llamaProject: "yearn-finance", llamaSymbol: "WETH", chainId: 1, vault: "0xc56413869c6CDf96496f2b1eF801fEDBdFA7dDB0", shareSymbol: "yvWETH-1", assetSymbol: "WETH", assetAddress: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", assetDecimals: 18, exit: "Instant (vault liquidity permitting)", instantWithdraw: true },
+  { protocol: "Yearn", llamaProject: "yearn-finance", llamaSymbol: "USDS", chainId: 1, vault: "0x182863131F9a4630fF9E27830d945B1413e347E8", shareSymbol: "yvUSDS-1", assetSymbol: "USDS", assetAddress: "0xdC035D45d973E3EC169d2276DDab16f1e407384F", assetDecimals: 18, exit: "Instant (vault liquidity permitting)", instantWithdraw: true },
 ];
 
 const norm = (s: string) => s.trim().toLowerCase().replace(/[\s_-]+/g, " ");
@@ -67,6 +76,9 @@ const PROTOCOL_ALIASES: Record<string, VaultEntry["protocol"]> = {
   ssr: "Sky",
   "spark savings": "Spark Savings",
   ethena: "Ethena",
+  yearn: "Yearn",
+  "yearn v3": "Yearn",
+  "yearn finance": "Yearn",
 };
 
 export function vaultProtocolFor(protocol: string | undefined): VaultEntry["protocol"] | undefined {
@@ -80,7 +92,9 @@ export function vaultProtocolFor(protocol: string | undefined): VaultEntry["prot
 export function findVault(protocol: string | undefined, asset: string, chainId: number): VaultEntry | undefined {
   const p = vaultProtocolFor(protocol);
   if (!p) return undefined;
-  const a = asset.trim().toLowerCase().replace(/^pt[-\s]/, "");
+  const raw = asset.trim().toLowerCase().replace(/^pt[-\s]/, "");
+  // ETH vaults take WETH: "Supply ETH on Yearn" is the WETH vault.
+  const a = raw === "eth" ? "weth" : raw;
   return VAULTS.find(
     (v) => v.protocol === p && v.chainId === chainId && (v.assetSymbol.toLowerCase() === a || v.shareSymbol.toLowerCase() === a),
   ) ?? VAULTS.find((v) => v.protocol === p && v.chainId === chainId && VAULTS.filter((x) => x.protocol === p && x.chainId === chainId).length === 1);

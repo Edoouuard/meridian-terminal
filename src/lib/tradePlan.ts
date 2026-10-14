@@ -502,11 +502,14 @@ export function parseThesis(rawText: string): TradePlan {
       // isn't a short-venue override — that would collapse both legs onto one
       // venue and defeat the point of a cross-venue beta-neutral pair.
       const shortVenue = protocol && protocol !== "Hyperliquid" ? protocol : "Extended";
+      // "beta neutral with my USDC": the stablecoin is the funding, not the
+      // market — there's no USDC perp. Pair on the volatile asset named, else ETH.
+      const market = assets.find((a) => !/^(USDC|USDT|DAI)$/.test(a)) ?? "ETH";
       legs = [
-        { side: "Long", asset: `${base} PERP`, protocol: "Hyperliquid", sizeUsd: size, leverage: lev, note: "Collect points" },
-        { side: "Short", asset: `${base} PERP`, protocol: shortVenue, sizeUsd: size, leverage: lev },
+        { side: "Long", asset: `${market} PERP`, protocol: "Hyperliquid", sizeUsd: size, leverage: lev, note: "Collect points" },
+        { side: "Short", asset: `${market} PERP`, protocol: shortVenue, sizeUsd: size, leverage: lev },
       ];
-      summary = `Farm ${base} points with a long on Hyperliquid paired against an offsetting short on ${shortVenue} — net delta near zero while keeping the volume eligible for points.`;
+      summary = `Farm ${market} points with a long on Hyperliquid paired against an offsetting short on ${shortVenue} — net delta near zero while keeping the volume eligible for points.`;
       break;
     }
     case "directional": {

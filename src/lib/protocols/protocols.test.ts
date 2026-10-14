@@ -31,6 +31,11 @@ describe("vault registry", () => {
     expect(findVault("Sky", "sUSDS", 1)?.shareSymbol).toBe("sUSDS");
     expect(findVault("Spark Savings", "USDC", 42161)?.shareSymbol).toBe("sUSDC");
     expect(findVault("Ethena", "USDe", 1)?.shareSymbol).toBe("sUSDe");
+    expect(findVault("Spark Savings", "USDT", 1)?.shareSymbol).toBe("spUSDT");
+    expect(findVault("Spark Savings", "ETH", 1)?.shareSymbol).toBe("spETH");
+    expect(findVault("Yearn", "USDC", 1)?.shareSymbol).toBe("yvUSDC-1");
+    expect(findVault("yearn v3", "ETH", 1)?.shareSymbol).toBe("yvWETH-1");
+    expect(findVault("Yearn", "USDC", 8453)).toBeUndefined();
     expect(findVault("Fluid", "DAI", 1)).toBeUndefined();
     expect(findVault("Aave", "USDC", 1)).toBeUndefined();
   });

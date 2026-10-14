@@ -335,3 +335,10 @@ describe("tradePlan — transfer intent (send X to an address)", () => {
     expect(planToThreadType(parseThesis(`send 1 ETH to ${ADDR}`))).toBe("custom");
   });
 });
+describe("parseThesis — beta-neutral funded with a stablecoin", () => {
+  it("pairs the perps on ETH, never on the stablecoin", () => {
+    const plan = parseThesis("beta neutral avec mes USDC");
+    expect(plan.intent).toBe("betaNeutral");
+    expect(plan.legs.map((l) => l.asset)).toEqual(["ETH PERP", "ETH PERP"]);
+  });
+});
