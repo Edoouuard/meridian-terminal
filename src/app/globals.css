@@ -1392,8 +1392,38 @@ body {
 /* ── Holdings ──────────────────────────────────────────────────────────── */
 .portfolio-day { margin: -4px 0 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
 .holdings { display: flex; flex-direction: column; gap: 6px; }
-.holdings__bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--color-divider); }
-.holdings__bar > div { height: 100%; transition: width 0.4s ease; }
+.alloc { display: flex; flex-direction: column; gap: 8px; padding-bottom: 6px; }
+.alloc__tabs { display: inline-flex; align-self: flex-start; gap: 2px; padding: 2px; border-radius: 8px; background: var(--color-surface); }
+.alloc__tabs button {
+  border: none;
+  background: transparent;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--color-neutral-500);
+  cursor: pointer;
+}
+.alloc__tabs button.is-on { background: var(--color-bg); color: var(--color-text); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
+.alloc__body { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.alloc__donut { width: 132px; height: 132px; flex: none; }
+.alloc__center-value { font-size: 17px; font-weight: 600; fill: var(--color-text); font-variant-numeric: tabular-nums; }
+.alloc__center-label { font-size: 10px; fill: var(--color-neutral-500); }
+.alloc__legend { list-style: none; margin: 0; padding: 0; flex: 1; min-width: 170px; display: flex; flex-direction: column; gap: 2px; }
+.alloc__legend li {
+  display: grid;
+  grid-template-columns: 10px 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: default;
+}
+.alloc__legend li.is-hover { background: var(--color-surface); }
+.alloc__swatch { width: 10px; height: 10px; border-radius: 3px; }
+.alloc__name { color: var(--color-text); line-height: 1.25; }
+.alloc__pct { color: var(--color-neutral-500); font-variant-numeric: tabular-nums; }
+.alloc__usd { color: var(--color-text); font-variant-numeric: tabular-nums; min-width: 64px; text-align: right; }
 .holdings__group { border-top: 1px solid var(--color-divider); padding-top: 4px; }
 .holdings__group:first-of-type { border-top: none; }
 .holdings__head {

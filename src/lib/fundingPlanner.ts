@@ -74,7 +74,7 @@ export interface FundingDeps {
 }
 
 /** Sides that spend a wallet token (the rest — borrow, withdraw, perps — don't need one up front). */
-const SPENDING_SIDES = new Set(["supply", "stake", "swap", "buy", "repay", "transfer", "bridge", "restake"]);
+const SPENDING_SIDES = new Set(["supply", "stake", "swap", "buy", "repay", "transfer", "bridge", "restake", "deposit"]);
 
 const key = (chainId: number, symbol: string) => `${chainId}:${symbol.toUpperCase()}`;
 const round2Down = (x: number) => Math.floor(x * 100) / 100;
@@ -316,7 +316,7 @@ export async function fundPlan(plan: TradePlan, deps: FundingDeps): Promise<Trad
     for (const [k, usd] of balances) {
       const [idStr, sym] = k.split(":");
       const id = Number(idStr);
-      if (sym === symbol || !STABLES.has(sym) || usd < DUST_USD) continue;
+      if (sym === symbol || !STABLES.has(sym) || usd < DUST_USD || !findToken(sym, id)) continue;
       if (id === targetChainId) {
         if (UNISWAP_SWAP_ROUTER02_BY_CHAIN[id] && (!sameChain || usd > sameChain.usd)) sameChain = { chainId: id, symbol: sym, usd };
       } else if (isRoutingSupportedChain(id) && isRoutingSupportedChain(targetChainId) && (!remote || usd > remote.usd)) {
@@ -332,6 +332,8 @@ export async function fundPlan(plan: TradePlan, deps: FundingDeps): Promise<Trad
       const [idStr, sym] = k.split(":");
       const id = Number(idStr);
       if (sym !== symbol || id === targetChainId || usd < DUST_USD || !isRoutingSupportedChain(id)) continue;
+      // Only a token Meridian tracks on that chain can be bridged from it.
+      if (!findToken(symbol, id)) continue;
       if (!best || usd > best.usd) best = { chainId: id, usd };
     }
     return best;

@@ -34,6 +34,8 @@ export interface Holding {
   change24h?: number;
   chains: string[];
   venues: string[];
+  /** USD held on each chain. */
+  usdByChain: Record<string, number>;
 }
 
 export interface PortfolioView {
@@ -82,9 +84,10 @@ export function buildPortfolioView(
     const group = holdingGroup(a);
     // Staked HYPE and spot HYPE are different holdings even with the same symbol.
     const key = `${group}|${a.symbol.toUpperCase()}`;
-    const h = byKey.get(key) ?? { symbol: a.symbol, group, balance: 0, usd: 0, chains: [], venues: [] };
+    const h = byKey.get(key) ?? { symbol: a.symbol, group, balance: 0, usd: 0, chains: [], venues: [], usdByChain: {} };
     h.balance += a.balance;
     h.usd += a.usd;
+    h.usdByChain[a.chain] = (h.usdByChain[a.chain] ?? 0) + a.usd;
     if (!h.chains.includes(a.chain)) h.chains.push(a.chain);
     if (!h.venues.includes(a.venue)) h.venues.push(a.venue);
     byKey.set(key, h);
@@ -147,4 +150,41 @@ export function dayChangeUsd(view: PortfolioView): { usd: number; pct: number } 
   }
   if (!any || base <= 0) return null;
   return { usd: change, pct: (change / view.totalUsd) * 100 };
+}
+
+export interface Slice {
+  key: string;
+  label: string;
+  usd: number;
+  /** Share of the positive total, 0–1. */
+  share: number;
+}
+
+/**
+ * Part-to-whole slices for the allocation donut, biggest first: by holding
+ * type (the view's groups) or by chain (wallet + lending, net). Negative or
+ * dust values are left out; past `max` slices, the rest fold into "Other" so
+ * a colour is never cycled.
+ */
+export function allocationSlices(view: PortfolioView, by: "type" | "chain", max = 5): Slice[] {
+  const raw: { key: string; label: string; usd: number }[] = [];
+  if (by === "type") {
+    for (const g of view.groups) raw.push({ key: g.group, label: g.label, usd: g.usd });
+  } else {
+    const byChain = new Map<string, number>();
+    for (const g of view.groups) for (const h of g.holdings) {
+      for (const [c, usd] of Object.entries(h.usdByChain)) byChain.set(c, (byChain.get(c) ?? 0) + usd);
+    }
+    for (const l of view.lending) byChain.set(l.chain, (byChain.get(l.chain) ?? 0) + l.collateralUsd - l.debtUsd);
+    for (const [chain, usd] of byChain) raw.push({ key: chain, label: chain, usd });
+  }
+  const positive = raw.filter((r) => r.usd > 0.5).sort((a, b) => b.usd - a.usd);
+  const total = positive.reduce((s, r) => s + r.usd, 0);
+  if (total <= 0) return [];
+  // By type the groups are already few and have fixed colours; by chain, fold the tail.
+  const kept = by === "chain" && positive.length > max ? positive.slice(0, max - 1) : positive;
+  const rest = by === "chain" && positive.length > max ? positive.slice(max - 1).reduce((s, r) => s + r.usd, 0) : 0;
+  const slices = kept.map((r) => ({ ...r, share: r.usd / total }));
+  if (rest > 0) slices.push({ key: "other", label: "Other", usd: rest, share: rest / total });
+  return slices;
 }

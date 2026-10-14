@@ -22,7 +22,7 @@ function fmtPx(n: number): string {
 /**
  * Hyperliquid account panel — reads the connected wallet's Hyperliquid account
  * (account value, positions, unrealised PnL) and lets the user CLOSE a position
- * (a signed reduce-only market order). TESTNET by default; nothing auto-runs.
+ * (a signed reduce-only market order). Mainnet by default (see useHyperliquidEnv); nothing auto-runs.
  */
 export function HyperliquidPanel() {
   const { address, isConnected } = useAccount();

@@ -166,3 +166,18 @@ describe("fundingPlanner — fundPlan", () => {
     expect(spentSymbol(out.legs[0], 42161)).toBe("USDT");
   });
 });
+
+describe("fundingPlanner — Hyperliquid deposit and untracked sources", () => {
+  it("funds a Hyperliquid deposit like any other spend", async () => {
+    const out = await fundPlan(
+      plan({ side: "Deposit", asset: "USDC", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 50 }),
+      deps([{ symbol: "USDC", chain: "Base", usd: 200 }]),
+    );
+    expect(out.legs[0]).toMatchObject({ side: "Bridge", chain: "Base", toChain: "Arbitrum" });
+  });
+
+  it("never bridges from a chain where the token isn't tracked (USDC on HyperEVM)", async () => {
+    const out = await fundPlan(plan(supply("Arbitrum", 50)), deps([{ symbol: "USDC", chain: "HyperEVM", usd: 200 }]));
+    expect(out.legs.some((l) => l.side === "Bridge")).toBe(false);
+  });
+});

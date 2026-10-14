@@ -8,12 +8,14 @@ import { useSyncExternalStore } from "react";
  * point into Hyperliquid execution (HyperliquidPanel's close-position flow,
  * ThreadCard's PerpExecuteButton for opening a new position from a thesis)
  * agrees on the same environment, instead of each one defaulting/hardcoding
- * its own. Defaults to testnet — switching to mainnet is always an explicit
- * user action via HyperliquidPanel's toggle.
+ * its own. Defaults to mainnet: a strategy deposits real USDC into the user's
+ * Hyperliquid account, so its hedge has to open there too (a testnet short
+ * hedges nothing). Testnet stays one click away in HyperliquidPanel, and
+ * every mainnet order goes through a "real funds" confirmation.
  */
 export type HlEnv = "testnet" | "mainnet";
 
-let sharedHlEnv: HlEnv = "testnet";
+let sharedHlEnv: HlEnv = "mainnet";
 const listeners = new Set<() => void>();
 
 export function setSharedHlEnv(env: HlEnv): void {

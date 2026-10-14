@@ -104,3 +104,25 @@ describe("strategyIntegrity — funding moves", () => {
     expect(dropFundingMoves(bridgeOnly)).toEqual(bridgeOnly);
   });
 });
+
+describe("strategyIntegrity — swaps where Meridian has no DEX", () => {
+  it("turns a swap on HyperEVM into a swapping bridge to where the strategy goes next", () => {
+    const legs: LLMLeg[] = [
+      { side: "Swap", asset: "UETH → USDC", protocol: "Uniswap", chain: "HyperEVM", sizeUsd: 48 },
+      { side: "Swap", asset: "USDC → wstETH", protocol: "Uniswap", chain: "Arbitrum", sizeUsd: 25 },
+    ];
+    const [first, second] = validateAndFixStrategy({ name: "Yield", risk: "moderate", variantNote: "", summary: "", legs }).legs;
+    expect(first).toMatchObject({ side: "Bridge", fromAsset: "UETH", asset: "USDC", chain: "HyperEVM", toChain: "Arbitrum", sizeUsd: 48 });
+    expect(second).toEqual(legs[1]);
+  });
+
+  it("counts UETH as ETH exposure, so a UETH holder's short is a real hedge", () => {
+    const out = validateAndFixStrategy(
+      strat("Neutral ETH", [
+        { side: "Supply", asset: "UETH", protocol: "Wallet", chain: "HyperEVM", sizeUsd: 48 },
+        { side: "Short", asset: "ETH PERP", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 48, leverage: 1 },
+      ]),
+    );
+    expect(out.legs.some((l) => l.side === "Swap")).toBe(false);
+  });
+});

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildPortfolioView, dayChangeUsd, fmtAmount, fmtPrice, holdingGroup } from "@/lib/portfolioView";
+import { allocationSlices, buildPortfolioView, dayChangeUsd, fmtAmount, fmtPrice, holdingGroup } from "@/lib/portfolioView";
 
 const assets = [
   { symbol: "ETH", venue: "Wallet", chain: "Ethereum", balance: 1, usd: 3000 },
@@ -51,5 +51,38 @@ describe("portfolioView", () => {
     expect(fmtPrice(3412.2)).toBe("$3,412");
     expect(fmtPrice(25.5)).toBe("$25.50");
     expect(fmtPrice(0.45213)).toBe("$0.4521");
+  });
+});
+
+describe("portfolioView — allocation slices", () => {
+  const assets = [
+    { symbol: "ETH", venue: "Wallet", chain: "Base", balance: 1, usd: 3000 },
+    { symbol: "USDC", venue: "Wallet", chain: "Arbitrum", balance: 1000, usd: 1000 },
+    { symbol: "USDC", venue: "Wallet", chain: "Base", balance: 1000, usd: 1000 },
+  ];
+  const view = buildPortfolioView(assets, [{ chain: "Ethereum", protocol: "Aave", collateralUsd: 500, debtUsd: 100, healthFactor: 3 }]);
+
+  it("splits by type with shares of the positive total, biggest first", () => {
+    const s = allocationSlices(view, "type");
+    expect(s.map((x) => x.key)).toEqual(["crypto", "stable", "lending"]);
+    expect(s[0].share).toBeCloseTo(3000 / 5400, 5);
+    expect(s.reduce((a, x) => a + x.share, 0)).toBeCloseTo(1, 5);
+  });
+
+  it("splits by chain, lending counted net on its chain", () => {
+    const s = allocationSlices(view, "chain");
+    expect(s.find((x) => x.key === "Base")?.usd).toBe(4000);
+    expect(s.find((x) => x.key === "Arbitrum")?.usd).toBe(1000);
+    expect(s.find((x) => x.key === "Ethereum")?.usd).toBe(400);
+  });
+
+  it("folds the chain tail into Other past the cap", () => {
+    const many = buildPortfolioView(
+      ["Base", "Arbitrum", "Ethereum", "Optimism", "Polygon", "BNB Chain"].map((chain, i) => ({ symbol: "USDC", venue: "Wallet", chain, balance: 10 + i, usd: 10 + i })),
+      [],
+    );
+    const s = allocationSlices(many, "chain", 5);
+    expect(s).toHaveLength(5);
+    expect(s[4].label).toBe("Other");
   });
 });
