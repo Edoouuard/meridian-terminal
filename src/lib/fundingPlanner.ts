@@ -339,5 +339,5 @@ export async function fundPlan(plan: TradePlan, deps: FundingDeps): Promise<Trad
     return best;
   }
 
-  return notes.length ? { ...plan, legs, fundingNotes: notes } : plan;
+  return notes.length ? { ...plan, legs, fundingNotes: [...(plan.fundingNotes ?? []), ...notes] } : plan;
 }

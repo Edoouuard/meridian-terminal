@@ -1,3 +1,4 @@
+import { deployableUsd, isLockedVenue } from "@/lib/budgetFit";
 import { FEATURES } from "@/lib/features";
 import { NextRequest, NextResponse } from "next/server";
 import { ACTIVE_CHAIN_IDS, CHAIN_LABEL } from "@/lib/onchain";
@@ -279,7 +280,8 @@ async function fetchYieldContext(baseUrl: string): Promise<string> {
 /** Format a portfolio snapshot into a human-readable string for the LLM. */
 function formatPortfolioContext(portfolio: PortfolioSnapshot | undefined): string {
   if (!portfolio) return "";
-  const freeBalance = Math.round(portfolio.freeBalanceUsd ?? 0);
+  // Recomputed from the holdings when they're sent: only wallet tokens and free Hyperliquid spot can fund a strategy.
+  const freeBalance = Math.round(portfolio.assets?.length ? deployableUsd(portfolio.assets) : (portfolio.freeBalanceUsd ?? 0));
   const lines: string[] = ["## USER'S CURRENT PORTFOLIO (live, read from wallet)"];
   lines.push(`Total net value: $${Math.round(portfolio.netUsd).toLocaleString()}`);
   lines.push(`FREE BALANCE (idle tokens in wallet, available to deploy): $${freeBalance.toLocaleString()}`);
@@ -305,7 +307,7 @@ function formatPortfolioContext(portfolio: PortfolioSnapshot | undefined): strin
     lines.push("\n### Wallet Holdings");
     for (const a of portfolio.assets) {
       if (a.usd < 1) continue;
-      lines.push(`- ${a.balance.toFixed(4)} ${a.symbol} ($${Math.round(a.usd)}) on ${a.venue} · ${a.chain}`);
+      lines.push(`- ${a.balance.toFixed(4)} ${a.symbol} ($${Math.round(a.usd)}) on ${a.venue} · ${a.chain}${isLockedVenue(a.venue) ? " — LOCKED (staked / in a vault): not part of the free balance, never size a leg from it" : ""}`);
     }
   }
 

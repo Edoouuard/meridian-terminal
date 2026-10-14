@@ -26,6 +26,7 @@ import { useHaikuPortfolio } from "@/hooks/useHaikuPortfolio";
 import { NewsFeed } from "@/components/NewsFeed";
 import { ACTIVE_CHAIN_IDS, CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
 import { FEATURES } from "@/lib/features";
+import { deployableUsd } from "@/lib/budgetFit";
 import { routeThesis, type TradePlan } from "@/lib/routeThesis";
 import { routeThesisAsync, type PortfolioContext } from "@/lib/intentEngine";
 import { fundPlan } from "@/lib/fundingPlanner";
@@ -179,8 +180,9 @@ export default function TerminalApp() {
     ];
 
     // Snapshot the live portfolio for the LLM (only if wallet connected)
-    // Free balance = wallet token holdings (idle assets not locked in protocols)
-    const freeBalanceUsd = live.assetsUsd;
+    // Free balance = what can fund a new strategy: wallet tokens and free Hyperliquid spot
+    // (not staked HYPE, HLP or vault equity, nor the perps account's margin).
+    const freeBalanceUsd = deployableUsd(live.assets);
     const portfolioSnapshot: PortfolioContext | undefined = live.isConnected
       ? {
           netUsd: live.netUsd,

@@ -28,6 +28,8 @@ export interface LLMLeg {
   chain?: string;
   /** Destination chain of a Bridge leg. */
   toChain?: string;
+  /** Token a Bridge leg spends when it differs from the one it delivers. */
+  fromAsset?: string;
 }
 
 export interface LLMStrategy {
@@ -44,6 +46,8 @@ export interface LLMStrategy {
   fit?: string;
   /** Main risks, short items. */
   risks?: string[];
+  /** What the server changed to fit the wallet (resized to the free balance…). */
+  fundingNotes?: string[];
 }
 
 export interface ParseIntentResponse {
@@ -131,6 +135,7 @@ function strategyToTradePlan(strategy: LLMStrategy): TradePlan & { riskTier: LLM
     note: l.note,
     chain: typeof l.chain === "string" && l.chain.trim() ? l.chain.trim() : undefined,
     toChain: typeof l.toChain === "string" && l.toChain.trim() ? l.toChain.trim() : undefined,
+    fromAsset: typeof l.fromAsset === "string" && l.fromAsset.trim() ? l.fromAsset.trim() : undefined,
   }));
 
   const intent = inferIntent(legs);
@@ -156,6 +161,7 @@ function strategyToTradePlan(strategy: LLMStrategy): TradePlan & { riskTier: LLM
     risks: Array.isArray(strategy.risks)
       ? strategy.risks.map((r) => cleanText(r, 120)).filter((r): r is string => !!r).slice(0, 4)
       : undefined,
+    fundingNotes: strategy.fundingNotes?.length ? strategy.fundingNotes.slice(0, 4) : undefined,
   };
 }
 

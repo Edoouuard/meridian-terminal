@@ -10,6 +10,7 @@
 
 import { chainIdFromName } from "@/lib/chains";
 import { findToken } from "@/lib/assetMap";
+import { deployableUsd, fitLegsToBudget } from "@/lib/budgetFit";
 import { UNISWAP_SWAP_ROUTER02_BY_CHAIN } from "@/lib/integrations/uniswap";
 
 export interface LLMLeg {
@@ -30,6 +31,8 @@ export interface LLMStrategy {
   variantNote: string;
   summary: string;
   legs: LLMLeg[];
+  /** What the validator changed to fit the wallet, shown with the plan. */
+  fundingNotes?: string[];
 }
 
 const NEUTRAL_KEYWORDS = /neutral|hedge|basis|cash\.and\.carry|funding.*harvest|no directional|market\.neutral/i;
@@ -245,6 +248,25 @@ export function deliverUsableTokens(legs: LLMLeg[]): LLMLeg[] {
 }
 
 export function validateAndFixStrategy(strategy: LLMStrategy, ctx?: WalletContext): LLMStrategy {
+  return fitToBudget(checkStructure(strategy, ctx), ctx);
+}
+
+/** Below this, the planner already says the wallet is too thin: nothing to scale to. */
+const MIN_BUDGET_USD = 5;
+
+/** Scale the whole strategy down when it needs more fresh capital than the wallet can deploy (lib/budgetFit.ts). */
+function fitToBudget(strategy: LLMStrategy, ctx?: WalletContext): LLMStrategy {
+  if (!ctx?.assets?.length) return strategy;
+  const budget = deployableUsd(ctx.assets);
+  if (budget < MIN_BUDGET_USD) return strategy;
+  const perpsMargin = ctx.assets.filter((a) => /^hyperliquid perps$/i.test(a.venue.trim()) && HL_MARGIN_SYMBOLS.test(a.symbol)).reduce((s, a) => s + a.usd, 0);
+  const { legs, scaled } = fitLegsToBudget(strategy.legs, budget, perpsMargin);
+  if (scaled === 1) return strategy;
+  const note = `Sized to your $${Math.floor(budget).toLocaleString("en-US")} free balance: every step is ${Math.round(scaled * 100)}% of what was first planned (staked, HLP and vault funds aren't counted).`;
+  return { ...strategy, legs, fundingNotes: [...(strategy.fundingNotes ?? []), note] };
+}
+
+function checkStructure(strategy: LLMStrategy, ctx?: WalletContext): LLMStrategy {
   const legs = fitHyperliquidDeposits(deliverUsableTokens(dropFundingMoves(routeSwapsWithoutDex(inferBridgeSource(strategy.legs ?? [], ctx)))), ctx);
   const nameAndSummary = `${strategy.name} ${strategy.summary}`;
   const claimsNeutral = NEUTRAL_KEYWORDS.test(nameAndSummary);
