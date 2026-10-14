@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from "react";
 import { useAccount, usePublicClient, useSendTransaction, useWriteContract } from "wagmi";
 import type { ExecutionPlan, Order } from "@/lib/execution";
 import { logTransition, type OrderFlowState, type OrderPlan } from "@/lib/executionPlan";
+import { reportExecution } from "@/lib/execLog";
 import {
   executePreparedOrder,
   prepareOrder,
@@ -99,6 +100,7 @@ export function useExecuteOrder(onConfirmed?: () => void): ExecuteOrderFlow {
           const msg = address ? "No RPC connection available for this chain." : "Connect a wallet first.";
           const s = address ? "RPC_ERROR" : "WRONG_CHAIN";
           logTransition(null, s, { message: msg });
+          if (address) reportExecution({ state: s, chainId: order.chainId, protocol: order.protocol, type: order.type, symbol: order.symbol, address, reason: msg });
           setState(s);
           setMessage(msg);
           return;

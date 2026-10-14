@@ -19,7 +19,7 @@ import { BridgePanel } from "@/components/BridgePanel";
 import { LiveAsset, LivePortfolio, useLivePortfolio } from "@/hooks/useLivePortfolio";
 import { useHaikuPortfolio } from "@/hooks/useHaikuPortfolio";
 import { NewsFeed } from "@/components/NewsFeed";
-import { CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
+import { ACTIVE_CHAIN_IDS, CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
 import { FEATURES } from "@/lib/features";
 import { routeThesis, type TradePlan } from "@/lib/routeThesis";
 import { routeThesisAsync, type PortfolioContext } from "@/lib/intentEngine";
@@ -27,6 +27,7 @@ import { fundPlan } from "@/lib/fundingPlanner";
 import { browserFundingDeps } from "@/lib/fundingDeps";
 import { useLivePrices } from "@/hooks/useLivePrices";
 import { recordExecution } from "@/lib/history";
+import { onAsk } from "@/lib/askBus";
 
 // Expose the local order-history API on the page module so real execution
 // sites (lib/orderRunner, useHyperliquid) can log orders going
@@ -70,6 +71,58 @@ function buildLiveAllocation(live: LivePortfolio): { label: string; pct: number;
     pct: Math.round((s.usd / total) * 1000) / 10,
     color: ALLOCATION_COLORS[i],
   }));
+}
+
+interface QuickPrompt {
+  label: string;
+  hint: string;
+  thesis: string;
+}
+
+const STABLES = new Set(["USDC", "USDT", "DAI", "USDS", "USDE", "GHO", "PYUSD", "USDC.E"]);
+
+function fmtAmount(n: number): string {
+  return n >= 100 ? Math.round(n).toLocaleString("en-US") : n >= 1 ? n.toFixed(2) : n.toPrecision(2);
+}
+
+/**
+ * The three suggested starts. Generic without a wallet; with one, the stable
+ * and ETH prompts quote what the wallet holds ("Put my 1,250 USDC to work").
+ */
+function buildQuickPrompts(assets: { symbol: string; balance: number; usd: number }[]): QuickPrompt[] {
+  const stables = assets.filter((a) => STABLES.has(a.symbol.toUpperCase()));
+  const stableUsd = stables.reduce((sum, a) => sum + a.usd, 0);
+  const mainStable = [...stables].sort((a, b) => b.usd - a.usd)[0]?.symbol ?? "USDC";
+  const eth = assets.filter((a) => /^(ETH|WETH)$/i.test(a.symbol)).reduce((sum, a) => sum + a.balance, 0);
+  return [
+    stableUsd >= 10
+      ? {
+          label: `Put my $${fmtAmount(stableUsd)} of stablecoins to work`,
+          hint: "Best live rate across 8 chains, bridging only when it pays",
+          thesis: `Find the best yield on my $${fmtAmount(stableUsd)} of stablecoins (mostly ${mainStable}) across all chains. Bridge or swap only if it pays off.`,
+        }
+      : {
+          label: "Best yield on my stablecoins",
+          hint: "Aave, Morpho, Pendle — across 8 chains, bridging only when it pays",
+          thesis: "Find the best yield on my stablecoins across all chains. Bridge or swap only if it pays off.",
+        },
+    eth >= 0.005
+      ? {
+          label: `Stake my ${fmtAmount(eth)} ETH`,
+          hint: "Lido staking, optional EigenLayer restaking",
+          thesis: `I want to stake my ${fmtAmount(eth)} ETH for yield: Lido, and restaking on EigenLayer if it makes sense.`,
+        }
+      : {
+          label: "Stake my ETH",
+          hint: "Lido staking, optional EigenLayer restaking",
+          thesis: "I want to stake my ETH for yield: Lido, and restaking on EigenLayer if it makes sense.",
+        },
+    {
+      label: "Lock a fixed rate",
+      hint: "Pendle PT on major stablecoins, held to maturity",
+      thesis: `Lock a fixed rate on my ${stableUsd >= 10 ? mainStable : "USDC"} with Pendle, on a major stablecoin market.`,
+    },
+  ];
 }
 
 export default function TerminalApp() {
@@ -155,7 +208,7 @@ export default function TerminalApp() {
       const routed = await fundThreadItem(await routeThesisAsync(trimmed, portfolioSnapshot));
       setThread((cur) => cur.concat([routed]));
     } catch {
-      setThread((cur) => cur.concat([routeThesis(trimmed)]));
+      setThread((cur) => cur.concat([{ ...routeThesis(trimmed), notice: "Something went wrong building your plan. Below is a basic plan from local rules, without live rates; ask again in a moment." }]));
     } finally {
       stepTimers.forEach(clearTimeout);
       setIsAnalyzing(false);
@@ -184,124 +237,139 @@ export default function TerminalApp() {
     setThread((cur) => cur.map((item, i) => (i === index ? { ...item, plan } : item)));
   }
 
-  const QUICK_PROMPTS = [
-    { label: "Yield on stables", thesis: "I want the best yield on my USDC across all protocols" },
-    { label: "ETH exposure", thesis: "I want exposure to ETH with different risk levels" },
-    { label: "Farm airdrops", thesis: "I want to farm airdrops and points with a delta-neutral strategy", perps: true },
-    { label: "Hedge portfolio", thesis: "I need to hedge my ETH exposure, I think the market is going down", perps: true },
-    { label: "Stake ETH", thesis: "I want to stake my ETH for yield, what are the best options?" },
-  ].filter((p) => FEATURES.perps || !("perps" in p));
+  // Three starting points, each one an end-to-end path Meridian has proven on
+  // forks (lend, stake/restake, fixed rate) — the first thing a new user tries
+  // should be something that works. With a wallet connected, they name what
+  // the wallet actually holds.
+  const QUICK_PROMPTS = buildQuickPrompts(isConnected ? live.assets : []);
+
+  // Panels ("Ask Meridian" on a risk, a chain, an alpha item) send prompts here.
+  const submitRef = useRef(submitThesis);
+  useEffect(() => {
+    submitRef.current = submitThesis;
+  });
+  useEffect(() => onAsk((prompt) => void submitRef.current(prompt)), []);
+
+  // "/" focuses the composer from anywhere outside a text field.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      e.preventDefault();
+      textareaRef.current?.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const FOLLOW_UPS = [
     { label: "Lower risk", thesis: "Same idea but more conservative, less leverage" },
     { label: "More yield", thesis: "I want to push for higher yield, I can take more risk" },
-    { label: "On Arbitrum", thesis: "Show me the same strategies but on Arbitrum" },
+    { label: "Stay on one chain", thesis: "Same goal, but keep everything on the chain where my funds already are — no bridge" },
+    { label: "Explain the risks", thesis: "Explain the risks of these strategies in plain words, and what could make me lose money" },
     { label: "Delta neutral", thesis: "Make it delta neutral, I don't want directional exposure", perps: true },
   ].filter((p) => FEATURES.perps || !("perps" in p));
 
   return (
     <div className="app-shell" style={{ background: "var(--color-bg)", color: "var(--color-text)", height: "100vh", display: "flex", flexDirection: "column" }}>
       <TickerBanner />
-      <div className="nav" style={{ background: "var(--color-surface)", flex: "none" }}>
+      <div className="nav topbar" style={{ background: "var(--color-surface)", flex: "none" }}>
         <Link href="/" className="nav-brand" style={{ color: "var(--color-text)" }}>
           Meridian
         </Link>
-        <span className="text-muted" style={{ fontSize: 13 }}>
-          {isConnected ? `${SUPPORTED_CHAINS.length} chains · connected` : `${SUPPORTED_CHAINS.length} chains · not connected`}
+        <span className={`status-pill${isConnected ? " status-pill--on" : ""}`} title={`Meridian executes on ${ACTIVE_CHAIN_IDS.map((id) => CHAIN_LABEL[id]).join(", ")}`}>
+          <span className="status-pill__dot" aria-hidden="true" />
+          {isConnected ? `Connected · ${chain?.name ?? "wallet"}` : "Not connected"}
+          <span className="status-pill__sep" aria-hidden="true">·</span>
+          {ACTIVE_CHAIN_IDS.length} chains
         </span>
+        <span className="topbar__spacer" />
+        {portfolioValue !== null && (
+          <span className="topbar__value" title="Wallet balances plus tracked positions">
+            <span className="topbar__value-label">Portfolio</span>
+            {fmtUsd(portfolioValue)}
+          </span>
+        )}
         <WalletConnectButton />
-        <span className="tag tag-neutral" style={{ fontVariantNumeric: "tabular-nums" }}>
-          {portfolioValue === null ? "—" : fmtUsd(portfolioValue)}
-        </span>
       </div>
 
       <div className="app-grid" style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "290px 1fr 320px", overflow: "hidden" }}>
         {/* Portfolio column */}
-        <div className="col-scroll app-col-portfolio" style={{ minWidth: 0, borderRight: "1px solid var(--color-divider)", padding: "var(--space-4)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <h6 style={{ color: "var(--color-accent)", margin: 0 }}>Portfolio</h6>
-            <span className="text-muted" style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>
-              {isConnected ? "Live" : "Not connected"}
-            </span>
-          </div>
-          <p
-            style={{
-              fontFamily: "var(--font-heading)",
-              fontSize: 28,
-              margin: "0 0 var(--space-3)",
-              fontVariantNumeric: "tabular-nums",
-            }}
-          >
-            {portfolioValue === null ? "—" : fmtUsd(portfolioValue)}
-          </p>
-          {!isConnected && (
-            <p className="text-muted" style={{ fontSize: 12, margin: "0 0 var(--space-3)" }}>
-              Connect a wallet to see your balances and positions across {SUPPORTED_CHAINS.length} chains.
-            </p>
-          )}
-
-          {displayAllocation.length > 0 && (
-            <>
-              <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden", marginBottom: "var(--space-2)" }}>
-                {displayAllocation.map((a) => (
-                  <div key={a.label} style={{ width: `${a.pct}%`, background: a.color }} />
-                ))}
+        <div className="col-scroll app-col-portfolio side-col" style={{ minWidth: 0, borderRight: "1px solid var(--color-divider)" }}>
+          <section className="panel-card">
+            <div className="panel-card__head">
+              <h6 className="panel-card__title">Portfolio</h6>
+              <span className={`live-chip${isConnected ? " live-chip--on" : ""}`}>{isConnected ? (live.isLoading ? "Reading…" : "Live") : "No wallet"}</span>
+            </div>
+            {portfolioValue !== null && <p className="portfolio-value">{fmtUsd(portfolioValue)}</p>}
+            {!isConnected && (
+              <div className="empty-hint">
+                <p>Connect a wallet to see your balances and positions across {SUPPORTED_CHAINS.length} chains, and to execute strategies.</p>
+                <WalletConnectButton />
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, marginBottom: "var(--space-4)" }}>
-                {displayAllocation.map((a) => (
-                  <div key={a.label} style={{ display: "flex", justifyContent: "space-between" }}>
-                    <span>{a.label}</span>
-                    <span className="text-muted">{a.pct}%</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-
-          <div className="hr" style={{ margin: "var(--space-3) 0" }} />
-          <h6 style={{ color: "var(--color-accent)" }}>Positions</h6>
-          <div style={{ display: "flex", flexDirection: "column", marginTop: "var(--space-2)" }}>
-            {displayPositions.map((pos, i) => (
-              <div
-                key={i}
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "baseline",
-                  padding: "6px 0",
-                  borderBottom: "1px solid var(--color-divider)",
-                  fontSize: 12,
-                }}
-              >
-                <span>
-                  {pos.asset}
-                  <span className="text-muted"> · {pos.venue}</span>
-                </span>
-                <span style={{ fontVariantNumeric: "tabular-nums", textAlign: "right" }}>{pos.amount}</span>
-              </div>
-            ))}
-            {isConnected && livePositions.length === 0 && (
-              <p style={{ fontSize: 12, margin: "6px 0 0" }} className="text-muted">
-                {live.isLoading
-                  ? "Reading your wallet balances and Aave position…"
-                  : `No tracked assets or Aave position found across ${CHAIN_NAMES}.`}
-              </p>
             )}
-          </div>
 
-          <div className="hr" style={{ margin: "var(--space-3) 0" }} />
-          <div className="seg" style={{ marginBottom: "var(--space-2)" }}>
+            {displayAllocation.length > 0 && (
+              <>
+                <div className="alloc-bar" aria-hidden="true">
+                  {displayAllocation.map((a) => (
+                    <div key={a.label} style={{ width: `${a.pct}%`, background: a.color }} />
+                  ))}
+                </div>
+                <ul className="alloc-legend">
+                  {displayAllocation.map((a) => (
+                    <li key={a.label}>
+                      <span className="alloc-legend__swatch" style={{ background: a.color }} />
+                      <span>{a.label}</span>
+                      <span className="text-muted">{a.pct}%</span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+          </section>
+
+          {isConnected && (
+            <section className="panel-card">
+              <div className="panel-card__head">
+                <h6 className="panel-card__title">Positions</h6>
+                <span className="text-muted" style={{ fontSize: 11 }}>{livePositions.length || ""}</span>
+              </div>
+              {livePositions.length > 0 ? (
+                <ul className="position-list">
+                  {displayPositions.map((pos, i) => (
+                    <li key={i} className="position-row">
+                      <span className="position-row__main">
+                        <span className="position-row__asset">{pos.asset}</span>
+                        <span className="position-row__venue">{pos.venue}</span>
+                      </span>
+                      <span className="position-row__amount">{pos.amount}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
+                  {live.isLoading
+                    ? "Reading your wallet balances and Aave position…"
+                    : `Nothing found yet across ${CHAIN_NAMES}. Fund this wallet, or ask for a strategy and Meridian will tell you what's needed.`}
+                </p>
+              )}
+            </section>
+          )}
+
+          <div className="seg side-tabs" role="tablist" aria-label="Portfolio tools">
             <label className="seg-opt">
               <input type="radio" name="left-tab" checked={leftTab === "risk"} onChange={() => setLeftTab("risk")} />
               <span>Risk</span>
             </label>
             <label className="seg-opt">
               <input type="radio" name="left-tab" checked={leftTab === "venues"} onChange={() => setLeftTab("venues")} />
-              <span>Venues</span>
+              <span>Tools</span>
             </label>
             <label className="seg-opt">
               <input type="radio" name="left-tab" checked={leftTab === "activity"} onChange={() => setLeftTab("activity")} />
-              <span>Activity</span>
+              <span>History</span>
             </label>
           </div>
 
@@ -313,8 +381,16 @@ export default function TerminalApp() {
           )}
           {leftTab === "venues" && (
             <>
-              <McpStatusPanel />
+              {!isConnected && (
+                <section className="panel-card">
+                  <h6 className="panel-card__title">Tools</h6>
+                  <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
+                    Bridge funds between chains and claim Lido withdrawals here once a wallet is connected. Strategies add the bridges they need on their own.
+                  </p>
+                </section>
+              )}
               <BridgePanel />
+              <LidoWithdrawalsPanel />
               {FEATURES.perps && (
                 <>
                   <HyperliquidPanel />
@@ -323,8 +399,11 @@ export default function TerminalApp() {
                   <LifiPerpsConnectPanel provider="lighter" />
                 </>
               )}
-              <LidoWithdrawalsPanel />
               {FEATURES.solana && <SolanaPanel />}
+              <details className="system-status">
+                <summary>System status</summary>
+                <McpStatusPanel />
+              </details>
             </>
           )}
           {leftTab === "activity" && <HistoryPanel />}
@@ -377,29 +456,29 @@ export default function TerminalApp() {
                   }}>
                     Describe your goal. Meridian fetches live rates across every protocol and designs strategies at different risk levels.
                   </p>
+                  {!isConnected && (
+                    <p className="text-muted" style={{ margin: 0, fontSize: 12 }}>
+                      Connect a wallet to fit strategies to your real balances and execute them. You can explore without one.
+                    </p>
+                  )}
                 </div>
                 <div style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
                   gap: 8,
                   width: "100%",
-                  maxWidth: 500,
+                  maxWidth: 600,
                 }}>
                   {QUICK_PROMPTS.map((qp) => (
                     <button
                       key={qp.label}
-                      className="btn btn-secondary"
-                      style={{
-                        fontSize: 12,
-                        padding: "10px 12px",
-                        textAlign: "left",
-                        justifyContent: "flex-start",
-                        borderRadius: "var(--radius-lg)",
-                      }}
+                      className="btn btn-secondary quick-prompt"
                       disabled={isAnalyzing}
                       onClick={() => submitThesis(qp.thesis)}
                     >
-                      {qp.label}
+                      <span className="quick-prompt__label">{qp.label}</span>
+                      <span className="quick-prompt__hint">{qp.hint}</span>
+                      <span className="quick-prompt__go" aria-hidden="true">→</span>
                     </button>
                   ))}
                 </div>
@@ -449,7 +528,7 @@ export default function TerminalApp() {
             background: "var(--color-bg)",
           }}>
             {thread.length > 0 && !isAnalyzing && (
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: "var(--space-2)", alignItems: "center" }}>
+              <div className="followups">
                 {FOLLOW_UPS.map((f) => (
                   <button
                     key={f.label}
@@ -465,9 +544,9 @@ export default function TerminalApp() {
                   className="btn btn-secondary"
                   style={{ fontSize: 11, padding: "2px 8px", marginLeft: "auto", color: "var(--color-neutral-500)" }}
                   onClick={() => setThread([])}
-                  title="Clear conversation"
+                  title="Start a new conversation"
                 >
-                  Clear
+                  New chat
                 </button>
               </div>
             )}
@@ -509,14 +588,14 @@ export default function TerminalApp() {
                 &#8593;
               </button>
             </div>
-            <p className="text-muted" style={{ margin: "4px 0 0", fontSize: 10, textAlign: "center" }}>
-              Enter to send &middot; Shift+Enter for new line
+            <p className="text-muted composer-hint" style={{ margin: "4px 0 0", fontSize: 10, textAlign: "center" }}>
+              Enter to send &middot; Shift+Enter for a new line &middot; <kbd>/</kbd> to focus
             </p>
           </div>
         </div>
 
         {/* News / Alpha column */}
-        <div className="col-scroll app-col-news" style={{ minWidth: 0, borderLeft: "1px solid var(--color-divider)", padding: "var(--space-4)" }}>
+        <div className="col-scroll app-col-news side-col" style={{ minWidth: 0, borderLeft: "1px solid var(--color-divider)" }}>
           <NewsFeed />
         </div>
       </div>

@@ -1,5 +1,6 @@
 "use client";
 
+import * as Sentry from "@sentry/nextjs";
 import { Component, type ErrorInfo, type ReactNode } from "react";
 
 /**
@@ -34,6 +35,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     // Best-effort visibility into what broke; must never throw.
     try {
       console.error("[Meridian] Render error caught by ErrorBoundary:", error, info);
+      Sentry.captureException(error, { contexts: { react: { componentStack: info.componentStack ?? "" } } });
     } catch {
       /* ignore logging failures */
     }

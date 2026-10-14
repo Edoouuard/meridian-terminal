@@ -1,7 +1,9 @@
 import type { Address } from "viem";
 import type { Order } from "@/lib/execution";
 import type { TradeLeg } from "@/lib/tradePlan";
-import { TRACKED_TOKENS_BY_CHAIN, SPARK_POOL_BY_CHAIN, SDAI_VAULT } from "@/lib/onchain";
+import { CHAIN_LABEL, TRACKED_TOKENS_BY_CHAIN, SPARK_POOL_BY_CHAIN, SDAI_VAULT } from "@/lib/onchain";
+import { VAULTS, findVault, vaultProtocolFor } from "@/lib/protocols/vaults";
+import { ARBITRUM_USDC, HYPERLIQUID_BRIDGE2, HYPERLIQUID_DEPOSIT_CHAIN_ID, HYPERLIQUID_MIN_DEPOSIT } from "@/lib/integrations/hyperliquidDeposit";
 import {
   type PriceEntry,
   resolvePriceFromList,
@@ -170,6 +172,27 @@ export function resolveOrderForLeg(
   // refuse to size the order rather than approximating the amount.
   const quoteFor = (symbol: string, decimals: number) =>
     usdToTokenAmount(symbol, leg.sizeUsd, resolvePriceFromList(prices, symbol), decimals);
+
+  // --- Hyperliquid deposit: Arbitrum USDC → the user's Hyperliquid account ---
+  if (protocol === "hyperliquid" && (side === "deposit" || side === "supply" || side === "fund")) {
+    if (bareSymbol(leg.asset) !== "USDC") return { unsupported: "Hyperliquid deposits are USDC only (native USDC on Arbitrum)." };
+    if (resolveChainId !== HYPERLIQUID_DEPOSIT_CHAIN_ID) {
+      return { unsupported: "Deposits to Hyperliquid go from native USDC on Arbitrum — bridge to Arbitrum first." };
+    }
+    const quote = quoteFor("USDC", 6);
+    if (!quote) return { unsupported: "No live price for USDC — cannot size this order safely." };
+    if (quote.amountBase < HYPERLIQUID_MIN_DEPOSIT) return { unsupported: "Hyperliquid's minimum deposit is 5 USDC — smaller deposits are not credited." };
+    return {
+      type: "transfer",
+      protocol: "erc20",
+      symbol: "USDC",
+      token: ARBITRUM_USDC,
+      amount: quote.amountBase,
+      chainId: HYPERLIQUID_DEPOSIT_CHAIN_ID,
+      decimals: 6,
+      to: HYPERLIQUID_BRIDGE2,
+    } as Order;
+  }
 
   // --- Native ETH/gas transfer (executable, all chains) ---------------------
   // The recipient comes from the thesis itself (leg.to, parsed by tradePlan's
@@ -422,6 +445,33 @@ export function resolveOrderForLeg(
     return {
       type: orderType, protocol: "spark", symbol: token.symbol,
       token: token.address, amount: quote.amountBase, chainId: resolveChainId, decimals: token.decimals,
+    };
+  }
+
+  // --- Verified ERC-4626 savings vaults (Fluid, Sky sUSDS, Spark Savings, Ethena) ---
+  const vaultProtocol = vaultProtocolFor(leg.protocol);
+  if (vaultProtocol && !(vaultProtocol === "Sky" && /^s?dai$/i.test(bareSymbol(leg.asset)))) {
+    const vault = findVault(leg.protocol, bareSymbol(leg.asset), resolveChainId);
+    if (!vault) {
+      const where = VAULTS.filter((v) => v.protocol === vaultProtocol)
+        .map((v) => `${v.shareSymbol} (${CHAIN_LABEL[v.chainId] ?? v.chainId})`)
+        .join(", ");
+      return { unsupported: `${vaultProtocol}: no verified vault for ${leg.asset} on this chain. Meridian deposits into ${where}.` };
+    }
+    if (side !== "supply" && side !== "deposit" && side !== "stake" && side !== "withdraw" && side !== "approve") {
+      return { unsupported: `${vaultProtocol} supports deposit and withdraw, not "${leg.side}".` };
+    }
+    const quote = quoteFor(vault.assetSymbol, vault.assetDecimals);
+    if (!quote) return { unsupported: `No live price for ${vault.assetSymbol} — cannot size this order safely.` };
+    return {
+      type: side === "withdraw" ? "withdraw" : "supply",
+      protocol: "vault",
+      symbol: vault.assetSymbol,
+      token: vault.assetAddress,
+      amount: quote.amountBase,
+      chainId: vault.chainId,
+      decimals: vault.assetDecimals,
+      vaultAddress: vault.vault,
     };
   }
 
@@ -711,6 +761,18 @@ export function approveOrderFor(order: Order): Order | null {
       amount: order.amount,
       chainId: order.chainId,
       decimals: order.decimals,
+    };
+  }
+  if (order.protocol === "vault" && order.type === "supply" && order.token && order.vaultAddress) {
+    return {
+      type: "approve",
+      protocol: "vault",
+      token: order.token,
+      symbol: order.symbol,
+      amount: order.amount,
+      chainId: order.chainId,
+      decimals: order.decimals,
+      vaultAddress: order.vaultAddress,
     };
   }
   if (order.protocol === "morpho" && order.type === "supply" && order.token && order.vaultAddress) {

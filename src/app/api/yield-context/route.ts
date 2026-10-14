@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { parseOpportunities, type Opportunity } from "@/lib/protocols/opportunities";
 import { fetchAaveYieldSummary } from "@/lib/mcp/aave";
 import { ACTIVE_CHAIN_IDS } from "@/lib/onchain";
 import { PENDLE_CHAINS, fetchPendleMarkets, type PendleMarket } from "@/lib/integrations/pendle";
@@ -138,13 +139,13 @@ function isLegitLpPair(symbol: string): boolean {
   return tokens.length >= 2 && tokens.every((t) => BLUECHIP_TOKENS.has(t.trim().toUpperCase()));
 }
 
-async function fetchDefiLlama(): Promise<{ lending: YieldRow[]; staking: YieldRow[] }> {
+async function fetchDefiLlama(): Promise<{ lending: YieldRow[]; staking: YieldRow[]; pools: DefiLlamaPool[] }> {
   try {
     const res = await fetch(DEFILLAMA_YIELDS, {
       signal: AbortSignal.timeout(TIMEOUT),
       cache: "no-store",
     });
-    if (!res.ok) return { lending: [], staking: [] };
+    if (!res.ok) return { lending: [], staking: [], pools: [] };
     const body: { data?: DefiLlamaPool[] } = await res.json();
     const pools = body.data ?? [];
 
@@ -217,9 +218,9 @@ async function fetchDefiLlama(): Promise<{ lending: YieldRow[]; staking: YieldRo
     const staking = Array.from(stakingMap.values())
       .sort((a, b) => b.apy - a.apy);
 
-    return { lending, staking };
+    return { lending, staking, pools };
   } catch {
-    return { lending: [], staking: [] };
+    return { lending: [], staking: [], pools: [] };
   }
 }
 
@@ -413,6 +414,33 @@ function pendleSummary(markets: PendleMarket[]): string {
   return lines.join("\n");
 }
 
+/**
+ * Cross-protocol coverage from DefiLlama (lib/protocols/registry.ts): the
+ * best single-asset stablecoin and ETH yields on the active chains (incl. HyperEVM), split into
+ * what Meridian executes and what it only watches.
+ */
+function opportunitiesSummary(pools: unknown[]): string {
+  if (pools.length === 0) return "";
+  const lines: string[] = [];
+  const row = (o: Opportunity) =>
+    `- ${o.protocol} | ${o.symbol}${o.shareSymbol ? ` → ${o.shareSymbol}` : ""} | ${o.chain} | ${o.apy.toFixed(2)}% APY${o.apyReward > 0 ? ` (${o.apyBase.toFixed(2)}% base + ${o.apyReward.toFixed(2)}% rewards)` : ""}${o.apyMean30d !== undefined ? ` | 30d avg ${o.apyMean30d.toFixed(2)}%` : ""} | ${fmtTvl(o.tvlUsd)} TVL${o.exit ? ` | exit: ${o.exit}` : ""}`;
+  for (const kind of ["stable", "eth", "hype"] as const) {
+    const all = parseOpportunities(pools, { kind, limit: 60 });
+    const exec = all.filter((o) => o.coverage === "execute").slice(0, 15);
+    const watch = all.filter((o) => o.coverage === "watch").slice(0, 8);
+    const label = kind === "stable" ? "stablecoins" : kind === "eth" ? "ETH" : "HYPE (Hyperliquid)";
+    if (exec.length > 0) {
+      lines.push(`\n\n### Best ${label} yields Meridian EXECUTES (DefiLlama, live) — use protocol name exactly as written`);
+      lines.push(...exec.map(row));
+    }
+    if (watch.length > 0) {
+      lines.push(`\n### Other ${label} yields (comparison only, NOT executable — never put these in a leg; mention them only to compare)`);
+      lines.push(...watch.map(row));
+    }
+  }
+  return lines.join("\n");
+}
+
 /* ---------- Handler ---------- */
 
 export async function GET() {
@@ -461,7 +489,8 @@ export async function GET() {
     summary: "",
   };
   // Build summary with optional Aave MCP enrichment appended
-  ctx.summary = buildSummary(ctx) + pendleSummary(pendleMarkets) + (aaveMcp ? `\n${aaveMcp}` : "");
+  ctx.summary =
+    buildSummary(ctx) + opportunitiesSummary(defiLlama.pools) + pendleSummary(pendleMarkets) + (aaveMcp ? `\n${aaveMcp}` : "");
 
   return NextResponse.json(ctx);
 }

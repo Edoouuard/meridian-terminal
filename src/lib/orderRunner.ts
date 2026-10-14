@@ -27,6 +27,7 @@ import {
   classifyExecutionError,
   createOrderPlan,
   isPlanExpired,
+  isTerminalState,
   isWalletDebitingAction,
   logTransition,
   validateOrderPlan,
@@ -35,6 +36,8 @@ import {
   type OrderPlan,
 } from "@/lib/executionPlan";
 import { recordExecution, type OrderRecordType } from "@/lib/history";
+import { reportExecution } from "@/lib/execLog";
+import { userFacingError } from "@/lib/errorText";
 
 /** How long to wait for a tx to confirm before surfacing CONFIRMATION_TIMEOUT instead of hanging forever. */
 export const CONFIRMATION_TIMEOUT_MS = 120_000;
@@ -116,7 +119,31 @@ export function recordTypeFor(orderType: Order["type"]): OrderRecordType {
 
 function transition(deps: OrderRunnerDeps, plan: OrderPlan | null, state: OrderFlowState, info?: { hash?: `0x${string}`; message?: string }) {
   logTransition(plan ? { planId: plan.planId, chainId: plan.order.chainId, symbol: plan.order.symbol } : null, state, info);
+  if (isTerminalState(state)) reportOutcome(deps, plan, state, info);
   deps.onState?.(state, info?.hash ? { hash: info.hash } : undefined);
+}
+
+/** Server journal of the outcome (lib/execLog.ts). */
+function reportOutcome(deps: OrderRunnerDeps, plan: OrderPlan | null, state: OrderFlowState, info?: { hash?: `0x${string}`; message?: string }) {
+  const order = plan?.order;
+  let amount: string | undefined;
+  try {
+    if (order) amount = typeof order.amount === "bigint" ? formatBaseUnits(order.amount, order.decimals ?? 18) : order.amount;
+  } catch {
+    amount = undefined;
+  }
+  reportExecution({
+    planId: plan?.planId,
+    state,
+    chainId: order?.chainId ?? deps.connectedChainId,
+    protocol: order?.protocol,
+    type: order?.type,
+    symbol: order?.symbol,
+    amount,
+    address: deps.address,
+    hash: info?.hash,
+    reason: info?.message,
+  });
 }
 
 function failure(deps: OrderRunnerDeps, plan: OrderPlan | null, state: FailureState, message: string): Failure {
@@ -125,7 +152,7 @@ function failure(deps: OrderRunnerDeps, plan: OrderPlan | null, state: FailureSt
 }
 
 function errorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err);
+  return userFacingError(err);
 }
 
 /** Resolve the approve plan + its spender (from the approve call's own args), when the order needs one. */
@@ -283,7 +310,7 @@ export async function executePreparedOrder(deps: OrderRunnerDeps, prepared: Prep
   const order = plan.order;
 
   if (deps.connectedChainId !== order.chainId) {
-    return failure(deps, plan, "WRONG_CHAIN", `Wrong network — switch to chain ${order.chainId} before signing.`);
+    return failure(deps, plan, "WRONG_CHAIN", `Wrong network — switch your wallet to ${CHAIN_LABEL[order.chainId] ?? `chain ${order.chainId}`} before signing.`);
   }
   if (isPlanExpired(plan)) return failure(deps, plan, "PLAN_EXPIRED", "This plan has expired — refresh and try again.");
 

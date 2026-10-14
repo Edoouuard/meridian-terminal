@@ -56,6 +56,7 @@ export const API_RATE_LIMITS: Array<[prefix: string, rule: RateLimitRule]> = [
   ["/api/bridge", { limit: 30, windowMs: MINUTE }],
   ["/api/route-quote", { limit: 30, windowMs: MINUTE }],
   ["/api/pendle", { limit: 30, windowMs: MINUTE }],
+  ["/api/exec-log", { limit: 30, windowMs: MINUTE }], // execution journal (one call per outcome)
   ["/api/preview-action", { limit: 30, windowMs: MINUTE }],
 ];
 

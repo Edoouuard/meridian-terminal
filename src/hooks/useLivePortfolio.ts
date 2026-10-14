@@ -1,11 +1,12 @@
 import { formatUnits } from "viem";
-import { useCallback, useEffect, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import { useAccount, useBalance, useReadContracts } from "wagmi";
 import {
   arbitrum,
   avalanche,
   base,
   bsc,
+  hyperEvm,
   celo,
   fantom,
   gnosis,
@@ -31,7 +32,7 @@ import {
   TRACKED_TOKENS_BY_CHAIN,
   perpCoinIsEth,
 } from "@/lib/onchain";
-import { fetchClearinghouseState, hyperliquidEnv, type HlAccount } from "@/lib/integrations/hyperliquid-live";
+import { fetchClearinghouseState, fetchHlHoldings, hyperliquidEnv, HLP_VAULT_ADDRESS, type HlAccount, type HlHoldings } from "@/lib/integrations/hyperliquid-live";
 import { ethPriceFromAssets, netEthDelta, stakingConcentration } from "@/lib/riskModel";
 import { useLivePrices } from "./useLivePrices";
 import { useIndexedPositions } from "./useIndexedPositions";
@@ -139,22 +140,42 @@ export function useLivePortfolio(): LivePortfolio {
   const { data: prices } = useLivePrices();
   const { morpho: indexedMorpho } = useIndexedPositions(address, isConnected);
 
-  // Fetch the Hyperliquid clearinghouse state when a wallet connects (read-only,
-  // TESTNET default). The result is written to the shared store so the portfolio
-  // and the Hyperliquid panel always agree.
+  // Fetch the Hyperliquid clearinghouse state when a wallet connects. Reads are
+  // read-only, so they always target MAINNET — the user's real account; order
+  // submission keeps its own testnet-first gate (hyperliquid-live.ts). The
+  // result is written to the shared store so the portfolio and the Hyperliquid
+  // panel always agree.
   useEffect(() => {
     if (!isConnected || !address) {
       setSharedHlAccount(null);
       return;
     }
     let cancelled = false;
-    fetchClearinghouseState(address, hyperliquidEnv(true))
+    fetchClearinghouseState(address, hyperliquidEnv(false))
       .then((acc) => {
         if (!cancelled) setSharedHlAccount(acc);
       })
       .catch(() => {
         // Graceful: a chain/network where HL reads fail just yields no perps.
         if (!cancelled) setSharedHlAccount(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [address, isConnected]);
+
+  // Hyperliquid L1 holdings outside perps margin: spot balances and vault (HLP) equity. Read-only, mainnet.
+  const [hlHoldingsState, setHlHoldings] = useState<{ address: string; holdings: HlHoldings } | null>(null);
+  const hlHoldings = isConnected && address && hlHoldingsState?.address === address ? hlHoldingsState.holdings : null;
+  useEffect(() => {
+    if (!isConnected || !address) return;
+    let cancelled = false;
+    fetchHlHoldings(address, hyperliquidEnv(false))
+      .then((holdings) => {
+        if (!cancelled) setHlHoldings({ address, holdings });
+      })
+      .catch(() => {
+        if (!cancelled) setHlHoldings(null);
       });
     return () => {
       cancelled = true;
@@ -170,6 +191,7 @@ export function useLivePortfolio(): LivePortfolio {
   const polygonBalance = useBalance({ address, chainId: polygon.id, query: { enabled: isConnected } });
   const avalancheBalance = useBalance({ address, chainId: avalanche.id, query: { enabled: isConnected } });
   const bscBalance = useBalance({ address, chainId: bsc.id, query: { enabled: isConnected } });
+  const hyperEvmBalance = useBalance({ address, chainId: hyperEvm.id, query: { enabled: isConnected } });
   const gnosisBalance = useBalance({ address, chainId: gnosis.id, query: { enabled: isConnected } });
   const scrollBalance = useBalance({ address, chainId: scroll.id, query: { enabled: isConnected } });
   const zkSyncBalance = useBalance({ address, chainId: zkSync.id, query: { enabled: isConnected } });
@@ -187,6 +209,7 @@ export function useLivePortfolio(): LivePortfolio {
     [polygon.id]: polygonBalance,
     [avalanche.id]: avalancheBalance,
     [bsc.id]: bscBalance,
+    [hyperEvm.id]: hyperEvmBalance,
     [gnosis.id]: gnosisBalance,
     [scroll.id]: scrollBalance,
     [zkSync.id]: zkSyncBalance,
@@ -325,7 +348,21 @@ export function useLivePortfolio(): LivePortfolio {
     }
   }
 
-  const assets = [...nativeAssets, ...tokenAssets].sort((a, b) => b.usd - a.usd);
+  // Funds on Hyperliquid L1 (not an EVM chain): perps account value, spot balances, vault equity.
+  const hlAssets: LiveAsset[] = [];
+  if (hlAccount && hlAccount.accountValue > 0) {
+    hlAssets.push({ symbol: "USDC", venue: "Hyperliquid perps", chain: "Hyperliquid L1", balance: hlAccount.accountValue, usd: hlAccount.accountValue });
+  }
+  for (const b of hlHoldings?.spot ?? []) {
+    const px = /^USD/.test(b.coin) ? 1 : priceOf(b.coin.replace(/^U(?=ETH|BTC|SOL)/, ""));
+    if (px > 0) hlAssets.push({ symbol: b.coin, venue: "Hyperliquid spot", chain: "Hyperliquid L1", balance: b.total, usd: b.total * px });
+  }
+  for (const v of hlHoldings?.vaults ?? []) {
+    const isHlp = v.vaultAddress.toLowerCase() === HLP_VAULT_ADDRESS;
+    hlAssets.push({ symbol: isHlp ? "HLP" : "Vault", venue: isHlp ? "Hyperliquid HLP" : "Hyperliquid vault", chain: "Hyperliquid L1", balance: v.equity, usd: v.equity });
+  }
+
+  const assets = [...nativeAssets, ...tokenAssets, ...hlAssets].sort((a, b) => b.usd - a.usd);
   const assetsUsd = assets.reduce((sum, a) => sum + a.usd, 0);
 
   const aavePositions: LiveAavePosition[] = lendingPoolList

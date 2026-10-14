@@ -15,8 +15,9 @@ describe("rpc — endpoint order", () => {
     expect(urls[3]).toBe("https://ethereum-rpc.publicnode.com");
   });
 
-  it("covers every active chain with both providers", () => {
-    for (const id of ACTIVE_CHAIN_IDS) {
+  it("covers every active chain with both providers (HyperEVM: public endpoint only)", () => {
+    expect(rpcUrlsFor(999, { NEXT_PUBLIC_ALCHEMY_API_KEY: "ak" })).toEqual(["https://rpc.hyperliquid.xyz/evm"]);
+    for (const id of ACTIVE_CHAIN_IDS.filter((c) => c !== 999)) {
       const urls = rpcUrlsFor(id, { NEXT_PUBLIC_ALCHEMY_API_KEY: "ak", NEXT_PUBLIC_INFURA_API_KEY: "ik" });
       expect(urls.filter((u) => u.includes(".g.alchemy.com/v2/ak")), `alchemy on ${id}`).toHaveLength(1);
       expect(urls.filter((u) => u.includes(".infura.io/v3/ik")), `infura on ${id}`).toHaveLength(1);

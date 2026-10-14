@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { AskButton } from "@/components/AskButton";
 import {
   HEALTH_FACTOR,
   NET_DELTA_ETH,
@@ -239,15 +240,21 @@ function NetDeltaBar({ value, isLive }: { value: number; isLive: boolean }) {
   );
 }
 
-function SuggestionBar({ suggestion }: { suggestion: RiskSuggestion }) {
+const ASK_FOR: Record<RiskSuggestion["kind"], string> = {
+  healthFactor: "Raise my Aave health factor safely: how much debt should I repay, and from which balance?",
+  delta: "Bring my net ETH exposure back near neutral. What hedge do you suggest and what does it cost?",
+  concentration: "Reduce my liquid staking concentration without giving up much yield. What would you move, and where?",
+};
+
+function SuggestionBar({ suggestion, canAsk }: { suggestion: RiskSuggestion; canAsk: boolean }) {
   const beforeStatus = statusFor(suggestion.kind, suggestion.before);
   const afterStatus = statusFor(suggestion.kind, suggestion.after);
   const beforePct = Math.min(100, (Math.abs(suggestion.before) / suggestion.max) * 100);
   const afterPct = Math.min(100, (Math.abs(suggestion.after) / suggestion.max) * 100);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <p style={{ fontSize: 12, margin: 0, color: "color-mix(in srgb, var(--color-text) 65%, transparent)" }}>{suggestion.text}</p>
+    <div className="suggestion-card">
+      <p style={{ fontSize: 12, margin: 0, color: "color-mix(in srgb, var(--color-text) 80%, transparent)" }}>{suggestion.text}</p>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
         <span style={{ width: 30, flex: "none", fontSize: 10 }} className="text-muted">
           Now
@@ -270,6 +277,7 @@ function SuggestionBar({ suggestion }: { suggestion: RiskSuggestion }) {
           {formatValue(suggestion.kind, suggestion.after)}
         </span>
       </div>
+      {canAsk && <AskButton prompt={`${ASK_FOR[suggestion.kind]} Context: ${suggestion.text}`} />}
     </div>
   );
 }
@@ -288,17 +296,19 @@ export function RiskPanel({ live, isConnected }: { live?: LivePortfolio; isConne
   const suggestions = isLive && effLive ? buildLiveSuggestions(effLive) : RISK_SUGGESTIONS;
 
   return (
-    <>
-      <div className="hr" style={{ margin: "var(--space-3) 0" }} />
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <h6 style={{ color: "var(--color-accent)", margin: 0 }}>Risk</h6>
-        <span className="text-muted" style={{ fontSize: 11 }}>
-          {suggestions.length} optimizations
+    <section className="panel-card">
+      <div className="panel-card__head">
+        <h6 className="panel-card__title">Risk</h6>
+        <span className={`live-chip${isConnected ? " live-chip--on" : ""}`}>
+          {isConnected ? (suggestions.length > 0 ? `${suggestions.length} to review` : "All clear") : simulating ? "Simulated" : "Example"}
         </span>
       </div>
 
       {!isConnected && (
-        <div style={{ marginTop: "var(--space-2)" }}>
+        <div style={{ marginTop: "var(--space-2)", display: "flex", flexDirection: "column", gap: 6 }}>
+          <p className="text-muted" style={{ fontSize: 11, margin: 0 }}>
+            {simulating ? "Simulated portfolio." : "Example figures, not yours."} Connect a wallet to see your own risk.
+          </p>
           <button className="btn btn-secondary" style={{ fontSize: 11 }} onClick={() => setSimulating((s) => !s)}>
             {simulating ? "Use demo figures" : "Simulate a portfolio"}
           </button>
@@ -353,18 +363,21 @@ export function RiskPanel({ live, isConnected }: { live?: LivePortfolio; isConne
         )}
       </div>
 
-      <p style={{ fontSize: 10, margin: "var(--space-2) 0 0" }} className="text-muted">
+      <details className="how-computed">
+        <summary>How is this computed?</summary>
+        <p className="text-muted">
         {isLive
           ? `Health factor reads live from your Aave v3 position. Net ETH delta and staking concentration are computed from your tracked spot holdings (${Math.round(
               stakingConcentration,
             )}% in Liquid Staking), with any open Hyperliquid perps folded into the delta.`
           : "Example figures. Connect a wallet to compute your real Aave health factor, net ETH delta, and staking concentration."}
         {simulating && " Simulated portfolio shown — connect a wallet for your real numbers."}
-      </p>
+        </p>
+      </details>
 
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", marginTop: "var(--space-3)" }}>
         {suggestions.map((s, i) => (
-          <SuggestionBar key={i} suggestion={s} />
+          <SuggestionBar key={i} suggestion={s} canAsk={isConnected} />
         ))}
         {suggestions.length === 0 && (
           <p style={{ fontSize: 12, margin: 0 }} className="text-muted">
@@ -372,6 +385,6 @@ export function RiskPanel({ live, isConnected }: { live?: LivePortfolio; isConne
           </p>
         )}
       </div>
-    </>
+    </section>
   );
 }

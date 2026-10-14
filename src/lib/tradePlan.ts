@@ -78,6 +78,14 @@ export interface TradePlan {
   riskTier?: "conservative" | "moderate" | "aggressive";
   /** How the plan was adjusted to the wallet's real balances (bridges added, legs resized or moved) — see fundingPlanner.ts. */
   fundingNotes?: string[];
+  /** Blended expected APY in percent, from the live data the planner quoted (see lib/strategyView.ts for the fallback). */
+  apyPct?: number;
+  /** How to get out: "Instant", "~7 days (Lido queue)", "Locked until 26 Mar 2027"… */
+  exit?: string;
+  /** Who this variant suits, one line. */
+  fit?: string;
+  /** The main risks, two to four short items. */
+  risks?: string[];
 }
 
 /** Augment ThreadItem with an optional parsed plan (keeps data.ts untouched). */
@@ -86,6 +94,12 @@ declare module "@/lib/data" {
     plan?: TradePlan;
     /** Alternative plans for the same thesis, when the intent has more than one honest way to run it. Present only when length > 1. */
     variants?: TradePlan[];
+    /** Shown above the answer when it isn't the full AI plan (planner down, rate-limited, session expired). */
+    notice?: string;
+    /** The planner's one-sentence restatement of the user's goal. */
+    understanding?: string;
+    /** Index in `variants` of the strategy the planner recommends. */
+    recommendedIndex?: number;
   }
 }
 

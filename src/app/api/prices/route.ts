@@ -31,6 +31,10 @@ const COINGECKO_IDS: Record<string, string> = {
   APT: "aptos",
   // Not shown in the top-25 ticker — used to price wallet asset balances instead.
   DAI: "dai",
+  USDS: "usds",
+  USDE: "ethena-usde",
+  SUSDE: "ethena-staked-usde",
+  GHO: "gho",
   WBTC: "wrapped-bitcoin",
   WSTETH: "wrapped-steth",
   // Native gas token on Polygon — covers both the pre- and post-rebrand symbol,

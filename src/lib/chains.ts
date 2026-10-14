@@ -3,6 +3,8 @@ const CHAIN_NAME_TO_ID: Record<string, number> = {
   ethereum: 1, mainnet: 1, "ethereum mainnet": 1,
   optimism: 10, "op mainnet": 10, op: 10,
   "bnb chain": 56, bsc: 56, bnb: 56,
+  // HyperEVM only: funds on Hyperliquid L1 itself (perps margin, spot, HLP) are not an EVM chain.
+  hyperevm: 999, "hyper evm": 999, "hyperliquid evm": 999,
   gnosis: 100,
   polygon: 137,
   sonic: 146,

@@ -4,6 +4,8 @@ import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { AlphaEntry, AlphaTag } from "@/app/api/alpha/route";
 import { ChainOverview } from "@/components/ChainOverview";
+import { AskButton } from "@/components/AskButton";
+import { YieldsPanel } from "@/components/YieldsPanel";
 
 const ALPHA_TAG_CLASS: Record<AlphaTag, string> = {
   "New protocol": "tag-neutral",
@@ -61,7 +63,7 @@ function useAlpha() {
  * stale content that looks live but isn't.
  */
 export function NewsFeed() {
-  const [tab, setTab] = useState<"chains" | "alpha">("chains");
+  const [tab, setTab] = useState<"yields" | "chains" | "alpha">("yields");
   const now = useNowTick();
 
   const alpha = useAlpha();
@@ -69,7 +71,11 @@ export function NewsFeed() {
 
   return (
     <>
-      <div className="seg" style={{ marginBottom: "var(--space-2)" }}>
+      <div className="seg side-tabs" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+        <label className="seg-opt">
+          <input type="radio" name="feed-tab" checked={tab === "yields"} onChange={() => setTab("yields")} />
+          <span>Yields</span>
+        </label>
         <label className="seg-opt">
           <input type="radio" name="feed-tab" checked={tab === "chains"} onChange={() => setTab("chains")} />
           <span>Chains</span>
@@ -80,10 +86,18 @@ export function NewsFeed() {
         </label>
       </div>
 
-      {tab === "chains" ? (
-        <ChainOverview hideDivider />
+      {tab === "yields" ? (
+        <YieldsPanel />
+      ) : tab === "chains" ? (
+        <section className="panel-card">
+          <ChainOverview hideDivider />
+        </section>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column" }}>
+        <section className="panel-card" style={{ gap: 0 }}>
+          <div className="panel-card__head">
+            <h6 className="panel-card__title">Alpha</h6>
+            <span className="text-muted" style={{ fontSize: 11 }}>{alphaEntries.length > 0 ? `DefiLlama · ${fmtAge(now - alpha.dataUpdatedAt)}` : ""}</span>
+          </div>
           {alphaEntries.length > 0 ? (
             alphaEntries.map((a, i) => (
               <div key={i} style={{ padding: "var(--space-2) 0", borderBottom: "1px solid var(--color-divider)" }}>
@@ -105,6 +119,7 @@ export function NewsFeed() {
                   {a.tag}
                 </p>
                 <p style={{ margin: "4px 0 0", fontSize: 13, lineHeight: 1.4 }}>{a.text}</p>
+                <AskButton label="Ask about this" prompt={`Tell me about ${a.protocol}: ${a.text} Is there a safe way to get exposure or yield from it with Meridian?`} />
               </div>
             ))
           ) : (
@@ -114,9 +129,8 @@ export function NewsFeed() {
           )}
           <p className="text-muted" style={{ fontSize: 10, margin: "var(--space-2) 0 0" }}>
             New listings and 7-day TVL momentum from DefiLlama&apos;s free API — not editorial calls.
-            {alphaEntries.length > 0 && ` · live · updated ${fmtAge(now - alpha.dataUpdatedAt)}`}
           </p>
-        </div>
+        </section>
       )}
     </>
   );

@@ -43,7 +43,7 @@ Un utilisateur DeFi déjà équipé d'un wallet (MetaMask, Rabby…) qui gère q
 | Exécution (validation → approve exact → simulation → signature) | 🟡 prouvée sur un fork de Base (vrais contrats Aave/USDC), **pas encore avec un vrai wallet** | CI `fork` + tests unitaires |
 | Positions utilisateur | 🟡 non vérifiées | liste vide sur l'adresse de test |
 | Coffres earn LI.FI | ✅ données live (clé ajoutée le 2026-10-13, APY corrigés : l'API renvoie des %) | `/api/haiku?action=yields` |
-| Routes deBridge avec swap | ❌ refusées | CrosschainForwarder hors allowlist (volontaire) |
+| Routes deBridge avec swap | ❌ refusées (décision D2) | swap + bridge via LI.FI |
 | Portefeuille sans wallet | ✅ affiche « — » et invite à connecter un wallet (faux portefeuille supprimé) | Phase 1 |
 
 **En une phrase : les données marchent, l'exécution est construite mais n'a jamais été prouvée de bout en bout.** Tant qu'une vraie transaction n'est pas passée, le produit n'est pas « fonctionnel ».
@@ -121,6 +121,7 @@ Diagnostic honnête du code (≈ 22 000 lignes, 80 commits, 16 PR) :
 | Sécurité | `lib/onchain.ts`, `lib/mcp/routerAllowlist.ts`, `lib/safety.ts` | Allowlist d'adresses, garde-fou HF |
 | Routage | `lib/mcp/router.ts`, `lib/mcp/{debridge,lifi}.ts` | Devis comparés, tx de bridge/swap |
 | MCP | `lib/mcp/client.ts`, `lib/mcp/aave.ts` | Client MCP robuste (timeouts, coercition, replis) |
+| Protocoles | `lib/protocols/registry.ts`, `lib/protocols/vaults.ts`, `lib/protocols/opportunities.ts`, `app/api/opportunities` | Couverture DefiLlama (slug → nom, catégorie, exécutable ou comparaison), vaults ERC-4626 vérifiés, classement des meilleurs rendements |
 | Portefeuille | `hooks/useLivePortfolio.ts`, `app/api/positions` | Soldes et positions on-chain |
 | Infra | `proxy.ts`, `lib/rateLimit.ts`, `lib/betaGate.ts`, `lib/features.ts` | Rate limit, accès bêta, feature flags |
 
@@ -141,6 +142,7 @@ Diagnostic honnête du code (≈ 22 000 lignes, 80 commits, 16 PR) :
 | `BETA_PASSWORD` | Accès bêta | présent (sensible, production) ; `NEXT_PUBLIC_BETA_PASSWORD` obsolète, à supprimer |
 | `LIFI_API_KEY` | Coffres earn LI.FI + quotas LI.FI | présente (sensible, production + preview) |
 | `BLOB_READ_WRITE_TOKEN` | Stockage | présent |
+| `NEXT_PUBLIC_SENTRY_DSN` | Suivi d'erreurs + journal des exécutions dans Sentry | **à créer** (sans DSN : journal dans les logs Vercel uniquement) |
 | `NEXT_PUBLIC_ALCHEMY_API_KEY` / `NEXT_PUBLIC_INFURA_API_KEY` | RPC dédiés sur les 7 chaînes (`lib/rpc.ts` : URL explicite `NEXT_PUBLIC_RPC_<CHAIN>` → Alchemy → Infura → publics) | **à créer** ; clés exposées au navigateur, à restreindre aux domaines Meridian côté fournisseur |
 
 ---
@@ -197,15 +199,31 @@ Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → s
 
 **Objectif : 5 à 10 utilisateurs réels sans que tu sois derrière eux.**
 
-- [~] RPC dédiés (Alchemy / Infura) pour les chaînes gardées — câblé (`lib/rpc.ts`) ; reste à créer les clés et les poser dans Vercel
-- [ ] Observabilité : journal serveur des exécutions (succès / échec / raison), suivi d'erreurs (Sentry ou équivalent)
-- [ ] Rate limit strict via Vercel WAF (le limiteur actuel est par instance)
+- [x] RPC dédiés (Alchemy / Infura) pour les chaînes gardées — `lib/rpc.ts` ; clés posées dans Vercel (type Config, restreintes aux domaines Meridian) ; Infura vérifié sur les 7 chaînes, Alchemy activé sur les 7
+- [~] Observabilité — câblé : journal serveur des exécutions (`lib/execLog.ts` → `/api/exec-log` : une ligne `[exec-log]` par issue — succès / échec / raison, protocole, chaîne, montant, wallet, tx — dans les logs Vercel ; avec Sentry, un log Sentry par issue + une issue par échec actionnable : simulation, approbation, revert, RPC, timeout) ; suivi d'erreurs Sentry (`instrumentation.ts`, `instrumentation-client.ts`, error boundaries ; sans IP, cookies, en-têtes ni corps). Reste : créer le projet Sentry et poser `NEXT_PUBLIC_SENTRY_DSN` dans Vercel
+- [~] Rate limit strict via Vercel WAF (le limiteur actuel est par instance) — règles prêtes : `/api/parse-intent` 15 req/min/IP, `/api/*` 300 req/min/IP ; bloqué : le pare-feu du projet n'est pas encore initialisé (l'API répond « config not found »). Ouvrir une fois l'onglet *Firewall* du projet dans Vercel, puis les poser
 - [x] Test e2e automatisé du parcours d'or sur un fork (Anvil) en CI — voir Phase 0
 - [x] CI GitHub : lint + typecheck + tests + build sur chaque push (`.github/workflows/ci.yml`)
-- [ ] Onboarding : 3 prompts suggérés, états vides propres, messages d'erreur compréhensibles
-- [ ] Décision deBridge CrosschainForwarder (routes avec swap)
+- [x] Onboarding : 3 prompts suggérés calés sur les parcours prouvés (stables, stake ETH, taux fixe Pendle) ; états vides (portefeuille, positions, risque « chiffres d'exemple ») ; erreurs en langage clair (`lib/errorText.ts` : gas, solde, approbation, slippage, quote expirée, tx en attente, mauvais réseau, cap, marché gelé, RPC ; raison technique courte en suffixe) et raison affichée quand le chat retombe sur le plan local (429, session bêta expirée, hors ligne, planner indisponible)
+- [x] Décision deBridge CrosschainForwarder (routes avec swap) : **non** (D2). Les routes swap + bridge passent par LI.FI, déjà autorisé, qui agrège lui-même deBridge ; le Forwarder exécuterait des appels arbitraires vers des agrégateurs, pour un gain marginal
 
 **Critère de sortie :** 10 utilisateurs, ≥ 20 transactions réelles, taux d'échec < 10 % avec cause connue pour chaque échec.
+
+### Hyperliquid
+
+- **HyperEVM (chaîne 999)** : 8e chaîne active. Jetons suivis (USDT0, USDe, WHYPE, UETH, UBTC — symbole et décimales vérifiés on-chain), solde natif HYPE, RPC officiel, bridges entrants/sortants via LI.FI (diamond propre à HyperEVM, `0x0a07…ce1A`, confirmé par l'API LI.FI et on-chain) et deBridge (DlnSource, id interne 100000022). Un stable USD bridgé vers HyperEVM arrive en USDT0.
+- **Dépôt Hyperliquid exécutable** : USDC natif d'Arbitrum → Bridge2 officiel (`0x2Df1…3dF7`, ~400 M$ USDC), crédité sur le compte Hyperliquid en ~1 min. Garde-fous dans le builder : USDC Arbitrum uniquement, minimum 5 USDC (en dessous, perdu). Prouvé sur fork Arbitrum en CI.
+- **Portefeuille** : le compte Hyperliquid réel (mainnet, lecture seule) — marge perps, soldes spot, part HLP — s'ajoute aux avoirs. Avant : lu sur le testnet, donc jamais vu.
+- **Pas encore exécutable** : dépôt HLP, trading perps, staking HYPE (actions L1 signées via un « agent wallet » Hyperliquid — chantier dédié). Le chat propose le dépôt puis renvoie vers l'app Hyperliquid pour ces étapes.
+- **Données** : HLP (APR live), écosystème HyperEVM via DefiLlama (« Hyperliquid L1 ») : HyperLend, Kinetiq, Felix en comparaison, onglet Yields « HYPE ».
+
+### Couverture des protocoles (DefiLlama)
+
+- **Exécutables (intégration dédiée)** : Aave, Compound, Morpho, Spark (SparkLend), Lido, Rocket Pool, Pendle, EigenLayer.
+- **Exécutables (vaults ERC-4626 vérifiés, un seul chemin de signature)** : Fluid (fUSDC/fUSDT/fWETH sur Ethereum, Arbitrum, Base), Sky sUSDS (Ethereum), Spark Savings sUSDC (Ethereum, Base, Arbitrum), Ethena sUSDe (Ethereum, sortie en 7 jours). Chaque vault : `asset()` vérifié on-chain avant ajout et à chaque audit, dépôt prouvé sur fork en CI.
+- **Comparaison seulement** : Maple, ether.fi, cbETH, wBETH, Kelp, Renzo, StakeWise, mETH, Liquid Collective, Aave v4, Yearn, Curve LlamaLend, Venus, Lista, Dolomite, Euler, Silo, Benqi, Moonwell, Centrifuge.
+- Onglet **Yields** (colonne droite) et contexte du planner : meilleurs rendements mono-actif ≥ 5 M$ de TVL sur les 7 chaînes, séparés « exécutable » / « comparaison ».
+- Ajouter un protocole = une ligne dans `registry.ts` (et, pour un vault ERC-4626, une ligne vérifiée dans `vaults.ts`).
 
 ### Phase 3 — Produit (après la bêta)
 
@@ -223,7 +241,7 @@ Seulement une fois la bêta stable, selon les retours :
 | # | Décision | Recommandation |
 |---|---|---|
 | D1 | Réduire la surface visible (masquer perps / Solana / chaînes secondaires) ? | **Oui**, derrière un flag : on réactive ce qui est prouvé |
-| D2 | Ajouter le deBridge CrosschainForwarder à l'allowlist ? | Pas avant la Phase 2 : le bridge simple suffit |
+| D2 | Ajouter le deBridge CrosschainForwarder à l'allowlist ? | **Tranché : non.** LI.FI couvre swap + bridge (et route lui-même via deBridge) ; deBridge reste pour les bridges même-token |
 | D3 | Créer une `LIFI_API_KEY` ? | Oui, gratuit, débloque les coffres earn |
 | D4 | Modèle LLM du chat (Gemini Flash aujourd'hui) | Garder tant que le parcours d'or n'est pas validé |
 
