@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { zeroAddress } from "viem";
 import { useAccount, useBalance, useReadContract, useReadContracts } from "wagmi";
 import { findToken, DEFAULT_CHAIN_ID } from "@/lib/assetMap";
@@ -14,7 +14,7 @@ import { useVaultRisk } from "@/hooks/useVaultRisk";
 import { MIN_VAULT_TVL_USD } from "@/lib/vaultPolicy";
 import { MIN_MORPHO_RISK_SCORE } from "@/lib/integrations/morpho";
 import { philidorAssetQuery } from "@/lib/integrations/philidor";
-import { PENDLE_CHAINS, PENDLE_ROUTER_V4, isEthMarket, pickPendleMarket, type PendleBuyQuote, type PendleMarket } from "@/lib/integrations/pendle";
+import { PENDLE_CHAINS, PENDLE_ROUTER_V4, isEthMarket, pickPendleMarketAcrossChains, type PendleBuyQuote, type PendleMarket } from "@/lib/integrations/pendle";
 import { QUOTER_V2_QUOTE_READ_ABI, QUOTE_FEE_TIERS, UNISWAP_QUOTER_V2_BY_CHAIN, applySlippage, parseSwapAsset, pickBestFeeQuote } from "@/lib/integrations/uniswap";
 import { formatBaseUnits, resolvePriceFromList, usdToTokenAmount, type PriceEntry } from "@/lib/quote";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
@@ -344,25 +344,35 @@ const QUOTE_TTL_MS = 60_000;
  */
 export function PendleExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry[] }) {
   const { address, chain } = useAccount();
-  const chainId = legChainId(leg, chain?.id) ?? DEFAULT_CHAIN_ID;
-  const chainName = CHAIN_LABEL[chainId] ?? `chain ${chainId}`;
-  const supported = (PENDLE_CHAINS as readonly number[]).includes(chainId);
+  const legChain = legChainId(leg, chain?.id) ?? DEFAULT_CHAIN_ID;
   const [quote, setQuote] = useState<{ order: Order; ptOut?: string } | null>(null);
   const [quoting, setQuoting] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
 
-  const { data: markets, isLoading } = useQuery<PendleMarket[]>({
-    queryKey: ["pendle-markets", chainId],
-    queryFn: async () => {
-      const res = await fetch(`/api/pendle?chainId=${chainId}`);
-      if (!res.ok) throw new Error("pendle markets fetch failed");
-      return res.json();
-    },
-    enabled: supported,
-    staleTime: 5 * 60_000,
+  // Every Pendle chain's eligible markets: a leg whose chain has none (Arbitrum often) runs where one exists.
+  const marketQueries = useQueries({
+    queries: PENDLE_CHAINS.map((c) => ({
+      queryKey: ["pendle-markets", c],
+      queryFn: async (): Promise<PendleMarket[]> => {
+        const res = await fetch(`/api/pendle?chainId=${c}`);
+        if (!res.ok) throw new Error("pendle markets fetch failed");
+        return res.json();
+      },
+      staleTime: 5 * 60_000,
+    })),
   });
-
-  const market = markets ? pickPendleMarket(markets, leg.asset) : undefined;
+  const isLoading = marketQueries.some((q) => q.isLoading);
+  const byChain: Partial<Record<number, PendleMarket[]>> = {};
+  PENDLE_CHAINS.forEach((c, i) => {
+    if (marketQueries[i].data) byChain[c] = marketQueries[i].data;
+  });
+  const picked = isLoading ? undefined : pickPendleMarketAcrossChains(byChain, leg.asset, legChain);
+  const market = picked?.market;
+  const chainId = market?.chainId ?? legChain;
+  const chainName = CHAIN_LABEL[chainId] ?? `chain ${chainId}`;
+  const legChainName = CHAIN_LABEL[legChain] ?? `chain ${legChain}`;
+  const supported = (PENDLE_CHAINS as readonly number[]).includes(chainId);
+  const markets = isLoading ? undefined : Object.values(byChain).flat();
   const spend = market ? findToken(isEthMarket(market) ? "WETH" : "USDC", chainId) : undefined;
   const price = spend ? resolvePriceFromList(prices, spend.symbol) : null;
   const amount = spend ? usdToTokenAmount(spend.symbol, leg.sizeUsd, price, spend.decimals) : null;
@@ -383,14 +393,14 @@ export function PendleExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
     },
   });
 
-  if (!supported) {
+  if (isLoading || !markets) {
+    return <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>Loading live Pendle markets…</p>;
+  }
+  if (market && !supported) {
     return <NotWired venue="Pendle" reason={`Pendle PT is wired on Ethereum, Arbitrum and Base — not ${chainName}.`} />;
   }
-  if (isLoading || !markets) {
-    return <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>Loading live Pendle markets on {chainName}…</p>;
-  }
   if (!market) {
-    return <NotWired venue="Pendle" reason={`No Pendle prime or major-stablecoin market for "${leg.asset}" on ${chainName} with ≥ $1M liquidity and more than 14 days to expiry. Meridian only buys PT on Pendle's curated (prime) markets and on major stablecoins (USDC, USDT, DAI, USDS, USDe and their savings versions, GHO, PYUSD).`} />;
+    return <NotWired venue="Pendle" reason={`No Pendle prime or major-stablecoin market for "${leg.asset}" on Ethereum, Arbitrum or Base right now with ≥ $1M liquidity and more than 14 days to expiry. Meridian only buys PT on Pendle's curated (prime) markets and on major stablecoins (USDC, USDT, DAI, USDS, USDe and their savings versions, GHO, PYUSD).`} />;
   }
   if (!spend || !amount) {
     return <NotWired venue="Pendle" reason="No live price for the input token — cannot size this order safely." />;
@@ -434,6 +444,12 @@ export function PendleExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
 
   return (
     <>
+      {picked?.moved && (
+        <p className="leg-card__note" style={{ margin: "4px 0" }}>
+          Pendle has no eligible market for this on {legChainName} right now, so this runs on {chainName}: your wallet will switch network, and the
+          {" "}{spend.symbol} has to be on {chainName}.
+        </p>
+      )}
       <OrderRow label="Market" value={`PT-${market.name} · ${chainName}`} />
       <OrderRow label="Fixed APY" value={`${market.impliedApyPct.toFixed(2)}% until ${expiry}`} valueColor="var(--color-accent-700)" />
       <OrderRow label="Liquidity" value={`$${Math.round(market.liquidityUsd).toLocaleString()}${market.isPrime ? " · Pendle prime" : " · major stablecoin"}`} />

@@ -141,6 +141,32 @@ export function pickPendleMarket(markets: PendleMarket[], asset: string): Pendle
   return ofKind[0]; // already sorted by fixed APY
 }
 
+/**
+ * Pick the market for a leg across Pendle's chains. Pendle markets live on one
+ * chain each and the eligible list changes (Arbitrum can have none at all), so
+ * a leg whose chain has no fitting market runs where one exists: the market
+ * the plan named first, else the best fixed APY of the right kind, preferring
+ * the leg's own chain, then Ethereum, then the others. `moved` says the market
+ * isn't on the leg's chain, so the UI can tell the user before they switch.
+ */
+export function pickPendleMarketAcrossChains(
+  byChain: Partial<Record<number, PendleMarket[]>>,
+  asset: string,
+  preferredChainId: number,
+): { market: PendleMarket; moved: boolean } | undefined {
+  const order = [preferredChainId, 1, ...PENDLE_CHAINS.filter((c) => c !== 1)].filter((c, i, a) => a.indexOf(c) === i);
+  const name = marketNameFromAsset(asset).toLowerCase();
+  for (const c of order) {
+    const exact = (byChain[c] ?? []).find((m) => m.name.toLowerCase() === name);
+    if (exact) return { market: exact, moved: c !== preferredChainId };
+  }
+  for (const c of order) {
+    const m = pickPendleMarket(byChain[c] ?? [], asset);
+    if (m) return { market: m, moved: c !== preferredChainId };
+  }
+  return undefined;
+}
+
 export interface PendleBuyQuote {
   tx: { to: Address; data: `0x${string}`; value?: string };
   /** PT received (base units), when the API reports it. */

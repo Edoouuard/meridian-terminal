@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isTrustedPendleRouter, marketNameFromAsset, parsePendleConvert, parsePendleMarkets, pickPendleMarket, PENDLE_ROUTER_V4 } from "@/lib/integrations/pendle";
+import { isTrustedPendleRouter, marketNameFromAsset, parsePendleConvert, parsePendleMarkets, pickPendleMarket, pickPendleMarketAcrossChains, PENDLE_ROUTER_V4, type PendleMarket } from "@/lib/integrations/pendle";
 
 const NOW = new Date("2026-10-13T00:00:00Z");
 const raw = (name: string, opts: { expiry?: string; liquidity?: number; apy?: number; prime?: boolean; cats?: string[] } = {}) => ({
@@ -101,5 +101,37 @@ describe("pendle — router allowlist", () => {
     expect(isTrustedPendleRouter(42161, PENDLE_ROUTER_V4.toLowerCase())).toBe(true);
     expect(isTrustedPendleRouter(10, PENDLE_ROUTER_V4)).toBe(false);
     expect(isTrustedPendleRouter(1, "0x" + "1".repeat(40))).toBe(false);
+  });
+});
+
+describe("pickPendleMarketAcrossChains", () => {
+  const mk = (chainId: number, name: string, apy: number, cats: string[] = ["stables"]): PendleMarket => ({
+    chainId,
+    name,
+    address: "0x0000000000000000000000000000000000000001",
+    pt: "0x0000000000000000000000000000000000000002",
+    expiry: "2027-01-01T00:00:00.000Z",
+    impliedApyPct: apy,
+    liquidityUsd: 5_000_000,
+    isPrime: false,
+    majorStable: true,
+    categories: cats,
+  });
+
+  it("stays on the leg's chain when it has a fitting market", () => {
+    const r = pickPendleMarketAcrossChains({ 42161: [mk(42161, "sUSDe", 6)], 1: [mk(1, "sUSDS", 9)] }, "USDC", 42161);
+    expect(r).toMatchObject({ moved: false, market: { chainId: 42161, name: "sUSDe" } });
+  });
+
+  it("moves to Ethereum when Arbitrum has no eligible market (the live case)", () => {
+    const r = pickPendleMarketAcrossChains({ 42161: [], 1: [mk(1, "sUSDS", 4.97), mk(1, "sUSDe", 4.93)], 8453: [mk(8453, "USDC", 7)] }, "PT-sUSDe", 42161);
+    expect(r).toMatchObject({ moved: true, market: { chainId: 1, name: "sUSDe" } });
+    // No exact name anywhere: best stable on the next chain in order (Ethereum first).
+    const any = pickPendleMarketAcrossChains({ 42161: [], 1: [mk(1, "sUSDS", 4.97)], 8453: [mk(8453, "GHO", 7)] }, "USD", 42161);
+    expect(any).toMatchObject({ moved: true, market: { chainId: 1 } });
+  });
+
+  it("returns nothing when no chain has a market of the kind", () => {
+    expect(pickPendleMarketAcrossChains({ 1: [mk(1, "wstETH", 2, ["eth"])] }, "USDC", 42161)).toBeUndefined();
   });
 });

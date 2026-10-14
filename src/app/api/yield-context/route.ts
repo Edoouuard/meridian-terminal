@@ -411,6 +411,8 @@ function pendleSummary(markets: PendleMarket[]): string {
       `- PT-${m.name} | ${chainName[m.chainId] ?? m.chainId} | ${m.impliedApyPct.toFixed(2)}% fixed until ${m.expiry.slice(0, 10)} | ${fmtTvl(m.liquidityUsd)} liquidity${m.isPrime ? " | prime" : " | major stable"}${m.categories.length ? ` | ${m.categories.join(",")}` : ""}`,
     );
   }
+  const empty = Object.entries(chainName).filter(([id]) => !markets.some((m) => m.chainId === Number(id))).map(([, n]) => n);
+  if (empty.length > 0) lines.push(`- No eligible Pendle market on ${empty.join(" or ")} right now: never put a Pendle leg there.`);
   return lines.join("\n");
 }
 
