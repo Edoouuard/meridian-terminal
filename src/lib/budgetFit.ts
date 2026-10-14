@@ -12,9 +12,9 @@
  * When the fresh total exceeds the deployable balance, every leg is scaled by
  * the same factor, so the strategy keeps its shape (a hedge stays hedged).
  *
- * Deployable = tokens in the wallet plus free Hyperliquid spot balances.
- * Staked HYPE, HLP and vault equity are locked; the Hyperliquid perps
- * account only backs perps.
+ * Deployable = tokens in the wallet (stETH/wstETH included). Stablecoins on
+ * Hyperliquid (perps account or spot) only back perps: no EVM leg can spend
+ * them. Staked HYPE, HLP and vault equity are locked.
  */
 
 import { chainIdFromName } from "@/lib/chains";
@@ -29,20 +29,27 @@ export interface BudgetAsset {
   usd: number;
 }
 
-const DEPLOYABLE_VENUE = /^(wallet|hyperliquid spot)$/i;
-const HL_PERPS_VENUE = /^hyperliquid perps$/i;
+const DEPLOYABLE_VENUE = /^(wallet|lido)$/i;
+const HL_ACCOUNT_VENUE = /^hyperliquid (perps|spot)$/i;
+const HL_MARGIN_SYMBOL = /^(USDC|USDT|USDT0|USDH|USDE)$/i;
 
 /** USD the user can put into a new strategy right now. */
 export function deployableUsd(assets: BudgetAsset[] | undefined): number {
   return (assets ?? []).filter((a) => DEPLOYABLE_VENUE.test(a.venue.trim()) && a.usd > 0).reduce((s, a) => s + a.usd, 0);
 }
 
+/** Stablecoins in the user's Hyperliquid account: margin for perps, nothing else. */
+export function hyperliquidMarginOnlyUsd(assets: BudgetAsset[] | undefined): number {
+  return (assets ?? []).filter((a) => HL_ACCOUNT_VENUE.test(a.venue.trim()) && HL_MARGIN_SYMBOL.test(a.symbol) && a.usd > 0).reduce((s, a) => s + a.usd, 0);
+}
+
 /** Holdings that count in net worth but can't fund a strategy (staking, HLP, vaults). */
 export function isLockedVenue(venue: string): boolean {
-  return !DEPLOYABLE_VENUE.test(venue.trim()) && !HL_PERPS_VENUE.test(venue.trim());
+  return !DEPLOYABLE_VENUE.test(venue.trim()) && !HL_ACCOUNT_VENUE.test(venue.trim());
 }
 
 const HL_MARGIN = "HL:MARGIN";
+const HL_MIN_DEPOSIT_USD = 5;
 
 /** Fresh wallet capital a strategy needs, in USD, given the margin already on Hyperliquid. */
 export function freshCapitalUsd(legs: TradeLeg[], hlMarginUsd = 0): number {
@@ -88,8 +95,12 @@ export function fitLegsToBudget<L extends TradeLeg>(legs: L[], budgetUsd: number
   const fresh = freshCapitalUsd(legs, hlMarginUsd);
   if (!(fresh > 0) || fresh <= budgetUsd * 1.0001) return { legs, scaled: 1 };
   const k = Math.max(0, budgetUsd) / fresh;
-  return {
-    legs: legs.map((l) => (l.sizeUsd && l.sizeUsd > 0 ? { ...l, sizeUsd: Math.floor(l.sizeUsd * k * 100) / 100 } : l)),
-    scaled: k,
+  const scale = (l: L): L => {
+    if (!(l.sizeUsd && l.sizeUsd > 0)) return l;
+    const size = Math.floor(l.sizeUsd * k * 100) / 100;
+    // Hyperliquid doesn't credit deposits under $5: keep the minimum rather than plan a lost deposit.
+    const isHlDeposit = /^deposit$/i.test(l.side.trim()) && /hyperliquid/i.test(l.protocol);
+    return { ...l, sizeUsd: isHlDeposit ? Math.max(HL_MIN_DEPOSIT_USD, size) : size };
   };
+  return { legs: legs.map(scale), scaled: k };
 }

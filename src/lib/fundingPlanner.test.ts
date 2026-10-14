@@ -47,6 +47,13 @@ describe("fundingPlanner — fundPlan", () => {
     expect(out).toBe(p);
   });
 
+  it("wraps native ETH into WETH for a WETH leg, keeping some for gas", async () => {
+    const out = await fundPlan(plan(supply("Base", 500, "Aave", "ETH")), deps([{ symbol: "ETH", chain: "Base", usd: 400 }]));
+    expect(out.legs[0]).toMatchObject({ side: "Wrap", asset: "ETH", protocol: "WETH", chain: "Base", sizeUsd: 397 });
+    expect(out.legs[1]).toMatchObject({ side: "Supply", sizeUsd: 397 });
+    expect(out.fundingNotes?.[0]).toMatch(/wrap into WETH/);
+  });
+
   it("counts the stETH from a Lido stake for the EigenLayer restake after it", async () => {
     const p = plan(
       { side: "Stake", asset: "stETH", protocol: "Lido", chain: "Ethereum", sizeUsd: 2000 },

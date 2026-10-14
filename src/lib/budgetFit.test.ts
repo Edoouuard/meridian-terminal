@@ -13,8 +13,9 @@ const assets = [
 ];
 
 describe("deployableUsd", () => {
-  it("counts wallet tokens and free Hyperliquid spot, never staked, HLP or perps margin", () => {
-    expect(deployableUsd(assets)).toBe(180);
+  it("counts wallet tokens (stETH too), never staked HYPE, HLP or Hyperliquid-account stables", () => {
+    expect(deployableUsd(assets)).toBe(168);
+    expect(deployableUsd([...assets, { symbol: "stETH", venue: "Lido", chain: "Ethereum", usd: 1000 }])).toBe(1168);
   });
 });
 
@@ -69,8 +70,8 @@ describe("validateAndFixStrategy — the free balance", () => {
   it("sizes an oversized plan to the wallet's free balance and says so", () => {
     const legs: LLMLeg[] = [{ side: "Supply", asset: "USDC", protocol: "Aave", chain: "Arbitrum", sizeUsd: 700 }];
     const out = validateAndFixStrategy({ name: "Yield", risk: "low", variantNote: "", summary: "", legs }, { assets });
-    expect(out.legs[0].sizeUsd).toBeCloseTo(180, 1);
-    expect(out.fundingNotes?.[0]).toMatch(/\$180 free balance/);
+    expect(out.legs[0].sizeUsd).toBeCloseTo(168, 1);
+    expect(out.fundingNotes?.[0]).toMatch(/\$168 free balance/);
   });
 
   it("leaves plans alone without a wallet", () => {

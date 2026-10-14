@@ -75,9 +75,12 @@ describe("quote — resolvePriceFromList", () => {
   it("prices a wrapped native token at its native price (the feeds only list ETH, not WETH)", () => {
     expect(resolvePriceFromList(prices, "WETH")).toBe(4000);
     expect(resolvePriceFromList([{ symbol: "AVAX", price: 10 }], "WAVAX")).toBe(10);
-    // An exact listing still wins, and non-wrapped tokens never borrow a price.
+    // 1:1 bridged and rebasing tokens share it too (UETH, stETH).
+    expect(resolvePriceFromList(prices, "UETH")).toBe(4000);
+    expect(resolvePriceFromList(prices, "stETH")).toBe(4000);
+    // An exact listing still wins, and a token worth more than ETH (wstETH) never borrows its price.
     expect(resolvePriceFromList([...prices, { symbol: "WETH", price: 3999 }], "WETH")).toBe(3999);
-    expect(resolvePriceFromList(prices, "stETH")).toBeNull();
+    expect(resolvePriceFromList(prices, "wstETH")).toBeNull();
   });
 });
 

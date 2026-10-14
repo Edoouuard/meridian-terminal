@@ -226,6 +226,8 @@ asset: token symbol. Perps: "ETH PERP". Swaps: "USDC → ETH". Staking: output t
 protocol: exactly one of: "Aave", "Compound", "Spark", "Lido", "Hyperliquid", "Extended", "Ondo", "Lighter", "Uniswap", "Morpho", "Pendle", "EigenLayer", "Fluid", "Sky", "Spark Savings", "Ethena", "Yearn", "Wallet", "deBridge" (same-chain swaps use "Uniswap"; LI.FI same-chain swaps are not executable)
 sizeUsd: integer USD value.
 leverage: only for Long/Short legs. Integer.
+to: only for a Transfer leg: the recipient address (0x…) or .eth name, copied exactly from the user's message. No recipient in the message → no Transfer leg; ask for one in the understanding.
+sizeToken: only when the user gave an exact token quantity ("send 0.5 ETH"): that quantity as a decimal string, e.g. "0.5". sizeUsd stays the USD estimate.
 note: MUST include the exact live rate from data (e.g. "Currently 4.23% APY", "Funding +12.3% annualized").
 
 ## Chain of each leg (REQUIRED)
@@ -263,13 +265,18 @@ Field rules:
 - "recommended": index (0-based) of the strategy that best fits THIS user's goal and wallet; when unsure, the moderate one.`;
 
 /** Fetch live yield context from our own aggregator route (server-side internal call). */
-async function fetchYieldContext(baseUrl: string): Promise<string> {
+async function fetchYieldContext(baseUrl: string, cookie: string | null): Promise<string> {
   try {
     const res = await fetch(`${baseUrl}/api/yield-context`, {
       signal: AbortSignal.timeout(10000),
       cache: "no-store",
+      // The beta gate (src/proxy.ts) guards every API route: pass the tester's cookie along.
+      headers: cookie ? { cookie } : undefined,
     });
-    if (!res.ok) return "";
+    if (!res.ok) {
+      console.error("[parse-intent] yield-context failed:", res.status);
+      return "";
+    }
     const data = await res.json();
     return data.summary ?? "";
   } catch {
@@ -346,11 +353,21 @@ interface PortfolioSnapshot {
   netDeltaEthTotal?: number | null;
 }
 
+/** The planner call can take ~30s; give the function room past the default limit. */
+export const maxDuration = 60;
+
+const MAX_THESIS_CHARS = 2000;
+/** Past this the tester has waited too long: fail and let the client fall back to local rules. */
+const PLANNER_TIMEOUT_MS = 50_000;
+
 export async function POST(req: NextRequest) {
   try {
     const { thesis, portfolio } = await req.json();
     if (!thesis || typeof thesis !== "string" || thesis.trim().length === 0) {
       return NextResponse.json({ error: "thesis is required" }, { status: 400 });
+    }
+    if (thesis.length > MAX_THESIS_CHARS) {
+      return NextResponse.json({ error: `Keep the request under ${MAX_THESIS_CHARS} characters.` }, { status: 400 });
     }
 
     const apiKey = process.env.OPENROUTER_API_KEY;
@@ -367,18 +384,20 @@ export async function POST(req: NextRequest) {
     const proto = req.headers.get("x-forwarded-proto") ?? "https";
     const host = req.headers.get("host") ?? "localhost:3000";
     const baseUrl = `${proto}://${host}`;
-    const yieldContext = await fetchYieldContext(baseUrl);
+    const yieldContext = await fetchYieldContext(baseUrl, req.headers.get("cookie"));
     const portfolioContext = formatPortfolioContext(portfolio as PortfolioSnapshot | undefined);
 
     // Build the user message with live yield data + portfolio injected
     const sections: string[] = [];
     if (portfolioContext) sections.push(portfolioContext);
     if (yieldContext) sections.push(yieldContext);
+    else sections.push("## LIVE DATA UNAVAILABLE\nThe live rates could not be loaded for this request. Do not quote any APY or rate: omit \"apy\", and say in each summary that rates will be shown live before signing.");
     sections.push(`User thesis: ${thesis.trim()}`);
     const userMessage = sections.join("\n\n---\n\n");
 
     const response = await fetch(OPENROUTER_URL, {
       method: "POST",
+      signal: AbortSignal.timeout(PLANNER_TIMEOUT_MS),
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
