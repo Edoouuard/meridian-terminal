@@ -3,6 +3,7 @@ import type { Order } from "@/lib/execution";
 import type { TradeLeg } from "@/lib/tradePlan";
 import { CHAIN_LABEL, TRACKED_TOKENS_BY_CHAIN, SPARK_POOL_BY_CHAIN, SDAI_VAULT } from "@/lib/onchain";
 import { VAULTS, findVault, vaultProtocolFor } from "@/lib/protocols/vaults";
+import { ARBITRUM_USDC, HYPERLIQUID_BRIDGE2, HYPERLIQUID_DEPOSIT_CHAIN_ID, HYPERLIQUID_MIN_DEPOSIT } from "@/lib/integrations/hyperliquidDeposit";
 import {
   type PriceEntry,
   resolvePriceFromList,
@@ -171,6 +172,27 @@ export function resolveOrderForLeg(
   // refuse to size the order rather than approximating the amount.
   const quoteFor = (symbol: string, decimals: number) =>
     usdToTokenAmount(symbol, leg.sizeUsd, resolvePriceFromList(prices, symbol), decimals);
+
+  // --- Hyperliquid deposit: Arbitrum USDC → the user's Hyperliquid account ---
+  if (protocol === "hyperliquid" && (side === "deposit" || side === "supply" || side === "fund")) {
+    if (bareSymbol(leg.asset) !== "USDC") return { unsupported: "Hyperliquid deposits are USDC only (native USDC on Arbitrum)." };
+    if (resolveChainId !== HYPERLIQUID_DEPOSIT_CHAIN_ID) {
+      return { unsupported: "Deposits to Hyperliquid go from native USDC on Arbitrum — bridge to Arbitrum first." };
+    }
+    const quote = quoteFor("USDC", 6);
+    if (!quote) return { unsupported: "No live price for USDC — cannot size this order safely." };
+    if (quote.amountBase < HYPERLIQUID_MIN_DEPOSIT) return { unsupported: "Hyperliquid's minimum deposit is 5 USDC — smaller deposits are not credited." };
+    return {
+      type: "transfer",
+      protocol: "erc20",
+      symbol: "USDC",
+      token: ARBITRUM_USDC,
+      amount: quote.amountBase,
+      chainId: HYPERLIQUID_DEPOSIT_CHAIN_ID,
+      decimals: 6,
+      to: HYPERLIQUID_BRIDGE2,
+    } as Order;
+  }
 
   // --- Native ETH/gas transfer (executable, all chains) ---------------------
   // The recipient comes from the thesis itself (leg.to, parsed by tradePlan's

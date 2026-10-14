@@ -94,6 +94,7 @@ const WRAPPED_NATIVE: Record<string, string> = {
   WETH: "ETH",
   WBNB: "BNB",
   WAVAX: "AVAX",
+  WHYPE: "HYPE",
   WPOL: "POL",
   WMATIC: "MATIC",
   WFTM: "FTM",

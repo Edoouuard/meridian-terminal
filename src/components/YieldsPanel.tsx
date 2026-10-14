@@ -17,7 +17,7 @@ function fmtTvl(n: number): string {
  * others are there to compare, honestly labelled.
  */
 export function YieldsPanel() {
-  const [kind, setKind] = useState<"stable" | "eth">("stable");
+  const [kind, setKind] = useState<"stable" | "eth" | "hype">("stable");
   const [onlyExec, setOnlyExec] = useState(false);
   const { data, isLoading } = useQuery<Opportunity[]>({
     queryKey: ["opportunities", kind],
@@ -46,6 +46,10 @@ export function YieldsPanel() {
           <label className="seg-opt">
             <input type="radio" name="yield-kind" checked={kind === "eth"} onChange={() => setKind("eth")} />
             <span>ETH</span>
+          </label>
+          <label className="seg-opt">
+            <input type="radio" name="yield-kind" checked={kind === "hype"} onChange={() => setKind("hype")} />
+            <span>HYPE</span>
           </label>
         </div>
         <label className="yields-toggle">
@@ -94,7 +98,7 @@ export function YieldsPanel() {
         </p>
       )}
       <p className="text-muted" style={{ fontSize: 10, margin: 0 }}>
-        Single-asset pools with at least $5M TVL on Meridian&apos;s 7 chains, from DefiLlama. &ldquo;Executable&rdquo; means
+        Single-asset pools with at least $5M TVL on Meridian&apos;s chains (incl. HyperEVM), from DefiLlama. &ldquo;Executable&rdquo; means
         Meridian builds and simulates the deposit itself.
       </p>
     </section>

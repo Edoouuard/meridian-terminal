@@ -117,7 +117,9 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
         const isBridge = legSide === "bridge" || /debridge/i.test(leg.protocol || "");
         const isLifiSwap = /li\.?fi/i.test(leg.protocol || "") && !isBridge;
         const isLidoStake = isLido && legSide === "stake";
-        const isPerp = /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "");
+        // A Hyperliquid deposit is a plain validated USDC transfer on Arbitrum, not a perp order.
+        const isHlDeposit = /hyperliquid/i.test(leg.protocol || "") && (legSide === "deposit" || legSide === "supply" || legSide === "fund");
+        const isPerp = /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "") && !isHlDeposit;
         const isUniswap = /uniswap/i.test(leg.protocol || "");
         const isPendle = /pendle/i.test(leg.protocol || "");
         // These venues need live data (vault, route, on-chain quote, perp
@@ -138,9 +140,9 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
             reason={`Meridian executes on ${ACTIVE_CHAIN_IDS.map((id) => CHAIN_LABEL[id]).join(", ")} — not ${leg.chain ?? "this chain"}.`}
           />
         ) : dedicated || isUnsupported(resolved) ? (
-            !FEATURES.perps && /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "") ? (
+            isPerp && !FEATURES.perps ? (
               <NotWired venue={leg.protocol} reason="Perps are paused during the beta while spot execution is validated end to end." />
-            ) : /hyperliquid/i.test(leg.protocol || "") ? (
+            ) : isPerp && /hyperliquid/i.test(leg.protocol || "") ? (
               <PerpExecuteButton leg={leg} prices={prices} />
             ) : /extended/i.test(leg.protocol || "") ? (
               <ExtendedPerpExecuteButton leg={leg} prices={prices} />

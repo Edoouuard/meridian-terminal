@@ -60,9 +60,13 @@ export const PROTOCOLS: Record<string, ProtocolInfo> = {
   "benqi-lending": { name: "Benqi", category: "lending", coverage: "watch" },
   "moonwell-lending": { name: "Moonwell", category: "lending", coverage: "watch" },
   "centrifuge-protocol": { name: "Centrifuge", category: "credit", coverage: "watch" },
+  // Hyperliquid ecosystem (DefiLlama files HyperEVM protocols under "Hyperliquid L1")
+  "hyperlend-pooled": { name: "HyperLend", category: "lending", coverage: "watch" },
+  "kinetiq-khype": { name: "Kinetiq", category: "staking", coverage: "watch" },
+  "felix-cdp": { name: "Felix", category: "savings", coverage: "watch" },
 };
 
-/** DefiLlama chain name → chain id, for Meridian's 7 active chains. */
+/** DefiLlama chain name → chain id, for Meridian's active chains (HyperEVM is "Hyperliquid L1" in DefiLlama). */
 export const LLAMA_CHAIN_ID: Record<string, number> = {
   Ethereum: 1,
   Base: 8453,
@@ -71,13 +75,15 @@ export const LLAMA_CHAIN_ID: Record<string, number> = {
   Polygon: 137,
   Avalanche: 43114,
   BSC: 56,
+  "Hyperliquid L1": 999,
 };
 
-export const STABLE_SYMBOLS = new Set(["USDC", "USDT", "USDT0", "USD₮0", "DAI", "USDS", "SUSDS", "SDAI", "USDE", "SUSDE", "GHO", "PYUSD", "USDC.E", "RLUSD", "USD1", "FDUSD", "CRVUSD", "FRAX"]);
+export const STABLE_SYMBOLS = new Set(["USDC", "USDT", "USDT0", "USD₮0", "FEUSD", "USDHL", "DAI", "USDS", "SUSDS", "SDAI", "USDE", "SUSDE", "GHO", "PYUSD", "USDC.E", "RLUSD", "USD1", "FDUSD", "CRVUSD", "FRAX"]);
 
-export function assetKind(symbol: string): "stable" | "eth" | "other" {
+export function assetKind(symbol: string): "stable" | "eth" | "hype" | "other" {
   const s = symbol.toUpperCase();
   if (STABLE_SYMBOLS.has(s)) return "stable";
+  if (/^(HYPE|WHYPE|KHYPE|STHYPE|WSTHYPE|LHYPE|BEHYPE|HBHYPE)$/.test(s)) return "hype";
   if (/^(W?ETH|STETH|WSTETH|RETH|CBETH|WEETH|EZETH|RSETH|METH|WBETH|OSETH|LSETH|ETHX)$/.test(s)) return "eth";
   return "other";
 }

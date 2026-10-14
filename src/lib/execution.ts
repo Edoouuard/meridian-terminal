@@ -4,6 +4,7 @@ import { AAVE_V3_POOL_BY_CHAIN, CHAIN_LABEL, COMPOUND_V3_USDC_COMET_BY_CHAIN, ST
 import { SWAP_ROUTER02_EXACT_INPUT_SINGLE_ABI, UNISWAP_SWAP_ROUTER02_BY_CHAIN } from "./integrations/uniswap";
 import { ERC4626_DEPOSIT_ABI, ERC4626_WITHDRAW_ABI } from "./integrations/morpho";
 import { isTrustedVault } from "./protocols/vaults";
+import { hyperliquidDepositProblem, isHyperliquidBridge } from "./integrations/hyperliquidDeposit";
 import {
   LIDO_CLAIM_WITHDRAWAL_ABI,
   LIDO_REQUEST_WITHDRAWALS_ABI,
@@ -544,6 +545,19 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
       if (!token) return fail("ERC-20 transfer requires a token address");
       const amount = normalizeAmount(order.amount, decimals);
       if ("error" in amount) return amount;
+      if (isHyperliquidBridge(chainId, to)) {
+        const problem = hyperliquidDepositProblem(token, amount.value);
+        if (problem) return fail(problem);
+        return {
+          chainId,
+          address: token,
+          abi: ERC20_TRANSFER_ABI,
+          functionName: "transfer",
+          args: [to, amount.value],
+          description: `Deposit ${order.amount} USDC into your Hyperliquid account (official Bridge2 on Arbitrum)`,
+          riskNote: "Hyperliquid credits the USDC to the sending address within about a minute. Trading and HLP deposits then happen on Hyperliquid.",
+        };
+      }
       return {
         chainId,
         address: token,

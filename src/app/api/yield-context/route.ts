@@ -416,7 +416,7 @@ function pendleSummary(markets: PendleMarket[]): string {
 
 /**
  * Cross-protocol coverage from DefiLlama (lib/protocols/registry.ts): the
- * best single-asset stablecoin and ETH yields on the 7 chains, split into
+ * best single-asset stablecoin and ETH yields on the active chains (incl. HyperEVM), split into
  * what Meridian executes and what it only watches.
  */
 function opportunitiesSummary(pools: unknown[]): string {
@@ -424,11 +424,11 @@ function opportunitiesSummary(pools: unknown[]): string {
   const lines: string[] = [];
   const row = (o: Opportunity) =>
     `- ${o.protocol} | ${o.symbol}${o.shareSymbol ? ` → ${o.shareSymbol}` : ""} | ${o.chain} | ${o.apy.toFixed(2)}% APY${o.apyReward > 0 ? ` (${o.apyBase.toFixed(2)}% base + ${o.apyReward.toFixed(2)}% rewards)` : ""}${o.apyMean30d !== undefined ? ` | 30d avg ${o.apyMean30d.toFixed(2)}%` : ""} | ${fmtTvl(o.tvlUsd)} TVL${o.exit ? ` | exit: ${o.exit}` : ""}`;
-  for (const kind of ["stable", "eth"] as const) {
+  for (const kind of ["stable", "eth", "hype"] as const) {
     const all = parseOpportunities(pools, { kind, limit: 60 });
     const exec = all.filter((o) => o.coverage === "execute").slice(0, 15);
     const watch = all.filter((o) => o.coverage === "watch").slice(0, 8);
-    const label = kind === "stable" ? "stablecoins" : "ETH";
+    const label = kind === "stable" ? "stablecoins" : kind === "eth" ? "ETH" : "HYPE (Hyperliquid)";
     if (exec.length > 0) {
       lines.push(`\n\n### Best ${label} yields Meridian EXECUTES (DefiLlama, live) — use protocol name exactly as written`);
       lines.push(...exec.map(row));

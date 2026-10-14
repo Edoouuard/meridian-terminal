@@ -39,6 +39,7 @@ const HTTP_TRANSPORT = { transport: "http" as const };
 /** EVM chain ID → deBridge-internal chain ID, where they differ. */
 const EVM_TO_DEBRIDGE_CHAIN: Record<number, number> = {
   100: 100000002, // Gnosis
+  999: 100000022, // HyperEVM
   146: 100000014, // Sonic
   2741: 100000017, // Abstract
   5000: 100000023, // Mantle

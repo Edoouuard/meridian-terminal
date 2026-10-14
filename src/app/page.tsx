@@ -98,12 +98,12 @@ function buildQuickPrompts(assets: { symbol: string; balance: number; usd: numbe
     stableUsd >= 10
       ? {
           label: `Put my $${fmtAmount(stableUsd)} of stablecoins to work`,
-          hint: "Best live rate across 7 chains, bridging only when it pays",
+          hint: "Best live rate across 8 chains, bridging only when it pays",
           thesis: `Find the best yield on my $${fmtAmount(stableUsd)} of stablecoins (mostly ${mainStable}) across all chains. Bridge or swap only if it pays off.`,
         }
       : {
           label: "Best yield on my stablecoins",
-          hint: "Aave, Morpho, Pendle — across 7 chains, bridging only when it pays",
+          hint: "Aave, Morpho, Pendle — across 8 chains, bridging only when it pays",
           thesis: "Find the best yield on my stablecoins across all chains. Bridge or swap only if it pays off.",
         },
     eth >= 0.005

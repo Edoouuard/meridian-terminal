@@ -14,6 +14,8 @@ import * as allow from "@/lib/mcp/routerAllowlist";
 import * as pendle from "@/lib/integrations/pendle";
 import * as eigen from "@/lib/integrations/eigenlayer";
 import { VAULTS } from "@/lib/protocols/vaults";
+import { HYPERLIQUID_BRIDGE2 } from "@/lib/integrations/hyperliquidDeposit";
+const ERC20_BAL = parseAbi(["function balanceOf(address) view returns (uint256)"]);
 const ERC4626_ASSET = [
   { type: "function", name: "asset", stateMutability: "view", inputs: [], outputs: [{ type: "address" }] },
   { type: "function", name: "totalAssets", stateMutability: "view", inputs: [], outputs: [{ type: "uint256" }] },
@@ -96,6 +98,10 @@ async function chainProbe(idStr) {
       const held = Number(ta) / 10 ** v.assetDecimals;
       log(id, "Vault", `${v.protocol} ${v.shareSymbol} ${v.vault}`, asset.toLowerCase() === v.assetAddress.toLowerCase() && ta > 0n ? "OK" : "FAIL", `asset=${asset} expected=${v.assetAddress} totalAssets=${Math.round(held)} ${v.assetSymbol}`);
     } catch (e) { log(id, "Vault", `${v.protocol} ${v.shareSymbol} ${v.vault}`, "FAIL", (e.shortMessage ?? "reverted").slice(0, 100)); }
+  }
+  if (id === 42161) {
+    const bal = await c.readContract({ address: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", abi: ERC20_BAL, functionName: "balanceOf", args: [HYPERLIQUID_BRIDGE2] }).catch(() => 0n);
+    log(id, "Hyperliquid", `Bridge2 ${HYPERLIQUID_BRIDGE2}`, (await code(HYPERLIQUID_BRIDGE2)) && bal > 0n ? "OK" : "FAIL", `USDC held=${Math.round(Number(bal) / 1e6)}`);
   }
   if (pendle.PENDLE_CHAINS.includes(id)) log(id, "Pendle", pendle.PENDLE_ROUTER_V4, (await code(pendle.PENDLE_ROUTER_V4)) ? "OK" : "FAIL", "RouterV4");
   if (id === 1) for (const [n, a] of [["StrategyManager", eigen.EIGENLAYER_STRATEGY_MANAGER], ["stETH strategy", eigen.EIGENLAYER_STETH_STRATEGY], ["DelegationManager", eigen.EIGENLAYER_DELEGATION_MANAGER]]) log(id, "EigenLayer", `${n} ${a}`, (await code(a)) ? "OK" : "FAIL", "");

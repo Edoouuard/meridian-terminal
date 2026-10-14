@@ -51,7 +51,7 @@ const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v)
 
 export function parseOpportunities(
   raw: unknown[],
-  { kind, limit = 30, minTvl = MIN_OPPORTUNITY_TVL }: { kind: "stable" | "eth"; limit?: number; minTvl?: number },
+  { kind, limit = 30, minTvl = MIN_OPPORTUNITY_TVL }: { kind: "stable" | "eth" | "hype"; limit?: number; minTvl?: number },
 ): Opportunity[] {
   const best = new Map<string, Opportunity>();
   for (const item of raw) {

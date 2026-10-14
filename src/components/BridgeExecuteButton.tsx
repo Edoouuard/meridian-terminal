@@ -58,7 +58,10 @@ export function BridgeExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
   // A bridge can also swap: it spends `fromAsset` (when set) and delivers `asset`.
   const fromAsset = leg.fromAsset ?? leg.asset;
   const fromToken = findToken(fromAsset, fromChainId);
-  const toToken = findToken(leg.asset, toChainId);
+  // A USD stable the destination doesn't track (USDC on HyperEVM) arrives as the stable it does (USDT0).
+  const toToken =
+    findToken(leg.asset, toChainId) ??
+    (/^(USDC|USDT|USDT0)$/i.test(leg.asset.trim()) ? ["USDC", "USDT0", "USDT"].map((s) => findToken(s, toChainId)).find(Boolean) : undefined);
   if (!fromToken) {
     return <NotWiredLine reason={`"${fromAsset}" has no tracked address on ${CHAIN_LABEL[fromChainId] ?? `chain ${fromChainId}`}.`} />;
   }

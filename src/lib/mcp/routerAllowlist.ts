@@ -38,6 +38,8 @@ export const LIFI_DIAMOND_BY_CHAIN: Record<number, Address> = {
   137: "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE", // Polygon
   43114: "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE", // Avalanche
   56: "0x1231DEB6f5749EF6cE6943a275A1D3E7486F4EaE", // BNB Chain
+  // HyperEVM uses its own diamond (not the CREATE2 address above): named by LI.FI's /chains API and checked to hold code on chain 999.
+  999: "0x0a0758d937d1059c356D4714e57F5df0239bce1A", // HyperEVM
 };
 
 /** deBridge's "DlnSource" entrypoint (origin-chain side of a DLN order) — verified on these chains only. */
@@ -49,6 +51,7 @@ export const DEBRIDGE_DLN_SOURCE_BY_CHAIN: Record<number, Address> = {
   137: "0xeF4fB24aD0916217251F553c0596F8Edc630EB66", // Polygon
   43114: "0xeF4fB24aD0916217251F553c0596F8Edc630EB66", // Avalanche
   56: "0xeF4fB24aD0916217251F553c0596F8Edc630EB66", // BNB Chain
+  999: "0xeF4fB24aD0916217251F553c0596F8Edc630EB66", // HyperEVM (code checked on chain 999)
 };
 
 /** True when `address` is the verified LI.FI entrypoint on `chainId`. */

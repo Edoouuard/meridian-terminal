@@ -209,6 +209,14 @@ Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → s
 
 **Critère de sortie :** 10 utilisateurs, ≥ 20 transactions réelles, taux d'échec < 10 % avec cause connue pour chaque échec.
 
+### Hyperliquid
+
+- **HyperEVM (chaîne 999)** : 8e chaîne active. Jetons suivis (USDT0, USDe, WHYPE, UETH, UBTC — symbole et décimales vérifiés on-chain), solde natif HYPE, RPC officiel, bridges entrants/sortants via LI.FI (diamond propre à HyperEVM, `0x0a07…ce1A`, confirmé par l'API LI.FI et on-chain) et deBridge (DlnSource, id interne 100000022). Un stable USD bridgé vers HyperEVM arrive en USDT0.
+- **Dépôt Hyperliquid exécutable** : USDC natif d'Arbitrum → Bridge2 officiel (`0x2Df1…3dF7`, ~400 M$ USDC), crédité sur le compte Hyperliquid en ~1 min. Garde-fous dans le builder : USDC Arbitrum uniquement, minimum 5 USDC (en dessous, perdu). Prouvé sur fork Arbitrum en CI.
+- **Portefeuille** : le compte Hyperliquid réel (mainnet, lecture seule) — marge perps, soldes spot, part HLP — s'ajoute aux avoirs. Avant : lu sur le testnet, donc jamais vu.
+- **Pas encore exécutable** : dépôt HLP, trading perps, staking HYPE (actions L1 signées via un « agent wallet » Hyperliquid — chantier dédié). Le chat propose le dépôt puis renvoie vers l'app Hyperliquid pour ces étapes.
+- **Données** : HLP (APR live), écosystème HyperEVM via DefiLlama (« Hyperliquid L1 ») : HyperLend, Kinetiq, Felix en comparaison, onglet Yields « HYPE ».
+
 ### Couverture des protocoles (DefiLlama)
 
 - **Exécutables (intégration dédiée)** : Aave, Compound, Morpho, Spark (SparkLend), Lido, Rocket Pool, Pendle, EigenLayer.

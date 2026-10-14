@@ -46,6 +46,7 @@ const PUBLIC: Record<number, { env: string; urls: string[] }> = {
   10: { env: "NEXT_PUBLIC_RPC_OPTIMISM", urls: ["https://mainnet.optimism.io", "https://optimism-rpc.publicnode.com"] },
   137: { env: "NEXT_PUBLIC_RPC_POLYGON", urls: ["https://polygon-bor-rpc.publicnode.com", "https://polygon.drpc.org"] },
   43114: { env: "NEXT_PUBLIC_RPC_AVALANCHE", urls: ["https://api.avax.network/ext/bc/C/rpc", "https://avalanche-c-chain-rpc.publicnode.com"] },
+  999: { env: "NEXT_PUBLIC_RPC_HYPEREVM", urls: ["https://rpc.hyperliquid.xyz/evm"] },
   56: { env: "NEXT_PUBLIC_RPC_BSC", urls: ["https://bsc-dataseed.bnbchain.org", "https://bsc-rpc.publicnode.com", "https://56.rpc.thirdweb.com"] },
 };
 
@@ -77,6 +78,7 @@ const ENV: Env = {
   NEXT_PUBLIC_RPC_POLYGON: process.env.NEXT_PUBLIC_RPC_POLYGON,
   NEXT_PUBLIC_RPC_AVALANCHE: process.env.NEXT_PUBLIC_RPC_AVALANCHE,
   NEXT_PUBLIC_RPC_BSC: process.env.NEXT_PUBLIC_RPC_BSC,
+  NEXT_PUBLIC_RPC_HYPEREVM: process.env.NEXT_PUBLIC_RPC_HYPEREVM,
 };
 
 export const RPC_URLS: Record<number, string[]> = Object.fromEntries(

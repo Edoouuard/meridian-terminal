@@ -324,6 +324,37 @@ export async function fetchClearinghouseState(
   return parseClearinghouseState(data);
 }
 
+/** What the user holds on Hyperliquid outside perps margin: spot balances and vault (e.g. HLP) equity. */
+export interface HlHoldings {
+  spot: { coin: string; total: number }[];
+  vaults: { vaultAddress: string; equity: number }[];
+}
+
+/** Parse `spotClearinghouseState` + `userVaultEquities` (pure; unit-tested). */
+export function parseHlHoldings(spotData: unknown, vaultData: unknown): HlHoldings {
+  const balances = (spotData as { balances?: { coin?: string; total?: string }[] } | null)?.balances;
+  const spot = (Array.isArray(balances) ? balances : [])
+    .map((b) => ({ coin: String(b.coin ?? ""), total: num(b.total) }))
+    .filter((b) => b.coin && b.total > 0);
+  const vaults = (Array.isArray(vaultData) ? (vaultData as { vaultAddress?: string; equity?: string }[]) : [])
+    .map((v) => ({ vaultAddress: String(v.vaultAddress ?? ""), equity: num(v.equity) }))
+    .filter((v) => v.vaultAddress && v.equity > 0);
+  return { spot, vaults };
+}
+
+/** Read-only: the user's Hyperliquid spot balances and vault equities. */
+export async function fetchHlHoldings(address: string, env: HyperliquidEnv): Promise<HlHoldings> {
+  const post = (body: object) =>
+    fetch(env.infoUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) =>
+      r.ok ? r.json() : null,
+    );
+  const [spot, vaults] = await Promise.all([
+    post({ type: "spotClearinghouseState", user: address }).catch(() => null),
+    post({ type: "userVaultEquities", user: address }).catch(() => null),
+  ]);
+  return parseHlHoldings(spot, vaults);
+}
+
 export interface HlOpenOrder {
   coin: string;
   side: string;

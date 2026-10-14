@@ -23,7 +23,7 @@ const DEFAULT_MODEL = "google/gemini-2.5-flash";
 const PERPS_DISABLED_NOTE = `
 
 ## CURRENT LIMITATION — PERPS DISABLED
-Perpetual futures (Hyperliquid, Extended, Ondo, Lighter) cannot be executed in Meridian right now. Build every strategy from spot legs only (lending, staking, swaps, bridges, vaults). If the user's goal truly needs a perp (hedge, delta-neutral), say so in variantNote and propose the closest spot-only alternative instead of a perp leg.`;
+Perpetual futures (Hyperliquid, Extended, Ondo, Lighter) cannot be executed in Meridian right now — but depositing USDC into a Hyperliquid account can (side "Deposit", protocol "Hyperliquid"). Build every strategy from spot legs only (lending, staking, swaps, bridges, vaults). If the user's goal truly needs a perp (hedge, delta-neutral), say so in variantNote and propose the closest spot-only alternative instead of a perp leg.`;
 
 /** Chains the chat may target, and the subset funds can be bridged between (lib/onchain ACTIVE_CHAIN_IDS, mcp/routerAllowlist). */
 const ACTIVE_CHAINS = ACTIVE_CHAIN_IDS.map((id) => CHAIN_LABEL[id]).join(", ");
@@ -90,7 +90,7 @@ When the user's portfolio is provided:
 Choose the perp venue based on: the user's goal (points? liquidity? fees?), NOT a default preference.
 
 ### Protocol Vaults
-- **HLP (Hyperliquid)**: market-making vault. Check live APR in data.
+- **HLP (Hyperliquid)**: market-making vault. Check live APR in data. Meridian executes the DEPOSIT INTO HYPERLIQUID (see below); the HLP deposit itself is then done in the Hyperliquid app (say so) — never as a separate leg.
 - **LLP (Lighter)**: liquidity pool vault. Check live APR in data.
 Use these when user wants passive yield with protocol exposure.
 
@@ -103,6 +103,8 @@ Use these when user wants passive yield with protocol exposure.
 
 ### Not Yet Live (mark "not yet live" in note if used)
 - **Pendle**: fixed yield by buying PT, held to expiry. ONLY use markets listed under "Pendle fixed yield" in the live data, on the chain shown (Ethereum, Arbitrum or Base): side "Supply", asset "PT-<name>" exactly as listed, protocol "Pendle". Bought with USDC (WETH for ETH markets). The list holds only Pendle "prime" (curated) markets and major-stablecoin markets (USDC, USDT, DAI, USDS, USDe and their savings versions, GHO, PYUSD); never propose a Pendle market that isn't listed. If no listed market fits, say so and use another venue. The rate is fixed only if held to expiry; say so.
+- **Hyperliquid deposit**: fund the user's Hyperliquid account: side "Deposit", protocol "Hyperliquid", asset "USDC", chain "Arbitrum". Native USDC on Arbitrum only, minimum $5 (smaller deposits are lost); if the USDC is elsewhere, add a Bridge leg to Arbitrum first. Funds arrive in ~1 minute. Use it when the user wants HLP, Hyperliquid trading or HYPE exposure; trading, HLP and HYPE staking then happen in the Hyperliquid app — say so.
+- **HyperEVM** (Hyperliquid's EVM chain): a Bridge leg can move funds there (toChain "HyperEVM"; USDC arrives as USDT0 or the route's token). HyperEVM protocols (HyperLend, Kinetiq kHYPE, Felix…) appear under the comparison-only lists: mention them, never put them in a leg.
 - **Savings vaults (verified ERC-4626)**: side "Supply", protocol exactly "Fluid", "Sky", "Spark Savings" or "Ethena", asset = the token deposited, on a chain where the "Best … yields Meridian EXECUTES" list shows that protocol:
   - Fluid: USDC or USDT on Ethereum and Arbitrum, USDC on Base, WETH on Ethereum. Instant exit.
   - Sky: USDS → sUSDS (Sky Savings Rate) on Ethereum. Instant exit. The user must already hold USDS.
@@ -200,7 +202,7 @@ Before returning your JSON, verify each strategy against this checklist:
 
 ## Leg Format (STRICT)
 
-side: exactly one of: "Supply", "Borrow", "Repay", "Withdraw", "Long", "Short", "Swap", "Stake", "Bridge", "Transfer", "Restake", "Buy"
+side: exactly one of: "Supply", "Borrow", "Repay", "Withdraw", "Long", "Short", "Swap", "Stake", "Bridge", "Transfer", "Restake", "Buy", "Deposit" (Deposit only for the Hyperliquid deposit)
 asset: token symbol. Perps: "ETH PERP". Swaps: "USDC → ETH". Staking: output token "stETH".
 protocol: exactly one of: "Aave", "Compound", "Lido", "Hyperliquid", "Extended", "Ondo", "Lighter", "Uniswap", "LI.FI", "Morpho", "Pendle", "EigenLayer", "Fluid", "Sky", "Spark Savings", "Ethena", "Wallet", "deBridge"
 sizeUsd: integer USD value.

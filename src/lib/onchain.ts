@@ -7,6 +7,7 @@ import {
   celo,
   fantom,
   gnosis,
+  hyperEvm,
   linea,
   mainnet,
   mantle,
@@ -26,6 +27,7 @@ export const SUPPORTED_CHAINS = [
   polygon,
   avalanche,
   bsc,
+  hyperEvm,
   gnosis,
   scroll,
   zkSync,
@@ -42,7 +44,7 @@ export const SUPPORTED_CHAINS = [
  * view still reads every SUPPORTED_CHAINS entry, so funds elsewhere stay
  * visible; they just aren't a target for new strategies.
  */
-export const ACTIVE_CHAIN_IDS: readonly number[] = [mainnet.id, base.id, arbitrum.id, optimism.id, polygon.id, avalanche.id, bsc.id];
+export const ACTIVE_CHAIN_IDS: readonly number[] = [mainnet.id, base.id, arbitrum.id, optimism.id, polygon.id, avalanche.id, bsc.id, hyperEvm.id];
 
 export function isActiveChain(chainId: number | undefined): boolean {
   return chainId !== undefined && ACTIVE_CHAIN_IDS.includes(chainId);
@@ -56,6 +58,7 @@ export const CHAIN_LABEL: Record<number, string> = {
   [polygon.id]: "Polygon",
   [avalanche.id]: "Avalanche",
   [bsc.id]: "BNB Chain",
+  [hyperEvm.id]: "HyperEVM",
   [gnosis.id]: "Gnosis",
   [scroll.id]: "Scroll",
   [zkSync.id]: "zkSync Era",
@@ -260,6 +263,14 @@ export const TRACKED_TOKENS_BY_CHAIN: Record<number, TrackedToken[]> = {
     { symbol: "WBNB", address: "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c", decimals: 18, priceSymbol: "BNB", venue: "Wallet" },
     // Binance-Peg ETH (on-chain symbol "ETH"), the ERC-20 ETH Aave and the bridges use on BNB Chain.
     { symbol: "WETH", address: "0x2170Ed0880ac9A755fd29B2688956BD959F933F8", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
+  ],
+  // HyperEVM (Hyperliquid's EVM, chain 999). Checked on-chain: symbol and decimals of each.
+  [hyperEvm.id]: [
+    { symbol: "USDT0", address: "0xB8CE59FC3717ada4C02eaDF9682A9e934F625ebb", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
+    { symbol: "USDe", address: "0x5d3a1Ff2b6BAb83b63cd9AD0787074081a52ef34", decimals: 18, priceSymbol: "USDE", venue: "Wallet" },
+    { symbol: "WHYPE", address: "0x5555555555555555555555555555555555555555", decimals: 18, priceSymbol: "HYPE", venue: "Wallet" },
+    { symbol: "UETH", address: "0xBe6727B535545C67d5cAa73dEa54865B92CF7907", decimals: 18, priceSymbol: "ETH", venue: "Wallet" },
+    { symbol: "UBTC", address: "0x9FDBdA0A5e284c32744D2f17Ee5c74B284993463", decimals: 8, priceSymbol: "BTC", venue: "Wallet" },
   ],
   [gnosis.id]: [
     { symbol: "USDC", address: "0xDDAfbb505ad214D7b80b1f830fcCc89B60fb7A83", decimals: 6, priceSymbol: "USDC", venue: "Wallet" },
