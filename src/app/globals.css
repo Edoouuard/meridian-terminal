@@ -1338,3 +1338,11 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .txp, .txp__spinner { animation: none; }
 }
+.celebrate__steps { display: flex; flex-direction: column; gap: 4px; margin: 12px auto 0; padding: 0; list-style: none; max-width: 320px; text-align: left; font-size: 12px; }
+.celebrate__steps li { display: flex; align-items: center; gap: 8px; opacity: 0; animation: step-in 0.35s ease-out forwards; }
+.celebrate__steps li span { display: grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 50%; font-size: 10px; font-weight: 700; }
+.celebrate__steps li.is-done span { background: var(--risk-good, #27ae60); color: #fff; }
+.celebrate__steps li.is-skipped { color: var(--color-neutral-500); text-decoration: line-through; }
+.celebrate__steps li.is-skipped span { background: var(--color-surface); color: var(--color-neutral-500); }
+@keyframes step-in { from { opacity: 0; transform: translateX(-6px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .celebrate__steps li { opacity: 1; animation: none; } }

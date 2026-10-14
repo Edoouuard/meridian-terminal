@@ -12,22 +12,22 @@ function fmtUsd(v: number): string {
 }
 
 /** A burst of confetti from the centre of the screen (pure CSS; skipped when the user prefers reduced motion). */
-function Confetti() {
+function Confetti({ wave = 0 }: { wave?: number }) {
   const pieces = useMemo(
     () =>
       Array.from({ length: PIECES }, (_, i) => {
-        const angle = (i / PIECES) * Math.PI * 2 + (i % 3) * 0.2;
-        const dist = 140 + ((i * 37) % 160);
+        const angle = (i / PIECES) * Math.PI * 2 + (i % 3) * 0.2 + wave * 0.4;
+        const dist = 140 + ((i * 37 + wave * 53) % 160);
         return {
           dx: Math.cos(angle) * dist,
           dy: Math.sin(angle) * dist - 60,
           rot: (i * 47) % 360,
           color: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
-          delay: (i % 6) * 25,
+          delay: (i % 6) * 25 + wave * 450,
           round: i % 4 === 0,
         };
       }),
-    [],
+    [wave],
   );
   return (
     <div className="confetti" aria-hidden="true">
@@ -48,6 +48,24 @@ function Confetti() {
       ))}
     </div>
   );
+}
+
+/** A number that counts up from zero (instantly when the user prefers reduced motion). */
+function CountUp({ value, format, durationMs = 900 }: { value: number; format: (v: number) => string; durationMs?: number }) {
+  const [shown, setShown] = useState(0);
+  useEffect(() => {
+    const reduce = typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    let raf = 0;
+    const start = performance.now();
+    const tick = (t: number) => {
+      const k = reduce ? 1 : Math.min(1, (t - start) / durationMs);
+      setShown(value * (1 - Math.pow(1 - k, 3)));
+      if (k < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value, durationMs]);
+  return <>{format(shown)}</>;
 }
 
 /**
@@ -117,16 +135,34 @@ export function Celebration() {
       {done && s && (
         <div className="celebrate" role="dialog" aria-modal="true" aria-label="Strategy live" onClick={() => setDone(null)}>
           <Confetti />
+          <Confetti wave={1} />
           <div className="celebrate__card" onClick={(e) => e.stopPropagation()}>
             <div className="celebrate__badge" aria-hidden="true">✓</div>
             <span className="celebrate__kicker">Strategy live</span>
             <h3 className="celebrate__title">{s.title}</h3>
             {s.apyPct !== undefined && (
               <p className="celebrate__apy">
-                {fmtPct(s.apyPct)} <span>{s.apyKind === "fixed" ? "fixed APY" : "APY"}</span>
+                <CountUp value={s.apyPct} format={fmtPct} /> <span>{s.apyKind === "fixed" ? "fixed APY" : "APY"}</span>
               </p>
             )}
-            {yearly !== undefined && <p className="celebrate__earn">≈ {fmtUsd(yearly)} a year on {fmtUsd(size as number)}</p>}
+            {yearly !== undefined && (
+              <p className="celebrate__earn">
+                ≈ <CountUp value={yearly} format={fmtUsd} /> a year on {fmtUsd(size as number)} · {fmtUsd(yearly / 365)} a day, starting now
+              </p>
+            )}
+            <ol className="celebrate__steps">
+              {s.legs.map((l, i) => (
+                <li
+                  key={i}
+                  className={l.status === "confirmed" ? "is-done" : "is-skipped"}
+                  style={{ animationDelay: `${300 + i * 180}ms` }}
+                >
+                  <span aria-hidden="true">{l.status === "confirmed" ? "✓" : "–"}</span>
+                  {l.side} {l.asset} · {l.protocol}
+                  {l.chain ? ` · ${l.chain}` : ""}
+                </li>
+              ))}
+            </ol>
             <p className="celebrate__text text-muted">
               {skippedMoves > 0
                 ? `${confirmedCount} step${confirmedCount > 1 ? "s" : ""} confirmed on-chain — the ${skippedMoves > 1 ? "other moves weren't" : "other move wasn't"} needed.`
