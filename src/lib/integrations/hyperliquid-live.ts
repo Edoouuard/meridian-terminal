@@ -328,17 +328,19 @@ export async function fetchClearinghouseState(
 /**
  * What the user holds on Hyperliquid outside perps margin.
  *
- * Verified against live accounts: a lent ("Earn") amount stays inside the
- * spot `total`, so `supplied` is the part of `total` that is lent out; a
- * borrow is not a negative balance, so it comes back separately as debt. In
- * the unified / portfolio-margin account modes the perps collateral is the
- * spot USDC itself, so the perps account value must not be added on top.
+ * How lending shows up in `spotClearinghouseState` depends on the account
+ * mode (checked against live accounts):
+ *   - portfolio margin: the spot `total` is net — it includes what is lent
+ *     out and subtracts what is borrowed (so it can be negative);
+ *   - unified (and default): what is lent out is not in the spot `total`.
+ * Each token is therefore split into what sits free in spot, what is lent
+ * and what is borrowed. In unified / portfolio-margin mode the perps
+ * collateral is the spot USDC itself, so the perps account value must not
+ * be added on top.
  */
 export interface HlHoldings {
-  /** Spot balances; `supplied` (≤ total) is lent out, `px` is Hyperliquid's own USD mark (0 when unknown). */
-  spot: { coin: string; total: number; supplied: number; px: number }[];
-  /** Borrowed tokens (debt), with their USD mark. */
-  borrows: { coin: string; amount: number; px: number }[];
+  /** Per token: free spot amount, amount lent out, amount borrowed, and Hyperliquid's own USD mark (0 when unknown). */
+  spot: { coin: string; free: number; supplied: number; borrowed: number; px: number }[];
   /** Lending health factor (null when nothing is borrowed). */
   lendingHealthFactor: number | null;
   /** Staked HYPE: delegated + undelegated staking balance + pending withdrawals. */
@@ -359,13 +361,17 @@ export interface HlHoldingsRaw {
   spotMeta?: unknown;
 }
 
-/** USD mark per spot token index, from `spotMetaAndAssetCtxs` (the token's pair against USDC). */
-function spotMarks(spotMeta: unknown): Map<number, number> {
+/** Token names and USD marks per spot token index, from `spotMetaAndAssetCtxs` (the token's pair against USDC). */
+function spotTokens(spotMeta: unknown): { names: Map<number, string>; marks: Map<number, number> } {
+  const names = new Map<number, string>([[0, "USDC"]]);
   const marks = new Map<number, number>([[0, 1]]);
-  if (!Array.isArray(spotMeta) || spotMeta.length < 2) return marks;
-  const meta = spotMeta[0] as { universe?: { tokens?: number[]; index?: number }[] } | null;
+  if (!Array.isArray(spotMeta) || spotMeta.length < 2) return { names, marks };
+  const meta = spotMeta[0] as { tokens?: { name?: string; index?: number }[]; universe?: { tokens?: number[]; index?: number }[] } | null;
   const ctxs = spotMeta[1] as { markPx?: string; midPx?: string | null }[] | null;
-  if (!Array.isArray(meta?.universe) || !Array.isArray(ctxs)) return marks;
+  for (const t of Array.isArray(meta?.tokens) ? meta.tokens : []) {
+    if (typeof t.index === "number" && t.name) names.set(t.index, t.name);
+  }
+  if (!Array.isArray(meta?.universe) || !Array.isArray(ctxs)) return { names, marks };
   for (const pair of meta.universe) {
     const [base, quote] = pair.tokens ?? [];
     if (quote !== 0 || typeof base !== "number" || typeof pair.index !== "number" || marks.has(base)) continue;
@@ -373,42 +379,48 @@ function spotMarks(spotMeta: unknown): Map<number, number> {
     const px = num(ctx?.midPx ?? ctx?.markPx);
     if (px > 0) marks.set(base, px);
   }
-  return marks;
+  return { names, marks };
 }
 
 /** Parse the raw info responses into holdings (pure; unit-tested). */
 export function parseHlHoldings(raw: HlHoldingsRaw): HlHoldings {
-  const marks = spotMarks(raw.spotMeta);
-  const pxOf = (token: unknown, coin: string) => {
-    if (typeof token === "number" && marks.has(token)) return marks.get(token) as number;
+  const { names, marks } = spotTokens(raw.spotMeta);
+  const pxOf = (token: number | undefined, coin: string) => {
+    if (token !== undefined && marks.has(token)) return marks.get(token) as number;
     return /^USD/.test(coin) ? 1 : 0;
   };
 
   const blState = raw.borrowLend as { tokenToState?: [number, { borrow?: { value?: string }; supply?: { value?: string } }][]; healthFactor?: string | null } | null;
   const supplied = new Map<number, number>();
   const borrowed = new Map<number, number>();
-  for (const entry of Array.isArray(blState?.tokenToState) ? blState.tokenToState : []) {
-    const [token, st] = entry;
+  for (const [token, st] of Array.isArray(blState?.tokenToState) ? blState.tokenToState : []) {
     if (num(st?.supply?.value) > 0) supplied.set(token, num(st?.supply?.value));
     if (num(st?.borrow?.value) > 0) borrowed.set(token, num(st?.borrow?.value));
   }
 
-  const balances = (raw.spot as { balances?: { coin?: string; token?: number; total?: string }[] } | null)?.balances;
-  const names = new Map<number, string>();
-  const spot = (Array.isArray(balances) ? balances : [])
-    .map((b) => {
-      const coin = String(b.coin ?? "");
-      if (typeof b.token === "number") names.set(b.token, coin);
-      const total = num(b.total);
-      const lent = typeof b.token === "number" ? Math.min(supplied.get(b.token) ?? 0, total) : 0;
-      return { coin, total, supplied: lent, px: pxOf(b.token, coin) };
-    })
-    .filter((b) => b.coin && b.total > 0);
+  const portfolioMargin = raw.abstraction === "portfolioMargin";
+  const balances = (raw.spot as { balances?: { coin?: string; token?: number | null; total?: string }[] } | null)?.balances;
+  const totals = new Map<string, { coin: string; token?: number; total: number }>();
+  for (const b of Array.isArray(balances) ? balances : []) {
+    const coin = String(b.coin ?? "");
+    if (!coin) continue;
+    const token = typeof b.token === "number" ? b.token : undefined;
+    if (token !== undefined) names.set(token, coin);
+    totals.set(token !== undefined ? `#${token}` : coin, { coin, token, total: num(b.total) });
+  }
+  for (const token of [...supplied.keys(), ...borrowed.keys()]) {
+    if (!totals.has(`#${token}`)) totals.set(`#${token}`, { coin: names.get(token) ?? `#${token}`, token, total: 0 });
+  }
 
-  const borrows = [...borrowed].map(([token, amount]) => {
-    const coin = names.get(token) ?? (token === 0 ? "USDC" : `#${token}`);
-    return { coin, amount, px: pxOf(token, coin) };
-  });
+  const spot = [...totals.values()]
+    .map(({ coin, token, total }) => {
+      const sup = token !== undefined ? (supplied.get(token) ?? 0) : 0;
+      const bor = token !== undefined ? (borrowed.get(token) ?? 0) : 0;
+      // Portfolio margin nets lending into the spot total; the other modes keep it out.
+      const free = Math.max(0, portfolioMargin ? total - sup + bor : total);
+      return { coin, free, supplied: sup, borrowed: bor, px: pxOf(token, coin) };
+    })
+    .filter((b) => b.free > 0 || b.supplied > 0 || b.borrowed > 0);
 
   const d = raw.delegator as { delegated?: string; undelegated?: string; totalPendingWithdrawal?: string } | null;
   const stakedHype = num(d?.delegated) + num(d?.undelegated) + num(d?.totalPendingWithdrawal);
@@ -420,11 +432,10 @@ export function parseHlHoldings(raw: HlHoldingsRaw): HlHoldings {
 
   return {
     spot,
-    borrows,
     lendingHealthFactor: blState?.healthFactor ? num(blState.healthFactor) : null,
     stakedHype,
     hypePx: marks.get(hypeToken) ?? 0,
-    unified: raw.abstraction === "unifiedAccount" || raw.abstraction === "portfolioMargin",
+    unified: raw.abstraction === "unifiedAccount" || portfolioMargin,
     vaults,
   };
 }

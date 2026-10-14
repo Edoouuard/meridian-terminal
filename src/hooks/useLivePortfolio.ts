@@ -360,9 +360,8 @@ export function useLivePortfolio(): LivePortfolio {
   const hlPx = (coin: string, px: number) => px || priceOf(coin.replace(/^U(?=ETH|BTC|SOL)/, "")) || (/^USD/.test(coin) ? 1 : 0);
   for (const b of hlHoldings?.spot ?? []) {
     const px = hlPx(b.coin, b.px);
-    const free = b.total - b.supplied;
     const pnl = hlUnified && b.coin === "USDC" ? hlPerpPnl : 0;
-    if (px > 0 && free > 0) hlAssets.push({ symbol: b.coin, venue: "Hyperliquid spot", chain: "Hyperliquid L1", balance: free, usd: free * px + pnl });
+    if (px > 0 && b.free > 0) hlAssets.push({ symbol: b.coin, venue: "Hyperliquid spot", chain: "Hyperliquid L1", balance: b.free, usd: b.free * px + pnl });
   }
   if (hlHoldings && hlHoldings.stakedHype > 0) {
     const px = hlPx("HYPE", hlHoldings.hypePx);
@@ -436,7 +435,7 @@ export function useLivePortfolio(): LivePortfolio {
   // Hyperliquid lending (Earn): lent spot tokens as collateral, borrows as debt.
   if (hlHoldings) {
     const lentUsd = hlHoldings.spot.reduce((sum, b) => sum + b.supplied * hlPx(b.coin, b.px), 0);
-    const borrowedUsd = hlHoldings.borrows.reduce((sum, b) => sum + b.amount * hlPx(b.coin, b.px), 0);
+    const borrowedUsd = hlHoldings.spot.reduce((sum, b) => sum + b.borrowed * hlPx(b.coin, b.px), 0);
     if (lentUsd > 0 || borrowedUsd > 0) {
       aavePositions.push({
         chain: "Hyperliquid L1",

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAccount } from "wagmi";
 import type { StakeYieldEntry } from "@/app/api/stake-yield/route";
@@ -19,6 +19,8 @@ import { formatBaseUnits } from "@/lib/quote";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FEATURES } from "@/lib/features";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
+import { StrategyLegContext } from "@/components/thread/strategyLegContext";
+import { confirmStrategyLeg } from "@/lib/strategyTracker";
 import { BridgeExecuteButton } from "@/components/BridgeExecuteButton";
 import { ExtendedPerpExecuteButton, LifiPerpExecuteButton, PerpExecuteButton } from "@/components/execute/PerpExecuteButtons";
 import { LidoUnstakeButton, MorphoExecuteButton, MorphoWithdrawButton, PendleExecuteButton, SwapExecuteButton } from "@/components/execute/VenueExecuteButtons";
@@ -172,7 +174,8 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
             </>
           );
         return (
-          <div key={i} className="leg-card" style={{ opacity: building ? 0.55 : 1 }}>
+          <StrategyLegContext.Provider key={i} value={{ plan, legIndex: i }}>
+          <div className="leg-card" style={{ opacity: building ? 0.55 : 1 }}>
             <div className="leg-card__header">
               {plan.legs.length > 1 && <span className="leg-card__step" aria-label={`Step ${i + 1}`}>{i + 1}</span>}
               <span className="leg-card__side">{leg.side}</span>
@@ -189,6 +192,7 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
               execution
             )}
           </div>
+          </StrategyLegContext.Provider>
         );
       })}
     </div>
@@ -218,7 +222,7 @@ const LEG_STATUS_COLOR: Record<LegStatus, string> = {
 /** Batch "Execute Strategy" button — runs all executable legs sequentially with chain switching. */
 export function ExecuteStrategyButton({ plan }: { plan: TradePlan }) {
   const { data: prices } = useLivePrices();
-  const { chain, isConnected } = useAccount();
+  const { chain, isConnected, address } = useAccount();
   const { progress, executeAll, cancel, reset } = useStrategyExecutor();
   const [confirming, setConfirming] = useState(false);
 
@@ -236,6 +240,17 @@ export function ExecuteStrategyButton({ plan }: { plan: TradePlan }) {
     });
     return allSignable ? results : [];
   }, [plan.legs, prices, connectedChainId]);
+
+  // Each leg the batch run confirms is recorded against the strategy (once per hash).
+  const recorded = useRef(new Set<string>());
+  useEffect(() => {
+    progress.legs.forEach((lp, i) => {
+      const entry = resolvedOrders[i];
+      if (lp.status !== "confirmed" || !lp.hash || !entry || recorded.current.has(lp.hash)) return;
+      recorded.current.add(lp.hash);
+      confirmStrategyLeg(plan, entry.legIndex, { hash: lp.hash, chainId: entry.order.chainId, owner: address });
+    });
+  }, [progress.legs, resolvedOrders, plan, address]);
 
   if (resolvedOrders.length === 0) return null;
 

@@ -34,40 +34,37 @@ describe("Hyperliquid deposit", () => {
 });
 
 describe("Hyperliquid holdings", () => {
-  // Shapes taken from live info API responses (portfolio-margin account with lending + staking).
+  // Shapes taken from live info API responses.
   const spotMeta = [
-    { universe: [{ tokens: [150, 0], index: 107 }, { tokens: [268, 0], index: 166 }] },
+    {
+      tokens: [{ name: "USDC", index: 0 }, { name: "HYPE", index: 150 }, { name: "USDT0", index: 268 }],
+      universe: [{ tokens: [150, 0], index: 107 }, { tokens: [268, 0], index: 166 }],
+    },
     Object.assign(new Array(200).fill({}), { 107: { markPx: "81.91", midPx: "81.9105" }, 166: { markPx: "1.0", midPx: null } }),
   ];
-  const raw = {
-    spot: {
-      balances: [
-        { coin: "USDC", token: 0, total: "10171.6", hold: "9847.7" },
-        { coin: "HYPE", token: 150, total: "14", hold: "7.9" },
-        { coin: "USDT0", token: 268, total: "0", hold: "-324.1" },
-      ],
-    },
-    vaults: [{ vaultAddress: "0xdfc24b077bc1425ad1dea75bcb6f8158e10df303", equity: "250.1" }, { vaultAddress: "0xabc", equity: "0" }],
-    borrowLend: {
-      tokenToState: [
-        [0, { borrow: { basis: "417.5", value: "417.6" }, supply: { basis: "0.0", value: "0.0" } }],
-        [150, { borrow: { basis: "0.0", value: "0.0" }, supply: { basis: "14", value: "14" } }],
-      ],
-      health: "healthy",
-      healthFactor: "1.78",
-    },
-    delegator: { delegated: "12", undelegated: "0.5", totalPendingWithdrawal: "1", nPendingWithdrawals: 1 },
-    abstraction: "portfolioMargin",
-    spotMeta,
-  };
+  const vaults = [{ vaultAddress: "0xdfc24b077bc1425ad1dea75bcb6f8158e10df303", equity: "250.1" }, { vaultAddress: "0xabc", equity: "0" }];
+  const delegator = { delegated: "12", undelegated: "0.5", totalPendingWithdrawal: "1", nPendingWithdrawals: 1 };
 
-  it("splits lent spot balances, reads borrows, staking, account mode and marks", () => {
-    const h = parseHlHoldings(raw);
+  it("portfolio margin: the spot total includes what is lent and is net of borrows", () => {
+    const h = parseHlHoldings({
+      spot: { balances: [{ coin: "USDC", token: 0, total: "-6448270.25" }, { coin: "HYPE", token: 150, total: "182372.3" }] },
+      borrowLend: {
+        tokenToState: [
+          [0, { borrow: { basis: "7948000", value: "7948753.25" }, supply: { basis: "0.0", value: "0.0" } }],
+          [150, { borrow: { basis: "0.0", value: "0.0" }, supply: { basis: "182000", value: "182372.3" } }],
+        ],
+        health: "healthy",
+        healthFactor: "1.78",
+      },
+      abstraction: "portfolioMargin",
+      delegator,
+      vaults,
+      spotMeta,
+    });
     expect(h.spot).toEqual([
-      { coin: "USDC", total: 10171.6, supplied: 0, px: 1 },
-      { coin: "HYPE", total: 14, supplied: 14, px: 81.9105 },
+      { coin: "USDC", free: 7948753.25 - 6448270.25, supplied: 0, borrowed: 7948753.25, px: 1 },
+      { coin: "HYPE", free: 0, supplied: 182372.3, borrowed: 0, px: 81.9105 },
     ]);
-    expect(h.borrows).toEqual([{ coin: "USDC", amount: 417.6, px: 1 }]);
     expect(h.lendingHealthFactor).toBe(1.78);
     expect(h.stakedHype).toBe(13.5);
     expect(h.hypePx).toBe(81.9105);
@@ -75,8 +72,31 @@ describe("Hyperliquid holdings", () => {
     expect(h.vaults).toEqual([{ vaultAddress: "0xdfc24b077bc1425ad1dea75bcb6f8158e10df303", equity: 250.1 }]);
   });
 
+  it("unified account: what is lent sits outside the spot total, even with no spot row", () => {
+    const h = parseHlHoldings({
+      spot: { balances: [{ coin: "USDC", token: 0, total: "0.0" }, { coin: "HYPE", token: 150, total: "0.08944077" }] },
+      borrowLend: {
+        tokenToState: [
+          [0, { borrow: { basis: "0.0", value: "0.0" }, supply: { basis: "135000", value: "135907.117" } }],
+          [150, { borrow: { basis: "0.0", value: "0.0" }, supply: { basis: "297", value: "297.42" } }],
+          [268, { borrow: { basis: "0.0", value: "0.0" }, supply: { basis: "50", value: "50" } }],
+        ],
+        healthFactor: null,
+      },
+      abstraction: "unifiedAccount",
+      spotMeta,
+    });
+    expect(h.spot).toEqual([
+      { coin: "USDC", free: 0, supplied: 135907.117, borrowed: 0, px: 1 },
+      { coin: "HYPE", free: 0.08944077, supplied: 297.42, borrowed: 0, px: 81.9105 },
+      { coin: "USDT0", free: 0, supplied: 50, borrowed: 0, px: 1 },
+    ]);
+    expect(h.lendingHealthFactor).toBeNull();
+    expect(h.unified).toBe(true);
+  });
+
   it("degrades to empty holdings when every read failed", () => {
-    expect(parseHlHoldings({})).toEqual({ spot: [], borrows: [], lendingHealthFactor: null, stakedHype: 0, hypePx: 0, unified: false, vaults: [] });
+    expect(parseHlHoldings({})).toEqual({ spot: [], lendingHealthFactor: null, stakedHype: 0, hypePx: 0, unified: false, vaults: [] });
     expect(parseHlHoldings({ abstraction: "default" }).unified).toBe(false);
   });
 
