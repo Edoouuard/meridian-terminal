@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { parseOpportunities, type Opportunity } from "@/lib/protocols/opportunities";
 import { fetchAaveYieldSummary } from "@/lib/mcp/aave";
-import { ACTIVE_CHAIN_IDS } from "@/lib/onchain";
+import { ACTIVE_CHAIN_IDS, CHAIN_LABEL } from "@/lib/onchain";
 import { PENDLE_CHAINS, fetchPendleMarkets, type PendleMarket } from "@/lib/integrations/pendle";
 import * as haiku from "@/lib/mcp/providers/haiku";
+import { MIN_VAULT_TVL_USD } from "@/lib/vaultPolicy";
+import { MIN_MORPHO_RISK_SCORE } from "@/lib/integrations/morpho";
 
 /**
  * GET /api/yield-context
@@ -98,8 +100,10 @@ const MERIDIAN_PROTOCOL_SLUGS = new Set([
   "aave-v3", "aave-v2",
   "compound-v3", "compound-v2",
   "morpho", "morpho-blue",
-  "spark",
-  "fluid",
+  "spark", "sparklend", "spark-savings",
+  "fluid", "fluid-lending",
+  "sky-lending",
+  "ethena-usde",
   // Staking (for comparison)
   "lido",
   "rocket-pool",
@@ -212,9 +216,13 @@ async function fetchDefiLlama(): Promise<{ lending: YieldRow[]; staking: YieldRo
       }
     }
 
+    // The deepest markets, not the highest APYs: a top-by-APY cut kept thin, odd
+    // pools and dropped the plain Aave / Compound / Fluid USDC markets, so the
+    // planner had no real rate for them and filled the gap itself.
     const lending = Array.from(lendingMap.values())
-      .sort((a, b) => b.apy - a.apy)
-      .slice(0, 50);
+      .sort((a, b) => b.tvlUsd - a.tvlUsd)
+      .slice(0, 80)
+      .sort((a, b) => b.apy - a.apy);
     const staking = Array.from(stakingMap.values())
       .sort((a, b) => b.apy - a.apy);
 
@@ -322,19 +330,20 @@ interface RawPhilidorVault {
 async function fetchPhilidorVaults(): Promise<PhilidorVault[]> {
   try {
     const res = await fetch(
-      `${PHILIDOR_VAULTS}?limit=50&sortBy=apr_net&sortOrder=desc&minTvl=100000`,
+      `${PHILIDOR_VAULTS}?limit=50&sortBy=tvl_usd&sortOrder=desc&minTvl=${MIN_VAULT_TVL_USD}`,
       { signal: AbortSignal.timeout(TIMEOUT), cache: "no-store" },
     );
     if (!res.ok) return [];
     const body: { data?: RawPhilidorVault[] } = await res.json();
     if (!Array.isArray(body.data)) return [];
     return body.data
-      .filter((v) => typeof v.apr_net === "number" && typeof v.total_score === "number")
+      .filter((v) => typeof v.apr_net === "number" && typeof v.total_score === "number" && (v.total_score as number) >= MIN_MORPHO_RISK_SCORE)
       .map((v) => ({
         protocol: String(v.protocol_name ?? ""),
         asset: String(v.asset_symbol ?? ""),
         chain: String(v.chain_name ?? ""),
-        apy: v.apr_net as number,
+        // Philidor reports apr_net as a fraction (0.0315 = 3.15%).
+        apy: (v.apr_net as number) * 100,
         riskScore: v.total_score as number,
         riskTier: String(v.risk_tier ?? ""),
         tvlUsd: typeof v.tvl_usd === "number" ? v.tvl_usd : 0,
@@ -342,6 +351,49 @@ async function fetchPhilidorVaults(): Promise<PhilidorVault[]> {
   } catch {
     return [];
   }
+}
+
+/**
+ * The exact Morpho vault Meridian deposits into for each chain and asset —
+ * the same rule as the Morpho execute button: Philidor's best risk score with
+ * at least MIN_VAULT_TVL_USD, Core tier or better. Quoting this vault's rate
+ * keeps the strategy's APY equal to what the user actually gets.
+ */
+async function fetchMorphoExecutableVaults(): Promise<string> {
+  // One query per chain, as the execute button does (a global top-50 by score
+  // left whole chains, Arbitrum included, without any Morpho rate).
+  const chains = ACTIVE_CHAIN_IDS.map((id) => CHAIN_LABEL[id]).filter((c): c is string => !!c);
+  const perChain = await Promise.all(
+    chains.map(async (chain) => {
+      try {
+        const res = await fetch(
+          `${PHILIDOR_VAULTS}?protocol=morpho&chain=${encodeURIComponent(chain)}&limit=25&sortBy=total_score&sortOrder=desc&minTvl=${MIN_VAULT_TVL_USD}`,
+          { signal: AbortSignal.timeout(TIMEOUT), cache: "no-store" },
+        );
+        if (!res.ok) return [];
+        const body: { data?: (RawPhilidorVault & { name?: unknown })[] } = await res.json();
+        return body.data ?? [];
+      } catch {
+        return [];
+      }
+    }),
+  );
+  const best = new Map<string, string>();
+  for (const v of perChain.flat()) {
+    if (typeof v.apr_net !== "number" || typeof v.total_score !== "number" || v.total_score < MIN_MORPHO_RISK_SCORE) continue;
+    if (typeof v.tvl_usd !== "number" || v.tvl_usd < MIN_VAULT_TVL_USD) continue;
+    const key = `${v.chain_name}|${v.asset_symbol}`;
+    if (best.has(key)) continue; // sorted by score: the first is the one Meridian picks
+    best.set(
+      key,
+      `- Morpho | ${String(v.asset_symbol)} | ${String(v.chain_name)} | ${(v.apr_net * 100).toFixed(2)}% net APY | vault "${String(v.name ?? "")}" | risk ${v.total_score.toFixed(1)}/10 | ${fmtTvl(v.tvl_usd)} TVL`,
+    );
+  }
+  if (best.size === 0) return "";
+  return [
+    "\n\n### Morpho — the vault Meridian deposits into (use exactly this rate for a Morpho leg; no other Morpho rate is real for execution; no row = no Morpho on that chain/asset)",
+    ...best.values(),
+  ].join("\n");
 }
 
 /* ---------- Build text summary ---------- */
@@ -447,7 +499,7 @@ function opportunitiesSummary(pools: unknown[]): string {
 
 export async function GET() {
   // Fetch ALL sources in parallel — each is independently null-safe
-  const [defiLlama, funding, hlp, lighterVaults, philidor, aaveMcp, haikuYields, pendleMarkets] = await Promise.all([
+  const [defiLlama, funding, hlp, lighterVaults, philidor, aaveMcp, haikuYields, pendleMarkets, morphoVaults] = await Promise.all([
     fetchDefiLlama(),
     fetchFundingRates(),
     fetchHlpVault(),
@@ -456,6 +508,7 @@ export async function GET() {
     fetchAaveYieldSummary([...ACTIVE_CHAIN_IDS]).catch(() => ""),
     haiku.fetchYieldOpportunities({ minApy: 1 }).catch(() => []),
     Promise.all(PENDLE_CHAINS.map((c) => fetchPendleMarkets(c))).then((all) => all.flat()),
+    fetchMorphoExecutableVaults(),
   ]);
 
   const vaults: VaultYield[] = [
@@ -469,17 +522,18 @@ export async function GET() {
     .map((y) => ({
       protocol: y.protocol,
       asset: y.asset.toUpperCase(),
-      chain: String(y.chainId),
+      chain: CHAIN_LABEL[y.chainId] ?? String(y.chainId),
       apy: y.apy,
       tvlUsd: y.tvlUsd,
       kind: y.type,
     }));
   // Deduplicate: prefer DefiLlama data (already validated), add Haiku-only entries
   const existingKeys = new Set(defiLlama.lending.map((r) => `${r.protocol}:${r.asset}:${r.chain}`));
+  // Haiku rows only fill gaps in DefiLlama's deep markets, and only with a sane, real-chain rate.
   const mergedLending = [
     ...defiLlama.lending,
-    ...haikuLending.filter((r) => !existingKeys.has(`${r.protocol}:${r.asset}:${r.chain}`)),
-  ].sort((a, b) => b.apy - a.apy).slice(0, 60);
+    ...haikuLending.filter((r) => !existingKeys.has(`${r.protocol}:${r.asset}:${r.chain}`) && !/^\d+$/.test(r.chain) && r.apy < 40).slice(0, 10),
+  ];
 
   const ctx: YieldContext = {
     lending: mergedLending,
@@ -492,7 +546,7 @@ export async function GET() {
   };
   // Build summary with optional Aave MCP enrichment appended
   ctx.summary =
-    buildSummary(ctx) + opportunitiesSummary(defiLlama.pools) + pendleSummary(pendleMarkets) + (aaveMcp ? `\n${aaveMcp}` : "");
+    buildSummary(ctx) + morphoVaults + opportunitiesSummary(defiLlama.pools) + pendleSummary(pendleMarkets) + (aaveMcp ? `\n${aaveMcp}` : "");
 
   return NextResponse.json(ctx);
 }

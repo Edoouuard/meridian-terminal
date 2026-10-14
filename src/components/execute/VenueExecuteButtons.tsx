@@ -195,6 +195,7 @@ export function MorphoExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
   return (
     <>
       <OrderRow label="Vault" value={vault.name} />
+      <OrderRow label="Net APY" value={`${(vault.aprNet * 100).toFixed(2)}% (live)`} valueColor="var(--color-accent-700)" />
       <OrderRow label="Risk" value={`${vault.riskTier} · ${vault.riskScore.toFixed(1)}/10 (Philidor)`} valueColor={RISK_TIER_COLOR[vault.riskTier]} />
       <ValidatedExecuteButton order={order} label="Deposit on Morpho →" />
     </>
