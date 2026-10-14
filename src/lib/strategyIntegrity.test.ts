@@ -34,14 +34,17 @@ describe("strategyIntegrity — neutral strategies", () => {
     expect(out.legs.map((l) => l.sizeUsd)).toEqual([5000, 5000]);
   });
 
-  it("adds the missing spot long to a naked perp short labelled neutral", () => {
+  it("adds the missing spot long to a naked perp short labelled neutral, paid from the stable leg", () => {
     const out = validateAndFixStrategy(
       strat("Neutral funding", [
-        { side: "Supply", asset: "USDC", protocol: "Aave", sizeUsd: 3000 },
-        { side: "Short", asset: "ETH PERP", protocol: "Hyperliquid", sizeUsd: 3000, leverage: 1 },
+        { side: "Supply", asset: "USDC", protocol: "Morpho", chain: "Arbitrum", sizeUsd: 4000 },
+        { side: "Deposit", asset: "USDC", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 1000 },
+        { side: "Short", asset: "ETH PERP", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 3000, leverage: 3 },
       ]),
     );
-    expect(out.legs[0]).toMatchObject({ side: "Swap", asset: "USDC → ETH", sizeUsd: 3000 });
+    expect(out.legs[0]).toMatchObject({ side: "Swap", asset: "USDC → wstETH", chain: "Arbitrum", sizeUsd: 3000 });
+    expect(out.legs[1]).toMatchObject({ side: "Supply", protocol: "Morpho", sizeUsd: 1000 });
+    expect(out.legs.reduce((s, l) => s + (l.side === "Short" ? 0 : (l.sizeUsd ?? 0)), 0)).toBe(5000);
   });
 
   it("relabels a 'neutral' strategy with no short side as directional", () => {

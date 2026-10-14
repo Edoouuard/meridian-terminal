@@ -146,25 +146,42 @@ export function validateAndFixStrategy(strategy: LLMStrategy): LLMStrategy {
   }
 
   // Missing the offsetting long — add a spot buy for each unique shorted asset.
+  // It's paid for by the strategy's own stablecoin supply when there is one
+  // ("supply USDC on Morpho + short ETH" becomes "buy wstETH + short ETH"), so
+  // the plan doesn't grow past the budget; it runs on the perp's chain, and an
+  // ETH long is held as wstETH so it earns staking yield.
   if (hasShort && !hasMatchingLong && !borrowHedged) {
+    let rest = legs.slice();
     const addedLegs: LLMLeg[] = [];
     for (const asset of shortAssets) {
       const matchingShorts = shortLegs.filter((l) => exposureAsset(legUnderlying(l)) === asset);
       const totalShortSize = matchingShorts.reduce((s, l) => s + (l.sizeUsd ?? 10000), 0);
+      const chain = matchingShorts[0]?.chain ?? "Arbitrum";
+      const token = asset === "ETH" ? "wstETH" : asset;
+      let toFund = totalShortSize;
+      rest = rest.flatMap((l) => {
+        const isStableSupply = l.side.toLowerCase() === "supply" && STABLECOINS.has(legUnderlying(l).toLowerCase());
+        if (!isStableSupply || toFund <= 0) return [l];
+        const take = Math.min(toFund, l.sizeUsd ?? 0);
+        toFund -= take;
+        const left = (l.sizeUsd ?? 0) - take;
+        return left >= 5 ? [{ ...l, sizeUsd: left }] : [];
+      });
       addedLegs.push({
         side: "Swap",
-        asset: `USDC → ${asset}`,
+        asset: `USDC → ${token}`,
         protocol: "Uniswap",
+        chain,
         sizeUsd: totalShortSize,
-        note: `Spot long ${asset} to offset short perp — required for delta neutrality.`,
+        note: `Spot long ${asset} (held as ${token}) to offset the short perp — required for neutrality.`,
       });
     }
-    const fixedLegs = [...addedLegs, ...legs].map(fixSpotLeverage);
+    const fixedLegs = [...addedLegs, ...rest].map(fixSpotLeverage);
     const assetList = [...shortAssets].join(", ");
     return {
       ...strategy,
       legs: fixedLegs,
-      summary: `${strategy.summary} Includes spot ${assetList} purchase(s) to maintain delta neutrality.`,
+      summary: `${strategy.summary} Meridian added the spot ${assetList} long the short needs to be neutral, paid from the stablecoin leg.`,
     };
   }
 
