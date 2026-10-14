@@ -13,6 +13,7 @@ import { useIndexedPositions } from "@/hooks/useIndexedPositions";
 import { useVaultRisk } from "@/hooks/useVaultRisk";
 import { MIN_VAULT_TVL_USD } from "@/lib/vaultPolicy";
 import { MIN_MORPHO_RISK_SCORE } from "@/lib/integrations/morpho";
+import { philidorAssetQuery } from "@/lib/integrations/philidor";
 import { PENDLE_CHAINS, PENDLE_ROUTER_V4, isEthMarket, pickPendleMarket, type PendleBuyQuote, type PendleMarket } from "@/lib/integrations/pendle";
 import { QUOTER_V2_QUOTE_READ_ABI, QUOTE_FEE_TIERS, UNISWAP_QUOTER_V2_BY_CHAIN, applySlippage, parseSwapAsset, pickBestFeeQuote } from "@/lib/integrations/uniswap";
 import { formatBaseUnits, resolvePriceFromList, usdToTokenAmount, type PriceEntry } from "@/lib/quote";
@@ -132,16 +133,19 @@ export function MorphoExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
 
   const { data: vaults, isLoading } = useVaultRisk({
     protocol: "Morpho",
-    asset: symbol || undefined,
+    asset: symbol ? philidorAssetQuery(symbol) : undefined,
     chain: chainName,
     limit: 25,
     enabled: !!symbol && !!chainName,
   });
   // Best-rated vault that also clears the TVL floor (the risk sort alone can
   // surface a sub-$1M vault with no yield).
-  const vault = vaults?.find((v) => v.tvlUsd >= MIN_VAULT_TVL_USD);
-
+  // Only a vault whose underlying is the exact token being deposited (aliases like USDT/USDT0 share one contract).
   const token = findToken(symbol, chainId);
+  const vault = vaults?.find(
+    (v) => v.tvlUsd >= MIN_VAULT_TVL_USD && (!token || !v.assetAddress || v.assetAddress.toLowerCase() === token.address.toLowerCase()),
+  );
+
   const price = token ? resolvePriceFromList(prices, token.symbol) : null;
   const quote = token ? usdToTokenAmount(token.symbol, leg.sizeUsd, price, token.decimals) : null;
 

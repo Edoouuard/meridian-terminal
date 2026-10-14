@@ -14,7 +14,7 @@ import { explorerUrlFor } from "@/lib/explorer";
 import { useStrategyExecutor, type LegStatus } from "@/hooks/useStrategyExecutor";
 import { useLivePrices } from "@/hooks/useLivePrices";
 import { useVaultRisk } from "@/hooks/useVaultRisk";
-import { PHILIDOR_PROTOCOL_ID } from "@/lib/integrations/philidor";
+import { PHILIDOR_PROTOCOL_ID, philidorAssetQuery } from "@/lib/integrations/philidor";
 import { formatBaseUnits } from "@/lib/quote";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FEATURES } from "@/lib/features";
@@ -35,7 +35,7 @@ export function LegRiskBadge({ leg }: { leg: TradeLeg }) {
   const protocolId = PHILIDOR_PROTOCOL_ID[leg.protocol];
   const plainAsset = /^[A-Za-z]{2,10}$/.test(leg.asset) ? leg.asset : undefined;
   const enabled = !!protocolId && !!plainAsset;
-  const { data } = useVaultRisk({ protocol: leg.protocol, asset: plainAsset, limit: 1, enabled });
+  const { data } = useVaultRisk({ protocol: leg.protocol, asset: plainAsset ? philidorAssetQuery(plainAsset) : plainAsset, limit: 1, enabled });
   const top = data?.[0];
   if (!enabled || !top) return null;
   return (

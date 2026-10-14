@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeVault, PHILIDOR_PROTOCOL_ID } from "@/lib/integrations/philidor";
+import { normalizeVault, philidorAssetQuery, PHILIDOR_PROTOCOL_ID } from "@/lib/integrations/philidor";
 
 describe("philidor — normalizeVault", () => {
   it("normalizes a well-formed raw vault row", () => {
@@ -91,5 +91,13 @@ describe("philidor — PHILIDOR_PROTOCOL_ID", () => {
     expect(PHILIDOR_PROTOCOL_ID["Variational"]).toBeUndefined();
     expect(PHILIDOR_PROTOCOL_ID["Lido"]).toBeUndefined();
     expect(PHILIDOR_PROTOCOL_ID["Pendle"]).toBeUndefined();
+  });
+});
+
+describe("philidorAssetQuery", () => {
+  it("searches USDT under both its symbols (Arbitrum vaults are filed as USDT0)", () => {
+    expect(philidorAssetQuery("USDT")).toBe("USDT,USDT0");
+    expect(philidorAssetQuery("usdt0")).toBe("USDT0,USDT");
+    expect(philidorAssetQuery("USDC")).toBe("USDC");
   });
 });

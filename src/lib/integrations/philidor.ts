@@ -109,6 +109,22 @@ export function normalizeVault(raw: RawVault): VaultRisk | null {
   };
 }
 
+/**
+ * Symbols Philidor files an asset under. USDT was migrated to USDT0 in place
+ * on Arbitrum (same contract), and Philidor lists those vaults as "USDT0", so
+ * a search for "USDT" alone misses them.
+ */
+const PHILIDOR_ASSET_ALIASES: Record<string, string[]> = {
+  USDT: ["USDT", "USDT0"],
+  USDT0: ["USDT0", "USDT"],
+};
+
+/** The `asset` filter to send Philidor for a Meridian asset symbol (comma-separated aliases). */
+export function philidorAssetQuery(symbol: string): string {
+  const s = symbol.trim();
+  return (PHILIDOR_ASSET_ALIASES[s.toUpperCase()] ?? [s]).join(",");
+}
+
 export interface SearchVaultsParams {
   /** Comma-separated Philidor protocol ids (see PHILIDOR_PROTOCOL_ID), e.g. "aave,morpho". */
   protocol?: string;
