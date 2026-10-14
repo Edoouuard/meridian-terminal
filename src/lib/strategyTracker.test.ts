@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TradePlan } from "@/lib/tradePlan";
-import { applyLegConfirmed, earningLeg, estimatedEarnedUsd, matchOpportunity, strategyId } from "@/lib/strategyTracker";
+import { applyLegConfirmed, deployedUsd, earningLeg, estimatedEarnedUsd, legState, liveSince, matchOpportunity, strategyId, type TrackedStrategy } from "@/lib/strategyTracker";
 
 const plan: TradePlan = {
   intent: "supply",
@@ -49,7 +49,8 @@ describe("strategyTracker", () => {
     const { strategy } = applyLegConfirmed([], { ...plan, legs: [plan.legs[1]] }, 0, { hash: "0x1" }, 0);
     const year = 365 * 24 * 3600 * 1000;
     expect(estimatedEarnedUsd(strategy!, year / 2)).toBeCloseTo(150, 5);
-    expect(estimatedEarnedUsd({ ...strategy!, completedAt: undefined }, year)).toBeUndefined();
+    const notLive = { ...strategy!, completedAt: undefined, legs: strategy!.legs.map((l) => ({ ...l, status: "pending" as const })) };
+    expect(estimatedEarnedUsd(notLive, year)).toBeUndefined();
   });
 
   it("finds today's rate for the earning leg, skipping the bridge", () => {
@@ -61,5 +62,47 @@ describe("strategyTracker", () => {
     ];
     expect(matchOpportunity(strategy!, opps)?.apy).toBe(5.2);
     expect(matchOpportunity(strategy!, [{ protocol: "Aave", chain: "Base", symbol: "USDC", apy: 4 }])).toBeUndefined();
+  });
+
+  it("is live once the earning step confirms, even if a top-up bridge was never needed", () => {
+    // Real case: bridge from BNB Chain (not needed, funds already on Arbitrum), then supply on Morpho.
+    const morpho: TradePlan = {
+      ...plan,
+      variantLabel: "Morpho USDC on Arbitrum",
+      sizeUsd: 661,
+      legs: [
+        { side: "Bridge", asset: "USDC", protocol: "deBridge", chain: "BNB Chain", toChain: "Arbitrum", sizeUsd: 200 } as TradePlan["legs"][number],
+        { side: "Supply", asset: "USDC", protocol: "Morpho", chain: "Arbitrum", sizeUsd: 661 } as TradePlan["legs"][number],
+      ],
+    };
+    const res = applyLegConfirmed([], morpho, 1, { hash: "0xb381" }, 1000);
+    expect(res.justCompleted).toBe(true);
+    expect(res.strategy?.completedAt).toBe(1000);
+    expect(legState(res.strategy!, 0)).toBe("skipped");
+    expect(legState(res.strategy!, 1)).toBe("confirmed");
+    expect(deployedUsd(res.strategy!)).toBe(661);
+  });
+
+  it("reads entries stored before the rule as live from their earning step", () => {
+    const stored: TrackedStrategy = {
+      id: "x",
+      title: "Fluid on Base",
+      summary: "",
+      apyPct: 9.7,
+      apyKind: "variable",
+      sizeUsd: 3,
+      createdAt: 100,
+      legs: [
+        { side: "Bridge", asset: "USDC", protocol: "deBridge", chain: "Arbitrum", status: "confirmed", hash: "0xab", confirmedAt: 200 },
+        { side: "Bridge", asset: "USDC", protocol: "deBridge", chain: "BNB Chain", status: "pending" },
+        { side: "Supply", asset: "USDC", protocol: "Fluid", chain: "Base", sizeUsd: 3, status: "confirmed", hash: "0x03", confirmedAt: 300 },
+      ],
+    };
+    expect(liveSince(stored)).toBe(300);
+    expect(legState(stored, 1)).toBe("skipped");
+    // A strategy whose earning step is still pending is not live, and its moves stay "to do".
+    const pending = { ...stored, legs: stored.legs.map((l, i) => (i === 2 ? { ...l, status: "pending" as const, hash: undefined, confirmedAt: undefined } : l)) };
+    expect(liveSince(pending)).toBeUndefined();
+    expect(legState(pending, 1)).toBe("pending");
   });
 });

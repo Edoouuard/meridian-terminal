@@ -31,8 +31,9 @@ import { findVault } from "@/lib/protocols/vaults";
 import { HYPERLIQUID_BRIDGE2 } from "@/lib/integrations/hyperliquidDeposit";
 import { executePreparedOrder, prepareOrder, type OrderRunnerClient, type OrderRunnerDeps, type WriteAsync } from "@/lib/orderRunner";
 
-// anvil's well-known default account #0 (local test key, holds no real funds).
-const account = privateKeyToAccount("0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80");
+// anvil's well-known default account #1 (local test key, holds no real funds). Not #0: the other
+// fork test files sign with #0 on the same forks in parallel, and a shared account races on nonces.
+const account = privateKeyToAccount("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d");
 const PRICES = ["USDC", "USDT", "USDS", "USDE"].map((symbol) => ({ symbol, price: 1 }));
 
 function withoutChainId(args: Record<string, unknown>): Record<string, unknown> {

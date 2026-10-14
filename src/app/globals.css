@@ -1286,3 +1286,5 @@ body {
 .strat-card__title { text-transform: none; letter-spacing: -0.01em; font-size: 14px; }
 .side-tabs .seg-opt span.tab-count { position: absolute; top: -8px; right: -4px; display: inline-grid; width: auto; margin: 0; padding: 0 4px; box-shadow: 0 0 0 2px var(--color-bg); }
 .side-tabs .seg-opt input:checked + span .tab-count { background: var(--color-accent-700); color: #fff; }
+.strat-legs li.is-skipped { opacity: 0.55; }
+.strat-legs li.is-skipped .strat-legs__label { text-decoration: line-through; text-decoration-color: var(--color-neutral-400); }
