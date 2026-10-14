@@ -2,6 +2,7 @@ import { FEATURES } from "@/lib/features";
 import { NextRequest, NextResponse } from "next/server";
 import { ACTIVE_CHAIN_IDS, CHAIN_LABEL } from "@/lib/onchain";
 import { routingChainNames } from "@/lib/mcp/routerAllowlist";
+import { validateAndFixStrategy } from "@/lib/strategyIntegrity";
 
 /**
  * POST /api/parse-intent
@@ -23,7 +24,8 @@ const DEFAULT_MODEL = "google/gemini-2.5-flash";
 const PERPS_DISABLED_NOTE = `
 
 ## CURRENT LIMITATION — PERPS DISABLED
-Perpetual futures (Hyperliquid, Extended, Ondo, Lighter) cannot be executed in Meridian right now — but depositing USDC into a Hyperliquid account can (side "Deposit", protocol "Hyperliquid"). Build every strategy from spot legs only (lending, staking, swaps, bridges, vaults). If the user's goal truly needs a perp (hedge, delta-neutral), say so in variantNote and propose the closest spot-only alternative instead of a perp leg.`;
+Perpetual futures (Hyperliquid, Extended, Ondo, Lighter) cannot be executed in Meridian right now — but depositing USDC into a Hyperliquid account can (side "Deposit", protocol "Hyperliquid"). Build every strategy from spot legs only (lending, borrowing, staking, swaps, bridges, vaults). Never put a Long or Short leg in a strategy.
+For a hedge, a beta-neutral or delta-neutral goal, use the spot-only version: the "Beta-neutral ETH carry" (supply USDC on Aave, borrow WETH, swap it to an LST on Uniswap, supply the LST on Aave) from the live data. Mention once in variantNote that the perp version (spot in a vault + short perp) comes when perps are enabled.`;
 
 /** Chains the chat may target, and the subset funds can be bridged between (lib/onchain ACTIVE_CHAIN_IDS, mcp/routerAllowlist). */
 const ACTIVE_CHAINS = ACTIVE_CHAIN_IDS.map((id) => CHAIN_LABEL[id]).join(", ");
@@ -73,7 +75,7 @@ When the user's portfolio is provided:
 ## Available Protocols on Meridian
 
 ### Lending / Yield
-- **Aave v3**: supply, borrow, repay, withdraw. Multi-chain. Check live data for current APY per asset/chain.
+- **Aave v3**: supply, borrow, repay, withdraw. Multi-chain. Check live data for current APY per asset/chain. Borrowing is executable: a Borrow leg needs collateral supplied first in the same strategy (or already in the user's Aave account); keep borrows at or under 45% of the collateral.
 - **Compound III**: supply, borrow, repay, withdraw. USDC market.
 - **Morpho**: vault supply/withdraw (ERC-4626). Check Philidor risk scores in live data.
 - **Spark**, **Fluid**: if they appear in live data, they are available.
@@ -113,13 +115,23 @@ Use these when user wants passive yield with protocol exposure.
   Quote the rate from the live list in the note. Never propose a protocol from the "comparison only" lists in a leg.
 - **EigenLayer**: restake stETH on Ethereum only: side "Restake", asset "stETH", protocol "EigenLayer" (pair it with a Lido stake leg when the user holds ETH). A deposit alone earns no operator rewards until delegated to an operator in the EigenLayer app, and withdrawals take ~14 days — say both in the note.
 
+## Composed strategies (REQUIRED when the goal allows)
+
+Users want more than "supply X on Y". When the goal is yield, income, a hedge or neutrality, at least ONE of the 3 strategies (usually the moderate or aggressive one) MUST be a composed, multi-leg strategy that combines protocols, built only from the executable venues and live rates below. Recipes:
+- **Beta-neutral ETH carry (spot only, executable now)**: Supply USDC on Aave → Borrow WETH on Aave → Swap "WETH → <LST>" on Uniswap → Supply <LST> on Aave. The WETH debt (short ETH) offsets the LST (long ETH), so the value barely moves with ETH; it earns the USDC rate plus staking minus the WETH borrow rate on the borrowed part. Use ONLY a chain and LST listed under "Beta-neutral ETH carry" in the live data, its exact sizes (borrow share of the USDC) and its exact net APY. If its row says NOT worth it now, don't propose it, or say so.
+- **Vault + short perp (when perps are available)**: Swap USDC → WETH (Uniswap) → Supply WETH into a vault (Fluid WETH on Ethereum, Morpho WETH) or Stake on Lido → Short the same ETH notional on a perp venue with positive funding. Earns vault/staking yield plus funding, ETH-neutral.
+- **Fixed + variable barbell**: part in a Pendle PT (fixed rate locked to expiry), part in an instant-exit vault (Fluid, Spark Savings, Morpho) for liquidity.
+- **Restaking stack**: Stake ETH on Lido → Restake the stETH on EigenLayer (Ethereum).
+- **Diversified stable basket**: split stables across 2-3 executable venues/chains from the live list to spread protocol risk.
+Each composed strategy states in "summary" how the legs fit together and the blended APY computed from the live rates.
+
 ## CRITICAL: Strategy Structural Integrity Rules
 
 These rules are ABSOLUTE. A strategy that violates any of them is WRONG and must be fixed before output.
 
 ### Rule 1: Delta-neutral / beta-neutral strategies MUST have BOTH legs on the SAME asset
 A strategy described as "delta-neutral", "beta-neutral", "market-neutral", or "no directional risk" MUST include:
-- A LONG leg (spot buy, stake, or long perp) AND a SHORT leg (short perp) on the SAME underlying asset, with EQUAL notional sizes.
+- A LONG leg (spot buy, stake, LST, or long perp) AND a SHORT leg on the SAME underlying asset, with EQUAL notional sizes. The short leg is a short perp, or a Borrow of that asset on Aave (borrowing WETH is short ETH; wstETH/weETH/rETH/cbETH count as ETH).
 - Example: Swap USDC → ETH ($10,000) + Stake ETH on Lido ($10,000) + Short $10,000 ETH PERP on Hyperliquid.
 - CRITICAL: Supplying a STABLECOIN (USDC, DAI, USDT) to a lending protocol is NOT a long position on any volatile asset. "Supply USDC on Morpho + Short ETH PERP" is a NAKED SHORT, not delta-neutral.
 - A single short perp WITHOUT an offsetting long ON THE SAME ASSET is a DIRECTIONAL SHORT, not delta-neutral. NEVER label it neutral.
@@ -256,180 +268,6 @@ async function fetchYieldContext(baseUrl: string): Promise<string> {
   } catch {
     return "";
   }
-}
-
-/* ------------------------------------------------------------------ */
-/*  Post-LLM structural validator                                      */
-/* ------------------------------------------------------------------ */
-
-interface LLMLeg {
-  side: string;
-  asset: string;
-  protocol: string;
-  sizeUsd?: number;
-  leverage?: number;
-  note?: string;
-}
-
-interface LLMStrategy {
-  name: string;
-  risk: string;
-  variantNote: string;
-  summary: string;
-  legs: LLMLeg[];
-}
-
-const NEUTRAL_KEYWORDS = /neutral|hedge|basis|cash\.and\.carry|funding.*harvest|no directional|market\.neutral/i;
-const SHORT_SIDES = new Set(["short"]);
-const LONG_SIDES = new Set(["long", "buy", "supply", "stake", "swap"]);
-const SPOT_SIDES = new Set(["supply", "stake", "swap", "buy", "bridge", "transfer", "borrow", "repay", "withdraw", "restake"]);
-/** Stablecoins — supplying/swapping these does NOT give long exposure on a volatile asset. */
-const STABLECOINS = new Set(["usdc", "usdt", "dai", "frax", "lusd", "gusd", "tusd", "susd", "pyusd", "eusd", "usdp", "busd"]);
-
-/** Extract the bare underlying asset from a leg (strip PERP suffix, take swap destination). */
-function legUnderlying(leg: LLMLeg): string {
-  const raw = (leg.asset ?? "").trim();
-  // Swap format: "USDC → ETH" → "ETH"
-  const arrowMatch = raw.match(/→\s*(.+)$/);
-  if (arrowMatch) return arrowMatch[1].trim().toUpperCase();
-  // Perp format: "ETH PERP" → "ETH"
-  return raw.replace(/\s*(PERP|perpetual)\s*$/i, "").trim().toUpperCase();
-}
-
-/** Does this leg give actual long exposure on a volatile asset? Stablecoin supply/swap does NOT count. */
-function isRealLongExposure(leg: LLMLeg): boolean {
-  const side = leg.side.toLowerCase();
-  if (!LONG_SIDES.has(side)) return false;
-  const underlying = legUnderlying(leg);
-  // Supplying/swapping a stablecoin (USDC, DAI, ...) is yield, not directional exposure.
-  if (STABLECOINS.has(underlying.toLowerCase())) return false;
-  return true;
-}
-
-/**
- * Validate a single LLM-produced strategy for structural coherence.
- * Fixes what can be fixed; relabels what can't.
- */
-function validateAndFixStrategy(strategy: LLMStrategy): LLMStrategy {
-  const legs = strategy.legs ?? [];
-  const nameAndSummary = `${strategy.name} ${strategy.summary}`;
-  const claimsNeutral = NEUTRAL_KEYWORDS.test(nameAndSummary);
-
-  if (!claimsNeutral) {
-    // Not claiming neutrality — just ensure spot legs don't carry leverage.
-    return { ...strategy, legs: legs.map(fixSpotLeverage) };
-  }
-
-  // Strategy claims to be neutral: check it has both sides ON THE SAME ASSET.
-  // "Supply USDC" is NOT long exposure on ETH — only a real long (spot buy,
-  // stake, supply of the SAME volatile asset) counts as the offsetting leg.
-  const shortLegs = legs.filter((l) => SHORT_SIDES.has(l.side.toLowerCase()));
-  const shortAssets = new Set(shortLegs.map(legUnderlying));
-
-  // A real long must be on one of the short-leg underlyings (or a derivative like stETH for ETH).
-  const realLongs = legs.filter((l) => {
-    if (!isRealLongExposure(l)) return false;
-    const underlying = legUnderlying(l);
-    // Direct match: long ETH offsets short ETH
-    if (shortAssets.has(underlying)) return true;
-    // Derivative match: stETH / wstETH / cbETH / rETH count as ETH exposure
-    if (/^(ST|WST|CB|R)ETH$/i.test(underlying) && shortAssets.has("ETH")) return true;
-    return false;
-  });
-
-  const hasMatchingLong = realLongs.length > 0;
-  const hasShort = shortLegs.length > 0;
-
-  if (hasMatchingLong && hasShort) {
-    // Both sides present on the same asset — ensure matching sizes and fix spot leverage.
-    return { ...strategy, legs: balanceNeutralSizes(legs).map(fixSpotLeverage) };
-  }
-
-  // Missing the offsetting long — add a spot buy for each unique shorted asset.
-  if (hasShort && !hasMatchingLong) {
-    const addedLegs: LLMLeg[] = [];
-    for (const asset of shortAssets) {
-      const matchingShorts = shortLegs.filter((l) => legUnderlying(l) === asset);
-      const totalShortSize = matchingShorts.reduce((s, l) => s + (l.sizeUsd ?? 10000), 0);
-      addedLegs.push({
-        side: "Swap",
-        asset: `USDC → ${asset}`,
-        protocol: "Uniswap",
-        sizeUsd: totalShortSize,
-        note: `Spot long ${asset} to offset short perp — required for delta neutrality.`,
-      });
-    }
-    const fixedLegs = [...addedLegs, ...legs].map(fixSpotLeverage);
-    const assetList = [...shortAssets].join(", ");
-    return {
-      ...strategy,
-      legs: fixedLegs,
-      summary: `${strategy.summary} Includes spot ${assetList} purchase(s) to maintain delta neutrality.`,
-    };
-  }
-
-  if (!hasShort) {
-    // No short legs — relabel as directional.
-    return {
-      ...strategy,
-      name: strategy.name.replace(NEUTRAL_KEYWORDS, "Directional").trim(),
-      summary: strategy.summary.replace(NEUTRAL_KEYWORDS, "directional"),
-      legs: legs.map(fixSpotLeverage),
-    };
-  }
-
-  return { ...strategy, legs: legs.map(fixSpotLeverage) };
-}
-
-/** Spot/lending sides never carry leverage. */
-function fixSpotLeverage(leg: LLMLeg): LLMLeg {
-  if (SPOT_SIDES.has(leg.side.toLowerCase()) && leg.leverage !== undefined) {
-    const { leverage: _, ...rest } = leg;
-    return rest;
-  }
-  return leg;
-}
-
-/** Ensure offsetting long/short legs in a neutral strategy have matching total notional per asset. */
-function balanceNeutralSizes(legs: LLMLeg[]): LLMLeg[] {
-  const shorts = legs.filter((l) => SHORT_SIDES.has(l.side.toLowerCase()));
-  if (shorts.length === 0) return legs;
-
-  // Group by underlying asset and balance each pair independently.
-  const shortAssets = new Set(shorts.map(legUnderlying));
-
-  return legs.map((l) => {
-    const side = l.side.toLowerCase();
-    const underlying = legUnderlying(l);
-
-    // Only balance legs whose underlying matches a shorted asset.
-    if (!shortAssets.has(underlying) && !(
-      /^(ST|WST|CB|R)ETH$/i.test(underlying) && shortAssets.has("ETH")
-    )) return l;
-
-    const effectiveAsset = /^(ST|WST|CB|R)ETH$/i.test(underlying) ? "ETH" : underlying;
-    const assetShorts = shorts.filter((s) => legUnderlying(s) === effectiveAsset);
-    const assetLongs = legs.filter((ll) => {
-      if (!isRealLongExposure(ll)) return false;
-      const u = legUnderlying(ll);
-      return u === effectiveAsset || (/^(ST|WST|CB|R)ETH$/i.test(u) && effectiveAsset === "ETH");
-    });
-    if (assetShorts.length === 0 || assetLongs.length === 0) return l;
-
-    const totalShort = assetShorts.reduce((s, ll) => s + (ll.sizeUsd ?? 10000), 0);
-    const totalLong = assetLongs.reduce((s, ll) => s + (ll.sizeUsd ?? 10000), 0);
-    const target = Math.max(totalLong, totalShort);
-
-    if (SHORT_SIDES.has(side)) {
-      const scale = totalShort > 0 ? target / totalShort : 1;
-      return scale !== 1 ? { ...l, sizeUsd: Math.round((l.sizeUsd ?? 10000) * scale) } : l;
-    }
-    if (isRealLongExposure(l)) {
-      const scale = totalLong > 0 ? target / totalLong : 1;
-      return scale !== 1 ? { ...l, sizeUsd: Math.round((l.sizeUsd ?? 10000) * scale) } : l;
-    }
-    return l;
-  });
 }
 
 /** Format a portfolio snapshot into a human-readable string for the LLM. */

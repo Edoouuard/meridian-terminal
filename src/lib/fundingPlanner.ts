@@ -94,6 +94,25 @@ export function spentSymbol(leg: TradeLeg, chainId: number): string | null {
   return (findToken(raw, chainId)?.symbol ?? raw).toUpperCase();
 }
 
+/** Share of a swap's notional assumed to arrive after fees and slippage, when crediting its output. */
+const SWAP_KEEP = 0.995;
+
+/**
+ * The token a leg puts in the wallet on its own chain, if any: a borrow or a
+ * withdrawal returns the asset, a swap its output, a Lido stake stETH.
+ */
+export function producedToken(leg: TradeLeg, chainId: number): { symbol: string; keep: number } | null {
+  const side = leg.side.toLowerCase();
+  const tracked = (raw: string) => (findToken(raw.trim(), chainId)?.symbol ?? raw.trim()).toUpperCase();
+  if (side === "borrow" || side === "withdraw") return { symbol: tracked(leg.asset), keep: 1 };
+  if (side === "swap" || side === "buy") {
+    const parts = leg.asset.split("→");
+    return parts.length === 2 && parts[1].trim() ? { symbol: tracked(parts[1]), keep: SWAP_KEEP } : null;
+  }
+  if (side === "stake" && /lido/i.test(leg.protocol)) return { symbol: "STETH", keep: 1 };
+  return null;
+}
+
 function legChain(leg: TradeLeg, connectedChainId?: number): number | undefined {
   return chainIdFromName(leg.chain) ?? connectedChainId;
 }
@@ -112,6 +131,9 @@ export async function fundPlan(plan: TradePlan, deps: FundingDeps): Promise<Trad
   }
   const bal = (chainId: number, symbol: string) => balances.get(key(chainId, symbol)) ?? 0;
   const add = (chainId: number, symbol: string, usd: number) => balances.set(key(chainId, symbol), bal(chainId, symbol) + usd);
+  // The part of a balance that earlier legs produce: sized by the same live
+  // price as the leg that spends it, so it needs no rounding margin.
+  const produced = new Map<string, number>();
 
   const legs: TradeLeg[] = [];
   const notes: string[] = [];
@@ -119,146 +141,165 @@ export async function fundPlan(plan: TradePlan, deps: FundingDeps): Promise<Trad
   for (const original of plan.legs) {
     const leg = { ...original };
     const chainId = legChain(leg, deps.connectedChainId);
-    const symbol = chainId !== undefined ? spentSymbol(leg, chainId) : null;
-    const size = leg.sizeUsd ?? 0;
-    if (chainId === undefined || !symbol || !(size > 0)) {
-      legs.push(leg);
-      continue;
-    }
-    const chainLabel = CHAIN_LABEL[chainId] ?? `chain ${chainId}`;
-    const isBridge = leg.side.toLowerCase() === "bridge";
-    const have = bal(chainId, symbol);
+    // What this leg leaves in the wallet (borrowed WETH, the swap's output,
+    // stETH from Lido) funds the legs after it, so a chain like "borrow WETH →
+    // swap to wstETH → supply wstETH" isn't mistaken for a wallet shortfall.
+    let funded = true;
+    try {
+      const symbol = chainId !== undefined ? spentSymbol(leg, chainId) : null;
+      const size = leg.sizeUsd ?? 0;
+      if (chainId === undefined || !symbol || !(size > 0)) {
+        legs.push(leg);
+        continue;
+      }
+      const chainLabel = CHAIN_LABEL[chainId] ?? `chain ${chainId}`;
+      const isBridge = leg.side.toLowerCase() === "bridge";
+      const have = bal(chainId, symbol);
 
-    if (have * BALANCE_MARGIN >= size) {
-      add(chainId, symbol, -size);
-      if (isBridge) creditBridge(leg, symbol, size);
-      legs.push(leg);
-      continue;
-    }
-
-    // Short on this chain: look for the same token on another verified routing chain.
-    const shortfall = size - have;
-    const source =
-      !isBridge && BRIDGEABLE.has(symbol) && isRoutingSupportedChain(chainId)
-        ? bestSource(symbol, chainId)
-        : undefined;
-
-    if (source) {
-      const sourceLabel = CHAIN_LABEL[source.chainId] ?? `chain ${source.chainId}`;
-      const bridgeUsd = round2Down(Math.min(shortfall, source.usd * BALANCE_MARGIN));
-
-      // Staying put beats bridging when the source chain can fund the whole
-      // leg, the same protocol pays there too, and the extra yield on the
-      // target wouldn't repay the bridge within the payback window.
-      if (have < DUST_USD && source.usd * BALANCE_MARGIN >= size) {
-        const [targetApy, sourceApy, cost] = await Promise.all([
-          deps.apyFor(leg.protocol, symbol, chainLabel),
-          deps.apyFor(leg.protocol, symbol, sourceLabel),
-          deps.bridgeCostUsd(source.chainId, chainId, symbol, bridgeUsd),
-        ]);
-        if (targetApy !== null && sourceApy !== null && cost !== null) {
-          const extraPerDay = (size * (targetApy - sourceApy)) / 100 / 365;
-          const paybackDays = extraPerDay > 0 ? cost / extraPerDay : Infinity;
-          if (paybackDays > BRIDGE_PAYBACK_DAYS) {
-            leg.chain = sourceLabel;
-            add(source.chainId, symbol, -size);
-            legs.push(leg);
-            notes.push(
-              `${leg.side} ${symbol} on ${leg.protocol} moved to ${sourceLabel}, where your ${symbol} is: bridging to ${chainLabel} costs ~$${cost.toFixed(2)}` +
-                (extraPerDay > 0
-                  ? ` and its extra ${(targetApy - sourceApy).toFixed(2)}% APY would take ${Math.ceil(paybackDays)} days to pay that back.`
-                  : ` for no better yield (${sourceApy.toFixed(2)}% on ${sourceLabel} vs ${targetApy.toFixed(2)}%).`),
-            );
-            continue;
-          }
-        }
+      const fromSteps = Math.min(produced.get(key(chainId, symbol)) ?? 0, have);
+      if ((have - fromSteps) * BALANCE_MARGIN + fromSteps >= size) {
+        add(chainId, symbol, -size);
+        produced.set(key(chainId, symbol), Math.max(0, fromSteps - size));
+        if (isBridge) creditBridge(leg, symbol, size);
+        legs.push(leg);
+        continue;
       }
 
-      const bridgeLeg: TradeLeg = {
-        side: "Bridge",
-        asset: symbol,
-        protocol: "deBridge",
-        chain: sourceLabel,
-        toChain: chainLabel,
-        sizeUsd: bridgeUsd,
-        note: `Added by Meridian: moves your ${symbol} from ${sourceLabel} to fund the next step on ${chainLabel}.`,
-      };
-      legs.push(bridgeLeg);
-      add(source.chainId, symbol, -bridgeUsd);
-      const arriving = bridgeUsd * (1 - BRIDGE_FEE_BUFFER);
-      const funded = round2Down(Math.min(size, (have + arriving) * BALANCE_MARGIN));
-      if (funded < size) leg.sizeUsd = funded;
-      add(chainId, symbol, arriving - funded);
-      legs.push(leg);
-      notes.push(
-        `Your ${symbol} is on ${sourceLabel}, not ${chainLabel}: a $${bridgeUsd} bridge was added first` +
-          (funded < size ? `, and the ${leg.side.toLowerCase()} is sized to $${funded} (what arrives after fees).` : "."),
-      );
-      continue;
-    }
+      // Short on this chain: look for the same token on another verified routing chain.
+      const shortfall = size - have;
+      const source =
+        !isBridge && BRIDGEABLE.has(symbol) && isRoutingSupportedChain(chainId)
+          ? bestSource(symbol, chainId)
+          : undefined;
 
-    // No same-token funds elsewhere: a stablecoin leg can still be fed from
-    // another stable — swapped on this chain (Uniswap), or swapped and bridged
-    // in one route from a verified chain.
-    const alt = !isBridge && STABLES.has(symbol) ? bestStableSource(symbol, chainId) : undefined;
-    if (alt) {
-      const altLabel = CHAIN_LABEL[alt.chainId] ?? `chain ${alt.chainId}`;
-      const convertUsd = round2Down(Math.min(shortfall, alt.usd * BALANCE_MARGIN));
-      const sameChain = alt.chainId === chainId;
-      legs.push(
-        sameChain
-          ? {
-              side: "Swap",
-              asset: `${alt.symbol} → ${symbol}`,
-              protocol: "Uniswap",
-              chain: chainLabel,
-              sizeUsd: convertUsd,
-              note: `Added by Meridian: swaps your ${alt.symbol} into ${symbol} for the next step.`,
+      if (source) {
+        const sourceLabel = CHAIN_LABEL[source.chainId] ?? `chain ${source.chainId}`;
+        const bridgeUsd = round2Down(Math.min(shortfall, source.usd * BALANCE_MARGIN));
+
+        // Staying put beats bridging when the source chain can fund the whole
+        // leg, the same protocol pays there too, and the extra yield on the
+        // target wouldn't repay the bridge within the payback window.
+        if (have < DUST_USD && source.usd * BALANCE_MARGIN >= size) {
+          const [targetApy, sourceApy, cost] = await Promise.all([
+            deps.apyFor(leg.protocol, symbol, chainLabel),
+            deps.apyFor(leg.protocol, symbol, sourceLabel),
+            deps.bridgeCostUsd(source.chainId, chainId, symbol, bridgeUsd),
+          ]);
+          if (targetApy !== null && sourceApy !== null && cost !== null) {
+            const extraPerDay = (size * (targetApy - sourceApy)) / 100 / 365;
+            const paybackDays = extraPerDay > 0 ? cost / extraPerDay : Infinity;
+            if (paybackDays > BRIDGE_PAYBACK_DAYS) {
+              leg.chain = sourceLabel;
+              add(source.chainId, symbol, -size);
+              legs.push(leg);
+              notes.push(
+                `${leg.side} ${symbol} on ${leg.protocol} moved to ${sourceLabel}, where your ${symbol} is: bridging to ${chainLabel} costs ~$${cost.toFixed(2)}` +
+                  (extraPerDay > 0
+                    ? ` and its extra ${(targetApy - sourceApy).toFixed(2)}% APY would take ${Math.ceil(paybackDays)} days to pay that back.`
+                    : ` for no better yield (${sourceApy.toFixed(2)}% on ${sourceLabel} vs ${targetApy.toFixed(2)}%).`),
+              );
+              continue;
             }
-          : {
-              side: "Bridge",
-              asset: symbol,
-              fromAsset: alt.symbol,
-              protocol: "deBridge",
-              chain: altLabel,
-              toChain: chainLabel,
-              sizeUsd: convertUsd,
-              note: `Added by Meridian: moves your ${alt.symbol} from ${altLabel} and delivers ${symbol} on ${chainLabel} in one route.`,
-            },
-      );
-      add(alt.chainId, alt.symbol, -convertUsd);
-      const arriving = convertUsd * (1 - BRIDGE_FEE_BUFFER);
-      const funded = round2Down(Math.min(size, (have + arriving) * BALANCE_MARGIN));
-      if (funded < size) leg.sizeUsd = funded;
-      add(chainId, symbol, arriving - funded);
-      legs.push(leg);
-      notes.push(
-        (sameChain
-          ? `Your stables on ${chainLabel} are ${alt.symbol}, not ${symbol}: a $${convertUsd} swap was added first`
-          : `Your ${alt.symbol} on ${altLabel} funds this: a $${convertUsd} route was added that swaps it to ${symbol} and bridges it to ${chainLabel}`) +
-          (funded < size ? `, and the ${leg.side.toLowerCase()} is sized to $${funded} (what arrives after fees).` : "."),
-      );
-      continue;
-    }
+          }
+        }
 
-    // Nothing to bridge from: use what this chain holds, or say there's none.
-    if (have >= DUST_USD) {
-      leg.sizeUsd = round2Down(have * BALANCE_MARGIN);
-      add(chainId, symbol, -have);
-      if (isBridge) creditBridge(leg, symbol, leg.sizeUsd);
-      notes.push(`${leg.side} ${symbol} on ${chainLabel} sized down to $${leg.sizeUsd}: that's all the ${symbol} your wallet holds there.`);
-    } else {
-      notes.push(
-        `Your wallet holds no ${symbol} on ${chainLabel}` +
-          (BRIDGEABLE.has(symbol)
-            ? isRoutingSupportedChain(chainId)
-              ? " or on any chain Meridian can bridge from"
-              : ` (and Meridian can't bridge into ${chainLabel})`
-            : "") +
-          ` — the ${leg.side.toLowerCase()} step can't be funded as planned.`,
-      );
+        const bridgeLeg: TradeLeg = {
+          side: "Bridge",
+          asset: symbol,
+          protocol: "deBridge",
+          chain: sourceLabel,
+          toChain: chainLabel,
+          sizeUsd: bridgeUsd,
+          note: `Added by Meridian: moves your ${symbol} from ${sourceLabel} to fund the next step on ${chainLabel}.`,
+        };
+        legs.push(bridgeLeg);
+        add(source.chainId, symbol, -bridgeUsd);
+        const arriving = bridgeUsd * (1 - BRIDGE_FEE_BUFFER);
+        const funded = round2Down(Math.min(size, (have + arriving) * BALANCE_MARGIN));
+        if (funded < size) leg.sizeUsd = funded;
+        add(chainId, symbol, arriving - funded);
+        legs.push(leg);
+        notes.push(
+          `Your ${symbol} is on ${sourceLabel}, not ${chainLabel}: a $${bridgeUsd} bridge was added first` +
+            (funded < size ? `, and the ${leg.side.toLowerCase()} is sized to $${funded} (what arrives after fees).` : "."),
+        );
+        continue;
+      }
+
+      // No same-token funds elsewhere: a stablecoin leg can still be fed from
+      // another stable — swapped on this chain (Uniswap), or swapped and bridged
+      // in one route from a verified chain.
+      const alt = !isBridge && STABLES.has(symbol) ? bestStableSource(symbol, chainId) : undefined;
+      if (alt) {
+        const altLabel = CHAIN_LABEL[alt.chainId] ?? `chain ${alt.chainId}`;
+        const convertUsd = round2Down(Math.min(shortfall, alt.usd * BALANCE_MARGIN));
+        const sameChain = alt.chainId === chainId;
+        legs.push(
+          sameChain
+            ? {
+                side: "Swap",
+                asset: `${alt.symbol} → ${symbol}`,
+                protocol: "Uniswap",
+                chain: chainLabel,
+                sizeUsd: convertUsd,
+                note: `Added by Meridian: swaps your ${alt.symbol} into ${symbol} for the next step.`,
+              }
+            : {
+                side: "Bridge",
+                asset: symbol,
+                fromAsset: alt.symbol,
+                protocol: "deBridge",
+                chain: altLabel,
+                toChain: chainLabel,
+                sizeUsd: convertUsd,
+                note: `Added by Meridian: moves your ${alt.symbol} from ${altLabel} and delivers ${symbol} on ${chainLabel} in one route.`,
+              },
+        );
+        add(alt.chainId, alt.symbol, -convertUsd);
+        const arriving = convertUsd * (1 - BRIDGE_FEE_BUFFER);
+        const funded = round2Down(Math.min(size, (have + arriving) * BALANCE_MARGIN));
+        if (funded < size) leg.sizeUsd = funded;
+        add(chainId, symbol, arriving - funded);
+        legs.push(leg);
+        notes.push(
+          (sameChain
+            ? `Your stables on ${chainLabel} are ${alt.symbol}, not ${symbol}: a $${convertUsd} swap was added first`
+            : `Your ${alt.symbol} on ${altLabel} funds this: a $${convertUsd} route was added that swaps it to ${symbol} and bridges it to ${chainLabel}`) +
+            (funded < size ? `, and the ${leg.side.toLowerCase()} is sized to $${funded} (what arrives after fees).` : "."),
+        );
+        continue;
+      }
+
+      // Nothing to bridge from: use what this chain holds, or say there's none.
+      if (have >= DUST_USD) {
+        leg.sizeUsd = round2Down(have * BALANCE_MARGIN);
+        add(chainId, symbol, -have);
+        if (isBridge) creditBridge(leg, symbol, leg.sizeUsd);
+        notes.push(`${leg.side} ${symbol} on ${chainLabel} sized down to $${leg.sizeUsd}: that's all the ${symbol} your wallet holds there.`);
+      } else {
+        funded = false;
+        notes.push(
+          `Your wallet holds no ${symbol} on ${chainLabel}` +
+            (BRIDGEABLE.has(symbol)
+              ? isRoutingSupportedChain(chainId)
+                ? " or on any chain Meridian can bridge from"
+                : ` (and Meridian can't bridge into ${chainLabel})`
+              : "") +
+            ` — the ${leg.side.toLowerCase()} step can't be funded as planned.`,
+        );
+      }
+      legs.push(leg);
+    } finally {
+      if (funded && chainId !== undefined) creditOutput(leg, chainId);
     }
-    legs.push(leg);
+  }
+
+  function creditOutput(leg: TradeLeg, chainId: number) {
+    const out = producedToken(leg, chainId);
+    const usd = leg.sizeUsd ?? 0;
+    if (!out || !(usd > 0)) return;
+    add(chainId, out.symbol, usd * out.keep);
+    produced.set(key(chainId, out.symbol), (produced.get(key(chainId, out.symbol)) ?? 0) + usd * out.keep);
   }
 
   function creditBridge(leg: TradeLeg, spent: string, usd: number) {

@@ -83,6 +83,24 @@ describe("strategyTracker", () => {
     expect(deployedUsd(res.strategy!)).toBe(661);
   });
 
+  it("counts only the user's own money in a borrow-hedged carry, and has no single live rate", () => {
+    const leg = (side: string, asset: string, sizeUsd: number) =>
+      ({ side, asset, protocol: side === "Swap" ? "Uniswap" : "Aave", chain: "Base", sizeUsd, status: "confirmed" as const });
+    const carry: TrackedStrategy = {
+      id: "carry",
+      title: "Beta-neutral wstETH carry",
+      summary: "",
+      apyPct: 4.3,
+      apyKind: "variable",
+      sizeUsd: 2000,
+      createdAt: 100,
+      completedAt: 200,
+      legs: [leg("Supply", "USDC", 2000), leg("Borrow", "WETH", 900), leg("Swap", "WETH → wstETH", 900), leg("Supply", "wstETH", 890)],
+    };
+    expect(deployedUsd(carry)).toBe(1990);
+    expect(earningLeg(carry)).toBeUndefined();
+  });
+
   it("reads entries stored before the rule as live from their earning step", () => {
     const stored: TrackedStrategy = {
       id: "x",

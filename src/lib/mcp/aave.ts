@@ -287,7 +287,16 @@ export async function previewAaveAction(
  * parallel (sequential calls blew through serverless time limits).
  */
 export async function fetchAaveYieldSummary(chainIds: number[]): Promise<string> {
-  const perChain = await Promise.all(chainIds.map(async (chainId) => ({ chainId, reserves: await fetchAaveReserves(chainId) })));
+  return aaveYieldSummary(await fetchAaveReservesByChain(chainIds));
+}
+
+/** Live reserves for several chains at once (a chain whose call fails comes back empty). */
+export async function fetchAaveReservesByChain(chainIds: number[]): Promise<{ chainId: number; reserves: AaveReserve[] }[]> {
+  return Promise.all(chainIds.map(async (chainId) => ({ chainId, reserves: await fetchAaveReserves(chainId) })));
+}
+
+/** The planner's Aave section from already-fetched reserves. */
+export function aaveYieldSummary(perChain: { chainId: number; reserves: AaveReserve[] }[]): string {
   const lines: string[] = [];
 
   for (const { chainId, reserves } of perChain) {

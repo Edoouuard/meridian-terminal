@@ -146,11 +146,22 @@ export function legState(s: TrackedStrategy, i: number): "confirmed" | "pending"
   return liveSince(s) !== undefined && isMoveLeg(l) ? "skipped" : "pending";
 }
 
-/** What is actually put to work: the earning legs' size (bridges move the same money), else the plan size. */
+/**
+ * What is actually put to work: the earning legs' size (bridges move the same
+ * money), else the plan size. Borrowed money isn't the user's: a borrow is
+ * subtracted (supply USDC 2,000 + borrow WETH 900 + supply wstETH 890 puts
+ * ~1,990 of the user's own to work), and a restake reuses the stake before it.
+ */
 export function deployedUsd(s: TrackedStrategy): number | undefined {
   const earning = s.legs.filter((l) => !isMoveLeg(l) && l.sizeUsd !== undefined);
-  if (earning.length > 0) return earning.reduce((sum, l) => sum + (l.sizeUsd as number), 0);
-  return s.sizeUsd;
+  if (earning.length === 0) return s.sizeUsd;
+  let total = 0;
+  for (const l of earning) {
+    const side = l.side.trim().toLowerCase();
+    if (side === "borrow") total -= l.sizeUsd as number;
+    else if (side !== "restake" && side !== "repay" && side !== "withdraw") total += l.sizeUsd as number;
+  }
+  return total > 0 ? total : s.sizeUsd;
 }
 
 /** Rough earnings since the strategy went live, at its entry APY. */
@@ -162,8 +173,13 @@ export function estimatedEarnedUsd(s: TrackedStrategy, now: number): number | un
   return size * (s.apyPct / 100) * years;
 }
 
-/** The leg that earns the yield: the last one that isn't a move (bridge/swap/transfer). */
+/**
+ * The leg that earns the yield: the last one that isn't a move
+ * (bridge/swap/transfer). A strategy with a borrow earns a spread across
+ * several legs, which no single live rate describes: none.
+ */
 export function earningLeg(s: TrackedStrategy): TrackedLeg | undefined {
+  if (s.legs.some((l) => /^borrow$/i.test(l.side.trim()))) return undefined;
   return [...s.legs].reverse().find((l) => !isMoveLeg(l));
 }
 
