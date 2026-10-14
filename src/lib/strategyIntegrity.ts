@@ -9,6 +9,7 @@
  */
 
 import { chainIdFromName } from "@/lib/chains";
+import { findToken } from "@/lib/assetMap";
 import { UNISWAP_SWAP_ROUTER02_BY_CHAIN } from "@/lib/integrations/uniswap";
 
 export interface LLMLeg {
@@ -153,8 +154,58 @@ export function dropFundingMoves(legs: LLMLeg[]): LLMLeg[] {
  * Validate a single LLM-produced strategy for structural coherence.
  * Fixes what can be fixed; relabels what can't.
  */
-export function validateAndFixStrategy(strategy: LLMStrategy): LLMStrategy {
-  const legs = dropFundingMoves(routeSwapsWithoutDex(strategy.legs ?? []));
+/** What the user already holds, as the planner saw it (lib/useLivePortfolio assets). */
+export interface WalletContext {
+  assets?: { symbol: string; venue: string; chain: string; usd: number }[];
+}
+
+const isHyperliquidAccount = (venue: string) => /^hyperliquid (perps|spot)$/i.test(venue.trim());
+const HL_MARGIN_SYMBOLS = /^(USDC|USDT|USDT0|USDH|USDE)$/i;
+
+/** Stablecoins already in the user's Hyperliquid account: margin that needs no deposit. */
+export function hyperliquidMarginUsd(ctx?: WalletContext): number {
+  return (ctx?.assets ?? []).filter((a) => isHyperliquidAccount(a.venue) && HL_MARGIN_SYMBOLS.test(a.symbol)).reduce((s, a) => s + a.usd, 0);
+}
+
+/** USD of price exposure to `asset` (ETH, BTC…) the user already holds outside Hyperliquid's account: UETH, wstETH, WETH… */
+function heldExposureUsd(ctx: WalletContext | undefined, asset: string): number {
+  return (ctx?.assets ?? []).filter((a) => !isHyperliquidAccount(a.venue) && exposureAsset(a.symbol.toUpperCase()) === asset).reduce((s, a) => s + a.usd, 0);
+}
+
+/**
+ * Hyperliquid margin the user already has covers the perp legs: no deposit
+ * (or only the shortfall, never under the $5 minimum). Margin per perp leg is
+ * its notional / leverage.
+ */
+export function fitHyperliquidDeposits(legs: LLMLeg[], ctx?: WalletContext): LLMLeg[] {
+  const have = hyperliquidMarginUsd(ctx);
+  if (!(have > 0)) return legs;
+  const needed = legs
+    .filter((l) => /^(long|short)$/i.test(l.side.trim()) && /hyperliquid/i.test(l.protocol))
+    .reduce((s, l) => s + (l.sizeUsd ?? 0) / Math.max(1, l.leverage ?? 1), 0);
+  const isDeposit = (l: LLMLeg) => /^deposit$/i.test(l.side.trim()) && /hyperliquid/i.test(l.protocol);
+  if (!legs.some(isDeposit)) return legs;
+  const missing = Math.ceil(needed - have);
+  if (missing <= 0) return legs.filter((l) => !isDeposit(l));
+  return legs.map((l) => (isDeposit(l) ? { ...l, sizeUsd: Math.max(5, missing), note: `Tops up the $${Math.round(have)} already on Hyperliquid to the margin the position needs.` } : l));
+}
+
+/**
+ * A bridge that would deliver a token the destination chain doesn't track
+ * (BNB to Arbitrum) can't be used there: deliver USDC instead, swapped on the
+ * way, which is what a margin deposit or a USDC step after it spends.
+ */
+export function deliverUsableTokens(legs: LLMLeg[]): LLMLeg[] {
+  return legs.map((l) => {
+    if (l.side.trim().toLowerCase() !== "bridge" || l.fromAsset) return l;
+    const to = chainIdFromName(l.toChain);
+    if (to === undefined || findToken(l.asset, to)) return l;
+    return { ...l, fromAsset: l.asset, asset: "USDC" };
+  });
+}
+
+export function validateAndFixStrategy(strategy: LLMStrategy, ctx?: WalletContext): LLMStrategy {
+  const legs = fitHyperliquidDeposits(deliverUsableTokens(dropFundingMoves(routeSwapsWithoutDex(strategy.legs ?? []))), ctx);
   const nameAndSummary = `${strategy.name} ${strategy.summary}`;
   const claimsNeutral = NEUTRAL_KEYWORDS.test(nameAndSummary);
 
@@ -172,9 +223,18 @@ export function validateAndFixStrategy(strategy: LLMStrategy): LLMStrategy {
   const shortAssets = new Set(shortLegs.map((l) => exposureAsset(legUnderlying(l))));
   const realLongs = legs.filter((l) => isRealLongExposure(l) && shortAssets.has(exposureAsset(legUnderlying(l))));
 
-  const hasMatchingLong = realLongs.length > 0;
   const hasShort = shortLegs.length > 0;
   const borrowHedged = shortLegs.some((l) => l.side.toLowerCase() === "borrow");
+  // What the wallet already holds counts as the long: shorting the ETH value
+  // of a UETH or wstETH holding is the hedge itself, nothing to buy.
+  const heldCoversShorts =
+    hasShort &&
+    [...shortAssets].every((asset) => {
+      const shortUsd = shortLegs.filter((l) => exposureAsset(legUnderlying(l)) === asset).reduce((s, l) => s + (l.sizeUsd ?? 0), 0);
+      return shortUsd > 0 && heldExposureUsd(ctx, asset) >= shortUsd * 0.9;
+    });
+  if (heldCoversShorts && realLongs.length === 0) return { ...strategy, legs: legs.map(fixSpotLeverage) };
+  const hasMatchingLong = realLongs.length > 0;
 
   if (hasMatchingLong && hasShort) {
     // Both sides present on the same asset. A perp hedge gets matching sizes;

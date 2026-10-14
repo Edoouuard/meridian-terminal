@@ -2,7 +2,7 @@ import { FEATURES } from "@/lib/features";
 import { NextRequest, NextResponse } from "next/server";
 import { ACTIVE_CHAIN_IDS, CHAIN_LABEL } from "@/lib/onchain";
 import { routingChainNames } from "@/lib/mcp/routerAllowlist";
-import { validateAndFixStrategy } from "@/lib/strategyIntegrity";
+import { hyperliquidMarginUsd, validateAndFixStrategy } from "@/lib/strategyIntegrity";
 
 /**
  * POST /api/parse-intent
@@ -106,7 +106,7 @@ Use these when user wants passive yield with protocol exposure.
 
 ### Not Yet Live (mark "not yet live" in note if used)
 - **Pendle**: fixed yield by buying PT, held to expiry. ONLY use markets listed under "Pendle fixed yield" in the live data, on the chain shown (Ethereum, Arbitrum or Base): side "Supply", asset "PT-<name>" exactly as listed, protocol "Pendle". Bought with USDC (WETH for ETH markets). The list holds only Pendle "prime" (curated) markets and major-stablecoin markets (USDC, USDT, DAI, USDS, USDe and their savings versions, GHO, PYUSD); never propose a Pendle market that isn't listed. If no listed market fits, say so and use another venue. The rate is fixed only if held to expiry; say so.
-- **Hyperliquid deposit**: fund the user's Hyperliquid account: side "Deposit", protocol "Hyperliquid", asset "USDC", chain "Arbitrum". Native USDC on Arbitrum only, minimum $5 (smaller deposits are lost); if the USDC is elsewhere, add a Bridge leg to Arbitrum first. Funds arrive in ~1 minute. Use it when the user wants HLP, Hyperliquid trading or HYPE exposure; trading, HLP and HYPE staking then happen in the Hyperliquid app — say so.
+- **Hyperliquid deposit**: fund the user's Hyperliquid account: side "Deposit", protocol "Hyperliquid", asset "USDC", chain "Arbitrum". Native USDC on Arbitrum only, minimum $5 (smaller deposits are lost); if the USDC is elsewhere, Meridian adds the bridge itself. If the user has no stablecoins at all, fund the margin by converting a token they hold on the way: a Bridge leg with fromAsset = that token, asset "USDC", toChain "Arbitrum" (never bridge a volatile token as itself). Margin already in the user's Hyperliquid account (see HYPERLIQUID ACCOUNT) needs no deposit. Funds arrive in ~1 minute. Use it when the user wants HLP, Hyperliquid trading or HYPE exposure; trading, HLP and HYPE staking then happen in the Hyperliquid app — say so.
 - **HyperEVM** (Hyperliquid's EVM chain): a Bridge leg can move funds there (toChain "HyperEVM"; USDC arrives as USDT0 or the route's token). HyperEVM protocols (HyperLend, Kinetiq kHYPE, Felix…) appear under the comparison-only lists: mention them, never put them in a leg. There is no DEX Meridian can sign on HyperEVM: never put a Swap leg there. Tokens the user holds on HyperEVM (UETH = ETH, UBTC = BTC, USDT0, WHYPE) leave it with a Bridge leg that converts on the way (fromAsset "UETH", asset "USDC", chain "HyperEVM", toChain "Arbitrum"). For a hedge, UETH/UBTC already ARE the long side: keep them and only short the same notional, rather than selling them.
 - **Savings vaults (verified ERC-4626)**: side "Supply", protocol exactly "Fluid", "Sky", "Spark Savings", "Ethena" or "Yearn", asset = the token deposited, on a chain where the "Best … yields Meridian EXECUTES" list shows that protocol:
   - Fluid: USDC or USDT on Ethereum and Arbitrum, USDC on Base, WETH on Ethereum. Instant exit.
@@ -296,6 +296,11 @@ function formatPortfolioContext(portfolio: PortfolioSnapshot | undefined): strin
     lines.push(`Net ETH delta (spot + perps): ${portfolio.netDeltaEthTotal.toFixed(4)} ETH`);
   }
 
+  const hlMargin = hyperliquidMarginUsd(portfolio);
+  if (hlMargin >= 1) {
+    lines.push(`HYPERLIQUID ACCOUNT: $${Math.round(hlMargin).toLocaleString()} of stablecoins already in the user's Hyperliquid account, usable as perp margin right now. A Long/Short on Hyperliquid needs NO Deposit leg up to that margin; add a Deposit only for margin beyond it.`);
+  }
+
   if (portfolio.assets && portfolio.assets.length > 0) {
     lines.push("\n### Wallet Holdings");
     for (const a of portfolio.assets) {
@@ -422,7 +427,8 @@ export async function POST(req: NextRequest) {
 
     // Post-LLM structural validation: catch strategies that are logically
     // incoherent (e.g. labeled "neutral" but only have one directional leg).
-    parsed.strategies = parsed.strategies.map(validateAndFixStrategy);
+    const wallet = { assets: (portfolio as PortfolioSnapshot | undefined)?.assets };
+    parsed.strategies = parsed.strategies.map((st: Parameters<typeof validateAndFixStrategy>[0]) => validateAndFixStrategy(st, wallet));
 
     return NextResponse.json(parsed);
   } catch (err: unknown) {

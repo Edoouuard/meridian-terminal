@@ -126,3 +126,33 @@ describe("strategyIntegrity — swaps where Meridian has no DEX", () => {
     expect(out.legs.some((l) => l.side === "Swap")).toBe(false);
   });
 });
+
+describe("strategyIntegrity — the user's wallet", () => {
+  const short = (sizeUsd: number): LLMLeg => ({ side: "Short", asset: "ETH PERP", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd, leverage: 1 });
+  const deposit = (sizeUsd: number): LLMLeg => ({ side: "Deposit", asset: "USDC", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd });
+
+  it("hedges a UETH holding with the short alone: no spot buy added", () => {
+    const out = validateAndFixStrategy(strat("Neutral UETH hedge", [deposit(24), short(24)]), {
+      assets: [{ symbol: "UETH", venue: "Wallet", chain: "HyperEVM", usd: 48 }],
+    });
+    expect(out.legs.some((l) => l.side === "Swap")).toBe(false);
+  });
+
+  it("drops the deposit when the Hyperliquid account already holds the margin, tops up otherwise", () => {
+    const hl = (usd: number) => ({ assets: [{ symbol: "USDC", venue: "Hyperliquid perps", chain: "Hyperliquid L1", usd }] });
+    expect(validateAndFixStrategy({ name: "ETH short", risk: "aggressive", variantNote: "", summary: "", legs: [deposit(24), short(24)] }, hl(30)).legs.map((l) => l.side)).toEqual(["Short"]);
+    const topUp = validateAndFixStrategy({ name: "ETH short", risk: "aggressive", variantNote: "", summary: "", legs: [deposit(50), short(50)] }, hl(30)).legs;
+    expect(topUp[0]).toMatchObject({ side: "Deposit", sizeUsd: 20 });
+  });
+
+  it("delivers USDC when a bridge would bring a token the destination doesn't track (BNB to Arbitrum)", () => {
+    const out = validateAndFixStrategy({
+      name: "ETH short",
+      risk: "aggressive",
+      variantNote: "",
+      summary: "",
+      legs: [{ side: "Bridge", asset: "BNB", protocol: "deBridge", chain: "BNB Chain", toChain: "Arbitrum", sizeUsd: 10 }, deposit(10), short(10)],
+    });
+    expect(out.legs[0]).toMatchObject({ side: "Bridge", fromAsset: "BNB", asset: "USDC", toChain: "Arbitrum" });
+  });
+});
