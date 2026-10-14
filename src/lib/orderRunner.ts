@@ -53,6 +53,9 @@ export interface OrderRunnerClient {
   readContract(args: any): Promise<unknown>;
   simulateContract(args: any): Promise<unknown>;
   call(args: any): Promise<unknown>;
+  /** Optional: when present, writes carry an explicit gas limit with headroom (see withGasHeadroom). */
+  estimateContractGas?(args: any): Promise<bigint>;
+  estimateGas?(args: any): Promise<bigint>;
   waitForTransactionReceipt(args: { hash: `0x${string}`; timeout?: number }): Promise<{ status: "success" | "reverted" }>;
 }
 export type WriteAsync = (args: any) => Promise<`0x${string}`>;
@@ -209,7 +212,45 @@ async function simulatePlan(client: OrderRunnerClient, account: Address, plan: E
   }
 }
 
+/**
+ * Gas limit = estimate + 25%. An exact estimate can run out: state read at
+ * estimate time can differ at inclusion (e.g. a Spark Savings vault's rate
+ * "drip" costs more once the block's timestamp moves), and the transaction
+ * then reverts out of gas. Without an estimate the wallet picks its own.
+ */
+const GAS_HEADROOM_NUM = BigInt(125);
+const GAS_HEADROOM_DEN = BigInt(100);
+
+export function withGasHeadroom(estimate: bigint): bigint {
+  return (estimate * GAS_HEADROOM_NUM) / GAS_HEADROOM_DEN;
+}
+
+async function gasFor(deps: OrderRunnerDeps, plan: ExecutionPlan): Promise<bigint | undefined> {
+  try {
+    if (plan.abi && plan.functionName && plan.args && deps.client.estimateContractGas) {
+      return withGasHeadroom(
+        await deps.client.estimateContractGas({
+          account: deps.address,
+          address: plan.address,
+          abi: plan.abi,
+          functionName: plan.functionName,
+          args: plan.args,
+          ...(plan.value !== undefined ? { value: plan.value } : {}),
+        }),
+      );
+    }
+    if (plan.data !== undefined && deps.client.estimateGas) {
+      return withGasHeadroom(await deps.client.estimateGas({ account: deps.address, to: plan.address, data: plan.data, value: plan.value }));
+    }
+  } catch {
+    /* no estimate: let the wallet estimate */
+  }
+  return undefined;
+}
+
 async function submitPlan(deps: OrderRunnerDeps, plan: ExecutionPlan): Promise<`0x${string}`> {
+  const gas = await gasFor(deps, plan);
+  const gasArg = gas !== undefined ? { gas } : {};
   if (plan.address && plan.abi && plan.functionName && plan.args) {
     return deps.writeContract({
       chainId: plan.chainId,
@@ -218,11 +259,12 @@ async function submitPlan(deps: OrderRunnerDeps, plan: ExecutionPlan): Promise<`
       functionName: plan.functionName,
       args: plan.args,
       ...(plan.value !== undefined ? { value: plan.value } : {}),
+      ...gasArg,
     });
   }
   if (plan.value !== undefined || plan.data !== undefined) {
     if (!plan.address) throw new Error("transaction is missing a recipient (address)");
-    return deps.sendTransaction({ chainId: plan.chainId, to: plan.address, value: plan.value, data: plan.data });
+    return deps.sendTransaction({ chainId: plan.chainId, to: plan.address, value: plan.value, data: plan.data, ...gasArg });
   }
   throw new Error("execution plan is missing required write fields");
 }
