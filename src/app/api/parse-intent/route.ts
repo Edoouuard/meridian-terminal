@@ -121,11 +121,13 @@ Use these when user wants passive yield with protocol exposure.
 
 Users want more than "supply X on Y". When the goal is yield, income, a hedge or neutrality, at least ONE of the 3 strategies (usually the moderate or aggressive one) MUST be a composed, multi-leg strategy that combines protocols, built only from the executable venues and live rates below. Recipes:
 - **Beta-neutral ETH carry (spot only, executable now)**: Supply USDC on Aave → Borrow WETH on Aave → Swap "WETH → <LST>" on Uniswap → Supply <LST> on Aave. The WETH debt (short ETH) offsets the LST (long ETH), so the value barely moves with ETH; it earns the USDC rate plus staking minus the WETH borrow rate on the borrowed part. Use ONLY a chain and LST listed under "Beta-neutral ETH carry" in the live data, its exact sizes (borrow share of the USDC) and its exact net APY. If its row says NOT worth it now, don't propose it, or say so.
-- **Vault + short perp (when perps are available)**: Swap USDC → WETH (Uniswap) → Supply WETH into a vault (Fluid WETH on Ethereum, Morpho WETH) or Stake on Lido → Short the same ETH notional on a perp venue with positive funding. Earns vault/staking yield plus funding, ETH-neutral.
+- **LST + short perp (when perps are available, only if ETH funding in the live data is positive)**: all spot legs on Arbitrum. (1) Deposit USDC on Hyperliquid (chain "Arbitrum") — the margin, sizeUsd = N / L; (2) Swap "USDC → wstETH" (or weETH) on Uniswap, chain "Arbitrum" — size N; (3) Short "ETH PERP" on Hyperliquid, size N, leverage L (1-3). With capital C: N = C × L / (L + 1) (e.g. C $3,000 at 2x → $1,000 margin, $2,000 wstETH, $2,000 short). It earns the LST staking yield plus the funding rate on N, ETH-neutral. Never use Lido (Ethereum only) or a different chain for the long side of this recipe.
 - **Fixed + variable barbell**: part in a Pendle PT (fixed rate locked to expiry), part in an instant-exit vault (Fluid, Spark Savings, Morpho) for liquidity.
 - **Restaking stack**: Stake ETH on Lido → Restake the stETH on EigenLayer (Ethereum).
 - **Diversified stable basket**: split stables across 2-3 executable venues/chains from the live list to spread protocol risk.
 Each composed strategy states in "summary" how the legs fit together and the blended APY computed from the live rates.
+The 3 strategies use 3 DIFFERENT mechanisms: never the same recipe twice on two chains or two LSTs. For a neutral or hedge goal with perps available, one strategy is the perp hedge and one is the spot-only carry.
+Never add Bridge legs or stablecoin swaps to move or convert the user's funds (Meridian adds them itself), and never swap before a Pendle leg (Pendle buys with USDC or WETH directly).
 
 ## CRITICAL: Strategy Structural Integrity Rules
 

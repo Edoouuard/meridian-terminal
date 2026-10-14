@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateAndFixStrategy, type LLMLeg } from "@/lib/strategyIntegrity";
+import { dropFundingMoves, validateAndFixStrategy, type LLMLeg } from "@/lib/strategyIntegrity";
 
 const strat = (name: string, legs: LLMLeg[]) => ({ name, risk: "moderate", variantNote: "", summary: "Earns the spread, beta-neutral.", legs });
 
@@ -57,5 +57,27 @@ describe("strategyIntegrity — neutral strategies", () => {
       ]),
     );
     expect(out.name).toMatch(/Directional/);
+  });
+});
+
+describe("strategyIntegrity — funding moves", () => {
+  it("drops the planner's own stablecoin bridges and the swap before a Pendle buy", () => {
+    const legs: LLMLeg[] = [
+      { side: "Bridge", asset: "USDC", protocol: "deBridge", chain: "Base", toChain: "Ethereum", sizeUsd: 4000 },
+      { side: "Swap", asset: "USDC → USDS", protocol: "Uniswap", chain: "Ethereum", sizeUsd: 5000 },
+      { side: "Supply", asset: "PT-sUSDS", protocol: "Pendle", chain: "Ethereum", sizeUsd: 5000 },
+    ];
+    expect(dropFundingMoves(legs)).toEqual([legs[2]]);
+  });
+
+  it("keeps a swap that is the position itself and a move-only strategy", () => {
+    const carry: LLMLeg[] = [
+      { side: "Borrow", asset: "WETH", protocol: "Aave", chain: "Base", sizeUsd: 900 },
+      { side: "Swap", asset: "WETH → wstETH", protocol: "Uniswap", chain: "Base", sizeUsd: 900 },
+      { side: "Supply", asset: "wstETH", protocol: "Aave", chain: "Base", sizeUsd: 880 },
+    ];
+    expect(dropFundingMoves(carry)).toEqual(carry);
+    const bridgeOnly: LLMLeg[] = [{ side: "Bridge", asset: "USDC", protocol: "deBridge", chain: "Base", toChain: "Arbitrum", sizeUsd: 100 }];
+    expect(dropFundingMoves(bridgeOnly)).toEqual(bridgeOnly);
   });
 });

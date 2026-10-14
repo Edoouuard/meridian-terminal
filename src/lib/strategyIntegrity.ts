@@ -15,6 +15,9 @@ export interface LLMLeg {
   sizeUsd?: number;
   leverage?: number;
   note?: string;
+  chain?: string;
+  toChain?: string;
+  fromAsset?: string;
 }
 
 export interface LLMStrategy {
@@ -75,12 +78,44 @@ function isRealLongExposure(leg: LLMLeg): boolean {
   return true;
 }
 
+/** Tokens the funding planner (lib/fundingPlanner.ts) bridges and converts on its own. */
+const FUNDING_TOKENS = new Set(["USDC", "USDT", "DAI", "WETH", "ETH"]);
+
+const isMove = (l: LLMLeg) => /^(bridge|swap|transfer)$/i.test(l.side.trim());
+
+/**
+ * Strip the moves the planner adds to get funds into place, which Meridian's
+ * funding planner adds back from the real balances (and only when they pay):
+ *   - a Bridge of a stablecoin or ETH, in a strategy that does more than move funds;
+ *   - a Swap right before a Pendle leg on the same chain into something other
+ *     than USDC/WETH: the Pendle order buys the PT with USDC or WETH directly,
+ *     so swapping into USDS first would leave it with nothing to spend.
+ * A strategy that is only moves ("bridge my USDC to Base") is left alone.
+ */
+export function dropFundingMoves(legs: LLMLeg[]): LLMLeg[] {
+  if (!legs.some((l) => !isMove(l))) return legs;
+  return legs.filter((l, i) => {
+    const side = l.side.trim().toLowerCase();
+    if (side === "bridge") {
+      const token = (l.fromAsset ?? l.asset).trim().toUpperCase();
+      return !FUNDING_TOKENS.has(token);
+    }
+    if (side === "swap") {
+      const out = l.asset.split("→")[1]?.trim().toUpperCase();
+      const next = legs[i + 1];
+      const feedsPendle = !!next && /pendle/i.test(next.protocol) && (next.chain ?? "") === (l.chain ?? "");
+      return !(feedsPendle && out && out !== "USDC" && out !== "WETH");
+    }
+    return true;
+  });
+}
+
 /**
  * Validate a single LLM-produced strategy for structural coherence.
  * Fixes what can be fixed; relabels what can't.
  */
 export function validateAndFixStrategy(strategy: LLMStrategy): LLMStrategy {
-  const legs = strategy.legs ?? [];
+  const legs = dropFundingMoves(strategy.legs ?? []);
   const nameAndSummary = `${strategy.name} ${strategy.summary}`;
   const claimsNeutral = NEUTRAL_KEYWORDS.test(nameAndSummary);
 
