@@ -40,19 +40,32 @@ jobs:
           BASE_RPC_URL: ${{ secrets.BASE_RPC_URL }}
           ARB_RPC_URL: ${{ secrets.ARB_RPC_URL }}
           ETH_RPC_URL: ${{ secrets.ETH_RPC_URL }}
+        # A load-balanced RPC can announce a head block that the next node it routes to doesn't have yet
+        # ("block not found" at genesis), which kills anvil before it serves anything: retry each fork.
         run: |
-          anvil --fork-url "${BASE_RPC_URL:-https://mainnet.base.org}" --port 8545 --silent &
-          anvil --fork-url "${ARB_RPC_URL:-https://arb1.arbitrum.io/rpc}" --port 8546 --silent &
-          anvil --fork-url "${ETH_RPC_URL:-https://ethereum-rpc.publicnode.com}" --port 8547 --silent &
-          for port in 8545 8546 8547; do
-            ok=0
-            for i in $(seq 1 30); do
-              if curl -sf -X POST -H 'content-type: application/json' \
-                -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' http://127.0.0.1:$port >/dev/null; then ok=1; break; fi
-              sleep 1
+          start_fork() {
+            local url="$1" port="$2"
+            for attempt in 1 2 3; do
+              anvil --fork-url "$url" --port "$port" --silent &
+              local pid=$!
+              for i in $(seq 1 30); do
+                if curl -sf -X POST -H 'content-type: application/json' \
+                  -d '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' "http://127.0.0.1:$port" >/dev/null; then return 0; fi
+                kill -0 "$pid" 2>/dev/null || break
+                sleep 1
+              done
+              kill "$pid" 2>/dev/null || true
+              echo "anvil on $port failed (attempt $attempt), retrying"
+              sleep 3
             done
-            [ "$ok" = 1 ] || { echo "anvil on $port did not start"; exit 1; }
-          done
+            echo "anvil on $port did not start"; return 1
+          }
+          start_fork "${BASE_RPC_URL:-https://mainnet.base.org}" 8545 &
+          start_fork "${ARB_RPC_URL:-https://arb1.arbitrum.io/rpc}" 8546 &
+          start_fork "${ETH_RPC_URL:-https://ethereum-rpc.publicnode.com}" 8547 &
+          fail=0
+          for job in $(jobs -p); do wait "$job" || fail=1; done
+          [ "$fail" = 0 ]
       - run: npm run test:fork
         env:
           ANVIL_URL: http://127.0.0.1:8545
