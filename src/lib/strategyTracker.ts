@@ -108,23 +108,63 @@ export function applyLegConfirmed(
   const legs = base.legs.map((l, i) =>
     i === legIndex ? { ...l, status: "confirmed" as const, hash: info.hash, chainId: info.chainId, confirmedAt: now } : l,
   );
-  const allDone = legs.every((l) => l.status === "confirmed");
-  const strategy: TrackedStrategy = { ...base, legs, completedAt: base.completedAt ?? (allDone ? now : undefined) };
-  const justCompleted = allDone && base.completedAt === undefined;
+  const live = isLive(legs);
+  const strategy: TrackedStrategy = { ...base, legs, completedAt: base.completedAt ?? (live ? now : undefined) };
+  const justCompleted = live && base.completedAt === undefined;
   const rest = list.filter((s) => s.id !== id);
   return { list: [strategy, ...rest].slice(0, LIMIT), strategy, changed: true, justCompleted };
 }
 
+/** Bridges, swaps and transfers only move funds into place; the other legs earn. */
+export function isMoveLeg(l: Pick<TrackedLeg, "side">): boolean {
+  return /^(bridge|swap|transfer)$/i.test(l.side.trim());
+}
+
+/**
+ * A strategy is live once every leg that earns has confirmed. A bridge the
+ * planner added to top up funds may never be needed (the user already had
+ * the funds where they go), so pending moves don't hold a strategy back.
+ * Without any earning leg (a pure move), every leg must confirm.
+ */
+function isLive(legs: TrackedLeg[]): boolean {
+  const earning = legs.filter((l) => !isMoveLeg(l));
+  return (earning.length > 0 ? earning : legs).every((l) => l.status === "confirmed");
+}
+
+/** When the strategy went live (also for entries stored before the earning-leg rule). */
+export function liveSince(s: TrackedStrategy): number | undefined {
+  if (s.completedAt !== undefined) return s.completedAt;
+  if (!isLive(s.legs)) return undefined;
+  const times = s.legs.filter((l) => !isMoveLeg(l) && l.confirmedAt !== undefined).map((l) => l.confirmedAt as number);
+  return times.length > 0 ? Math.max(...times) : s.createdAt;
+}
+
+/** How a leg reads in the monitor: a move still pending on a live strategy wasn't needed. */
+export function legState(s: TrackedStrategy, i: number): "confirmed" | "pending" | "skipped" {
+  const l = s.legs[i];
+  if (l.status === "confirmed") return "confirmed";
+  return liveSince(s) !== undefined && isMoveLeg(l) ? "skipped" : "pending";
+}
+
+/** What is actually put to work: the earning legs' size (bridges move the same money), else the plan size. */
+export function deployedUsd(s: TrackedStrategy): number | undefined {
+  const earning = s.legs.filter((l) => !isMoveLeg(l) && l.sizeUsd !== undefined);
+  if (earning.length > 0) return earning.reduce((sum, l) => sum + (l.sizeUsd as number), 0);
+  return s.sizeUsd;
+}
+
 /** Rough earnings since the strategy went live, at its entry APY. */
 export function estimatedEarnedUsd(s: TrackedStrategy, now: number): number | undefined {
-  if (s.completedAt === undefined || !s.apyPct || !s.sizeUsd) return undefined;
-  const years = Math.max(0, now - s.completedAt) / (365 * 24 * 3600 * 1000);
-  return s.sizeUsd * (s.apyPct / 100) * years;
+  const since = liveSince(s);
+  const size = deployedUsd(s);
+  if (since === undefined || !s.apyPct || !size) return undefined;
+  const years = Math.max(0, now - since) / (365 * 24 * 3600 * 1000);
+  return size * (s.apyPct / 100) * years;
 }
 
 /** The leg that earns the yield: the last one that isn't a move (bridge/swap/transfer). */
 export function earningLeg(s: TrackedStrategy): TrackedLeg | undefined {
-  return [...s.legs].reverse().find((l) => !/^(bridge|swap|transfer)$/i.test(l.side));
+  return [...s.legs].reverse().find((l) => !isMoveLeg(l));
 }
 
 export interface OpportunityLike {

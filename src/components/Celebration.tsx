@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CELEBRATE_EVENT, openStrategies, type CelebrateDetail } from "@/lib/strategyTracker";
+import { CELEBRATE_EVENT, deployedUsd, isMoveLeg, openStrategies, type CelebrateDetail } from "@/lib/strategyTracker";
 import { fmtPct } from "@/lib/strategyView";
 
 const CONFETTI_COLORS = ["#b68235", "#e1ad66", "#facb8d", "#27ae60", "#5a3b0a", "#ffe3bf"];
@@ -92,7 +92,10 @@ export function Celebration() {
   const stepLeg = step ? step.strategy.legs[step.legIndex] : undefined;
   const confirmedSteps = step ? step.strategy.legs.filter((l) => l.status === "confirmed").length : 0;
   const s = done?.strategy;
-  const yearly = s?.apyPct && s.sizeUsd ? (s.sizeUsd * s.apyPct) / 100 : undefined;
+  const size = s ? deployedUsd(s) : undefined;
+  const yearly = s?.apyPct && size ? (size * s.apyPct) / 100 : undefined;
+  const confirmedCount = s ? s.legs.filter((l) => l.status === "confirmed").length : 0;
+  const skippedMoves = s ? s.legs.filter((l) => l.status !== "confirmed" && isMoveLeg(l)).length : 0;
 
   return (
     <>
@@ -123,10 +126,12 @@ export function Celebration() {
                 {fmtPct(s.apyPct)} <span>{s.apyKind === "fixed" ? "fixed APY" : "APY"}</span>
               </p>
             )}
-            {yearly !== undefined && <p className="celebrate__earn">≈ {fmtUsd(yearly)} a year on {fmtUsd(s.sizeUsd as number)}</p>}
+            {yearly !== undefined && <p className="celebrate__earn">≈ {fmtUsd(yearly)} a year on {fmtUsd(size as number)}</p>}
             <p className="celebrate__text text-muted">
-              All {s.legs.length} step{s.legs.length > 1 ? "s" : ""} confirmed on-chain. Follow it in the Strategies tab: rate today vs entry, earnings so
-              far and every transaction.
+              {skippedMoves > 0
+                ? `${confirmedCount} step${confirmedCount > 1 ? "s" : ""} confirmed on-chain — the ${skippedMoves > 1 ? "other moves weren't" : "other move wasn't"} needed.`
+                : `All ${s.legs.length} step${s.legs.length > 1 ? "s" : ""} confirmed on-chain.`}{" "}
+              Follow it in the Strategies tab: rate today vs entry, earnings so far and every transaction.
             </p>
             <div className="celebrate__actions">
               <button

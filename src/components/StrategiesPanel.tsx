@@ -7,8 +7,11 @@ import type { Opportunity } from "@/lib/protocols/opportunities";
 import { explorerUrlFor } from "@/lib/explorer";
 import { fmtPct } from "@/lib/strategyView";
 import {
+  deployedUsd,
   earningLeg,
   estimatedEarnedUsd,
+  legState,
+  liveSince,
   matchOpportunity,
   removeStrategy,
   useTrackedStrategies,
@@ -47,14 +50,16 @@ function useAllOpportunities(enabled: boolean) {
 
 function StrategyCard({ s, opps, now }: { s: TrackedStrategy; opps: Opportunity[]; now: number }) {
   const done = s.legs.filter((l) => l.status === "confirmed").length;
-  const live = !!s.completedAt;
+  const since = liveSince(s);
+  const live = since !== undefined;
+  const size = deployedUsd(s);
   const earned = estimatedEarnedUsd(s, now);
   const today = s.apyKind === "variable" ? matchOpportunity(s, opps) : undefined;
   const drift = today && s.apyPct !== undefined ? today.apy - s.apyPct : undefined;
   const leg = earningLeg(s);
   const reviewPrompt =
     `Review my live strategy "${s.title}": ${s.legs.map((l) => `${l.side} ${l.asset} on ${l.protocol}${l.chain ? ` (${l.chain})` : ""}`).join(", ")}` +
-    `${s.sizeUsd ? `, about $${Math.round(s.sizeUsd)}` : ""}${s.apyPct !== undefined ? `, entered at ${fmtPct(s.apyPct)} APY` : ""}. Is it still the best option, and should I change anything?`;
+    `${size ? `, about $${Math.round(size)}` : ""}${s.apyPct !== undefined ? `, entered at ${fmtPct(s.apyPct)} APY` : ""}. Is it still the best option, and should I change anything?`;
 
   return (
     <article className={`strat-card${live ? " strat-card--live" : ""}`}>
@@ -63,7 +68,7 @@ function StrategyCard({ s, opps, now }: { s: TrackedStrategy; opps: Opportunity[
           <h6 className="strat-card__title">{s.title}</h6>
           <span className="text-muted strat-card__sub">
             {leg ? `${leg.protocol}${leg.chain ? ` · ${leg.chain}` : ""} · ` : ""}
-            {live ? `live since ${fmtAge(s.completedAt as number, now)}` : `started ${fmtAge(s.createdAt, now)}`}
+            {live ? `live since ${fmtAge(since as number, now)}` : `started ${fmtAge(s.createdAt, now)}`}
           </span>
         </div>
         <span className={`strat-chip${live ? " strat-chip--live" : ""}`}>
@@ -84,10 +89,10 @@ function StrategyCard({ s, opps, now }: { s: TrackedStrategy; opps: Opportunity[
       )}
 
       <dl className="strat-metrics">
-        {s.sizeUsd !== undefined && (
+        {size !== undefined && (
           <div>
             <dt>Size</dt>
-            <dd>{fmtUsd(s.sizeUsd)}</dd>
+            <dd>{fmtUsd(size)}</dd>
           </div>
         )}
         {s.apyPct !== undefined && (
@@ -119,9 +124,11 @@ function StrategyCard({ s, opps, now }: { s: TrackedStrategy; opps: Opportunity[
       )}
 
       <ol className="strat-legs">
-        {s.legs.map((l, i) => (
-          <li key={i} className={l.status === "confirmed" ? "is-done" : undefined}>
-            <span className="strat-legs__mark" aria-hidden="true">{l.status === "confirmed" ? "✓" : i + 1}</span>
+        {s.legs.map((l, i) => {
+          const state = legState(s, i);
+          return (
+          <li key={i} className={state === "confirmed" ? "is-done" : state === "skipped" ? "is-skipped" : undefined}>
+            <span className="strat-legs__mark" aria-hidden="true">{state === "confirmed" ? "✓" : state === "skipped" ? "–" : i + 1}</span>
             <span className="strat-legs__label">
               {l.side} {l.asset} · {l.protocol}
               {l.chain ? ` · ${l.chain}` : ""}
@@ -131,10 +138,11 @@ function StrategyCard({ s, opps, now }: { s: TrackedStrategy; opps: Opportunity[
                 tx ↗
               </a>
             ) : (
-              <span className="text-muted strat-legs__tx">{l.status === "confirmed" ? "" : "to do"}</span>
+              <span className="text-muted strat-legs__tx">{state === "skipped" ? "not needed" : state === "pending" ? "to do" : ""}</span>
             )}
           </li>
-        ))}
+          );
+        })}
       </ol>
 
       <footer className="strat-card__foot">
@@ -182,9 +190,9 @@ export function StrategiesPanel() {
     );
   }
 
-  const live = strategies.filter((s) => s.completedAt);
-  const totalSize = live.reduce((sum, s) => sum + (s.sizeUsd ?? 0), 0);
-  const totalYearly = live.reduce((sum, s) => sum + ((s.sizeUsd ?? 0) * (s.apyPct ?? 0)) / 100, 0);
+  const live = strategies.filter((s) => liveSince(s) !== undefined);
+  const totalSize = live.reduce((sum, s) => sum + (deployedUsd(s) ?? 0), 0);
+  const totalYearly = live.reduce((sum, s) => sum + ((deployedUsd(s) ?? 0) * (s.apyPct ?? 0)) / 100, 0);
 
   return (
     <div className="strat-list">
