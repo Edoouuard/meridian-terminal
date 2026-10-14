@@ -10,6 +10,7 @@ import { WalletConnectButton } from "@/components/WalletConnectButton";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { StrategiesPanel } from "@/components/StrategiesPanel";
 import { Celebration } from "@/components/Celebration";
+import { ProductTour, startTour } from "@/components/ProductTour";
 import { OPEN_STRATEGIES_EVENT, useTrackedStrategies } from "@/lib/strategyTracker";
 import { HyperliquidPanel } from "@/components/HyperliquidPanel";
 import { ExtendedConnectPanel } from "@/components/ExtendedConnectPanel";
@@ -289,11 +290,12 @@ export default function TerminalApp() {
     <div className="app-shell" style={{ background: "var(--color-bg)", color: "var(--color-text)", height: "100vh", display: "flex", flexDirection: "column" }}>
       <TickerBanner />
       <Celebration />
+      <ProductTour />
       <div className="nav topbar" style={{ background: "var(--color-surface)", flex: "none" }}>
         <Link href="/" className="nav-brand" style={{ color: "var(--color-text)" }}>
           Meridian
         </Link>
-        <span className={`status-pill${isConnected ? " status-pill--on" : ""}`} title={`Meridian executes on ${ACTIVE_CHAIN_IDS.map((id) => CHAIN_LABEL[id]).join(", ")}`}>
+        <span data-tour="status" className={`status-pill${isConnected ? " status-pill--on" : ""}`} title={`Meridian executes on ${ACTIVE_CHAIN_IDS.map((id) => CHAIN_LABEL[id]).join(", ")}`}>
           <span className="status-pill__dot" aria-hidden="true" />
           {isConnected ? `Connected · ${chain?.name ?? "wallet"}` : "Not connected"}
           <span className="status-pill__sep" aria-hidden="true">·</span>
@@ -306,13 +308,16 @@ export default function TerminalApp() {
             {fmtUsd(portfolioValue)}
           </span>
         )}
+        <button type="button" className="tour-trigger" onClick={startTour} title="Take the product tour">
+          Tour
+        </button>
         <WalletConnectButton />
       </div>
 
       <div className="app-grid" style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "290px 1fr 320px", overflow: "hidden" }}>
         {/* Portfolio column */}
         <div className="col-scroll app-col-portfolio side-col" style={{ minWidth: 0, borderRight: "1px solid var(--color-divider)" }}>
-          <section className="panel-card">
+          <section className="panel-card" data-tour="portfolio">
             <div className="panel-card__head">
               <h6 className="panel-card__title">Portfolio</h6>
               <span className={`live-chip${isConnected ? " live-chip--on" : ""}`}>{isConnected ? (live.isLoading ? "Reading…" : "Live") : "No wallet"}</span>
@@ -320,7 +325,7 @@ export default function TerminalApp() {
             {portfolioValue !== null && <p className="portfolio-value">{fmtUsd(portfolioValue)}</p>}
             {!isConnected && (
               <div className="empty-hint">
-                <p>Connect a wallet to see your balances and positions across {SUPPORTED_CHAINS.length} chains, and to execute strategies.</p>
+                <p>Connect a wallet to see your balances and positions across {ACTIVE_CHAIN_IDS.length} chains, and to execute strategies.</p>
                 <WalletConnectButton />
               </div>
             )}
@@ -373,7 +378,7 @@ export default function TerminalApp() {
             </section>
           )}
 
-          <div className="seg side-tabs" role="tablist" aria-label="Portfolio tools" ref={sideTabsRef}>
+          <div className="seg side-tabs" role="tablist" aria-label="Portfolio tools" ref={sideTabsRef} data-tour="tabs">
             <label className="seg-opt">
               <input type="radio" name="left-tab" checked={leftTab === "risk"} onChange={() => setLeftTab("risk")} />
               <span>Risk</span>
@@ -573,7 +578,7 @@ export default function TerminalApp() {
                 </button>
               </div>
             )}
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }} data-tour="composer">
               <textarea
                 ref={textareaRef}
                 className="input"
@@ -618,7 +623,7 @@ export default function TerminalApp() {
         </div>
 
         {/* News / Alpha column */}
-        <div className="col-scroll app-col-news side-col" style={{ minWidth: 0, borderLeft: "1px solid var(--color-divider)" }}>
+        <div className="col-scroll app-col-news side-col" style={{ minWidth: 0, borderLeft: "1px solid var(--color-divider)" }} data-tour="markets">
           <NewsFeed />
         </div>
       </div>
