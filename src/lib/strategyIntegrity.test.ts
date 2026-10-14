@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dropFundingMoves, validateAndFixStrategy, type LLMLeg } from "@/lib/strategyIntegrity";
+import { dropFundingMoves, inferBridgeSource, validateAndFixStrategy, type LLMLeg } from "@/lib/strategyIntegrity";
 
 const strat = (name: string, legs: LLMLeg[]) => ({ name, risk: "moderate", variantNote: "", summary: "Earns the spread, beta-neutral.", legs });
 
@@ -114,6 +114,24 @@ describe("strategyIntegrity — swaps where Meridian has no DEX", () => {
     const [first, second] = validateAndFixStrategy({ name: "Yield", risk: "moderate", variantNote: "", summary: "", legs }).legs;
     expect(first).toMatchObject({ side: "Bridge", fromAsset: "UETH", asset: "USDC", chain: "HyperEVM", toChain: "Arbitrum", sizeUsd: 48 });
     expect(second).toEqual(legs[1]);
+  });
+
+  it("sells UETH on Hyperliquid spot when nothing needs the USDC on another chain", () => {
+    const legs: LLMLeg[] = [{ side: "Swap", asset: "UETH → USDC", protocol: "Uniswap", chain: "HyperEVM", sizeUsd: 48 }];
+    const [only] = validateAndFixStrategy({ name: "Sell", risk: "low", variantNote: "", summary: "", legs }).legs;
+    expect(only).toMatchObject({ side: "Sell", asset: "UETH", protocol: "Hyperliquid", chain: "HyperEVM", sizeUsd: 48 });
+  });
+
+  it("names what a HyperEVM bridge spends: the token in its note, else the wallet's holding there", () => {
+    const bridge: LLMLeg = { side: "Bridge", asset: "USDC", protocol: "deBridge", chain: "HyperEVM", toChain: "Arbitrum", sizeUsd: 48 };
+    const ctx = { assets: [{ symbol: "UETH", venue: "Wallet", chain: "HyperEVM", usd: 48 }, { symbol: "USDC", venue: "Wallet", chain: "Arbitrum", usd: 900 }] };
+    expect(inferBridgeSource([bridge], ctx)[0]).toMatchObject({ fromAsset: "UETH", asset: "USDC" });
+    expect(inferBridgeSource([{ ...bridge, note: "Sells your UBTC on the way" }], ctx)[0]).toMatchObject({ fromAsset: "UBTC" });
+    // Nothing to infer from: left as it was.
+    expect(inferBridgeSource([bridge])[0]).toEqual(bridge);
+    // A bridge of a token the source chain tracks needs nothing.
+    const arb: LLMLeg = { ...bridge, chain: "Arbitrum", toChain: "Base" };
+    expect(inferBridgeSource([arb], ctx)[0]).toEqual(arb);
   });
 
   it("counts UETH as ETH exposure, so a UETH holder's short is a real hedge", () => {

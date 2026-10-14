@@ -194,6 +194,11 @@ export function resolveOrderForLeg(
     } as Order;
   }
 
+  // --- Hyperliquid spot sell: its own two-step button (HyperliquidSpotSellButton), never a single EVM order ---
+  if (protocol === "hyperliquid" && side === "sell") {
+    return { unsupported: "Sold on Hyperliquid's spot order book, with its own button." };
+  }
+
   // --- Native ETH/gas transfer (executable, all chains) ---------------------
   // The recipient comes from the thesis itself (leg.to, parsed by tradePlan's
   // "transfer" intent) — falling back to the `address` param only for a

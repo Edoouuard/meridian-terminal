@@ -104,6 +104,10 @@ export function routeSwapsWithoutDex(legs: LLMLeg[]): LLMLeg[] {
       const id = chainIdFromName(n.chain);
       return id !== undefined && id !== chainId;
     });
+    // Nothing needs the proceeds on another chain: sell on Hyperliquid's own order book.
+    if (!next && chainId === HYPEREVM_CHAIN_ID && HL_SPOT_TOKENS.test(from) && STABLECOINS.has(to.toLowerCase())) {
+      return hyperliquidSellLeg(from, l.sizeUsd);
+    }
     const toChain = next?.chain ?? "Arbitrum";
     return {
       side: "Bridge",
@@ -115,6 +119,42 @@ export function routeSwapsWithoutDex(legs: LLMLeg[]): LLMLeg[] {
       sizeUsd: l.sizeUsd,
       note: `No DEX Meridian can sign on ${l.chain}: this sells your ${from} and delivers ${to} on ${toChain} in one route.`,
     };
+  });
+}
+
+const HYPEREVM_CHAIN_ID = 999;
+/** HyperEVM tokens with a USDC spot market on Hyperliquid, reachable through their HyperCore system address. */
+export const HL_SPOT_TOKENS = /^(UETH|UBTC)$/i;
+
+/** Sell a HyperEVM token on Hyperliquid spot (components/execute/HyperliquidSpotSellButton). */
+export function hyperliquidSellLeg(token: string, sizeUsd?: number): LLMLeg {
+  return {
+    side: "Sell",
+    asset: token.toUpperCase(),
+    protocol: "Hyperliquid",
+    chain: "HyperEVM",
+    sizeUsd,
+    note: `Moves your ${token.toUpperCase()} from HyperEVM into your Hyperliquid spot balance and sells it for USDC on Hyperliquid's order book; the USDC stays in your Hyperliquid account.`,
+  };
+}
+
+/**
+ * A Bridge that names only what it delivers (asset "USDC" from HyperEVM) when
+ * the source chain doesn't track that token can't run: the route has nothing
+ * to spend. The token it really spends is the one the note names, or else the
+ * largest one the wallet holds on that chain.
+ */
+export function inferBridgeSource(legs: LLMLeg[], ctx?: WalletContext): LLMLeg[] {
+  return legs.map((l) => {
+    if (l.side.trim().toLowerCase() !== "bridge" || l.fromAsset) return l;
+    const from = chainIdFromName(l.chain);
+    if (from === undefined || findToken(l.asset, from)) return l;
+    const named = (l.note ?? "").match(/\b[A-Za-z][A-Za-z0-9]{1,9}\b/g)?.find((w) => w.toUpperCase() !== l.asset.toUpperCase() && findToken(w, from));
+    const held = (ctx?.assets ?? [])
+      .filter((a) => a.venue === "Wallet" && chainIdFromName(a.chain) === from && a.usd > 1 && findToken(a.symbol, from))
+      .sort((a, b) => b.usd - a.usd)[0]?.symbol;
+    const source = named ?? held;
+    return source ? { ...l, fromAsset: findToken(source, from)!.symbol } : l;
   });
 }
 
@@ -205,7 +245,7 @@ export function deliverUsableTokens(legs: LLMLeg[]): LLMLeg[] {
 }
 
 export function validateAndFixStrategy(strategy: LLMStrategy, ctx?: WalletContext): LLMStrategy {
-  const legs = fitHyperliquidDeposits(deliverUsableTokens(dropFundingMoves(routeSwapsWithoutDex(strategy.legs ?? []))), ctx);
+  const legs = fitHyperliquidDeposits(deliverUsableTokens(dropFundingMoves(routeSwapsWithoutDex(inferBridgeSource(strategy.legs ?? [], ctx)))), ctx);
   const nameAndSummary = `${strategy.name} ${strategy.summary}`;
   const claimsNeutral = NEUTRAL_KEYWORDS.test(nameAndSummary);
 

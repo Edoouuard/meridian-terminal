@@ -23,6 +23,7 @@ import { StrategyLegContext } from "@/components/thread/strategyLegContext";
 import { confirmStrategyLeg } from "@/lib/strategyTracker";
 import { typicalWait } from "@/components/TxProgress";
 import { BridgeExecuteButton } from "@/components/BridgeExecuteButton";
+import { HyperliquidSpotSellButton } from "@/components/execute/HyperliquidSpotSellButton";
 import { ExtendedPerpExecuteButton, LifiPerpExecuteButton, PerpExecuteButton } from "@/components/execute/PerpExecuteButtons";
 import { LidoUnstakeButton, MorphoExecuteButton, MorphoWithdrawButton, PendleExecuteButton, SwapExecuteButton } from "@/components/execute/VenueExecuteButtons";
 import { NotWired, OrderRow, RISK_TIER_COLOR, isUnsupported, legRowValue } from "@/components/thread/shared";
@@ -122,13 +123,15 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
         const isLidoStake = isLido && legSide === "stake";
         // A Hyperliquid deposit is a plain validated USDC transfer on Arbitrum, not a perp order.
         const isHlDeposit = /hyperliquid/i.test(leg.protocol || "") && (legSide === "deposit" || legSide === "supply" || legSide === "fund");
-        const isPerp = /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "") && !isHlDeposit;
+        // Selling UETH/UBTC on Hyperliquid spot: a move from HyperEVM, then a spot order — not a perp.
+        const isHlSpotSell = /hyperliquid/i.test(leg.protocol || "") && legSide === "sell";
+        const isPerp = /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "") && !isHlDeposit && !isHlSpotSell;
         const isUniswap = /uniswap/i.test(leg.protocol || "");
         const isPendle = /pendle/i.test(leg.protocol || "");
         // These venues need live data (vault, route, on-chain quote, perp
         // signing) that only their dedicated button fetches — never hand their
         // shell order to the generic button.
-        const dedicated = isPerp || isUniswap || isMorpho || isLidoWithdraw || isBridge || isLifiSwap || isPendle;
+        const dedicated = isHlSpotSell || isPerp || isUniswap || isMorpho || isLidoWithdraw || isBridge || isLifiSwap || isPendle;
         const liveVenue = dedicated || isLidoStake;
         const building = isUnsupported(resolved) && !liveVenue;
         // A leg funded by an earlier bridge into its chain waits for the funds.
@@ -143,7 +146,9 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
             reason={`Meridian executes on ${ACTIVE_CHAIN_IDS.map((id) => CHAIN_LABEL[id]).join(", ")} — not ${leg.chain ?? "this chain"}.`}
           />
         ) : dedicated || isUnsupported(resolved) ? (
-            isPerp && !FEATURES.perps ? (
+            isHlSpotSell ? (
+              <HyperliquidSpotSellButton leg={leg} />
+            ) : isPerp && !FEATURES.perps ? (
               <NotWired venue={leg.protocol} reason="Perps are paused during the beta while spot execution is validated end to end." />
             ) : isPerp && /hyperliquid/i.test(leg.protocol || "") ? (
               <PerpExecuteButton leg={leg} prices={prices} />
