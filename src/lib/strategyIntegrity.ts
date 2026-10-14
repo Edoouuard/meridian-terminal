@@ -8,6 +8,9 @@
  * spot-only hedge Meridian can execute while perps are paused.
  */
 
+import { chainIdFromName } from "@/lib/chains";
+import { UNISWAP_SWAP_ROUTER02_BY_CHAIN } from "@/lib/integrations/uniswap";
+
 export interface LLMLeg {
   side: string;
   asset: string;
@@ -46,8 +49,8 @@ function legUnderlying(leg: LLMLeg): string {
 }
 
 /** Wrapped and liquid-staked versions carry the same price exposure as their base asset. */
-const ETH_LIKE = /^(ETH|WETH|STETH|WSTETH|CBETH|RETH|WEETH|EZETH|RSETH|OSETH|METH|SFRXETH)$/;
-const BTC_LIKE = /^(BTC|WBTC|CBBTC|TBTC|LBTC)$/;
+const ETH_LIKE = /^(ETH|WETH|UETH|STETH|WSTETH|CBETH|RETH|WEETH|EZETH|RSETH|OSETH|METH|SFRXETH)$/;
+const BTC_LIKE = /^(BTC|WBTC|UBTC|CBBTC|TBTC|LBTC)$/;
 
 /** The asset a leg's price exposure is on: ETH for wstETH, BTC for WBTC. */
 function exposureAsset(underlying: string): string {
@@ -76,6 +79,42 @@ function isRealLongExposure(leg: LLMLeg): boolean {
   // Supplying/swapping a stablecoin (USDC, DAI, ...) is yield, not directional exposure.
   if (STABLECOINS.has(underlying.toLowerCase())) return false;
   return true;
+}
+
+/** Chains with a Uniswap router Meridian signs swaps on. */
+const SWAP_CHAIN_IDS = new Set(Object.keys(UNISWAP_SWAP_ROUTER02_BY_CHAIN).map(Number));
+
+/**
+ * A Swap on a chain with no DEX Meridian can sign on (HyperEVM) can't run.
+ * Selling a token there means taking it off the chain anyway, so it becomes a
+ * swapping bridge: the token is sold and delivered as the swap's output on
+ * the chain where the strategy uses it next (Arbitrum when nothing says).
+ * "Swap UETH → USDC on HyperEVM" + legs on Arbitrum → "Bridge UETH → USDC,
+ * HyperEVM → Arbitrum", one route.
+ */
+export function routeSwapsWithoutDex(legs: LLMLeg[]): LLMLeg[] {
+  return legs.map((l, i) => {
+    if (l.side.trim().toLowerCase() !== "swap") return l;
+    const chainId = chainIdFromName(l.chain);
+    if (chainId === undefined || SWAP_CHAIN_IDS.has(chainId)) return l;
+    const [from, to] = l.asset.split("→").map((x) => x.trim());
+    if (!from || !to) return l;
+    const next = legs.slice(i + 1).find((n) => {
+      const id = chainIdFromName(n.chain);
+      return id !== undefined && id !== chainId;
+    });
+    const toChain = next?.chain ?? "Arbitrum";
+    return {
+      side: "Bridge",
+      fromAsset: from,
+      asset: to,
+      protocol: "deBridge",
+      chain: l.chain,
+      toChain,
+      sizeUsd: l.sizeUsd,
+      note: `No DEX Meridian can sign on ${l.chain}: this sells your ${from} and delivers ${to} on ${toChain} in one route.`,
+    };
+  });
 }
 
 /** Tokens the funding planner (lib/fundingPlanner.ts) bridges and converts on its own. */
@@ -115,7 +154,7 @@ export function dropFundingMoves(legs: LLMLeg[]): LLMLeg[] {
  * Fixes what can be fixed; relabels what can't.
  */
 export function validateAndFixStrategy(strategy: LLMStrategy): LLMStrategy {
-  const legs = dropFundingMoves(strategy.legs ?? []);
+  const legs = dropFundingMoves(routeSwapsWithoutDex(strategy.legs ?? []));
   const nameAndSummary = `${strategy.name} ${strategy.summary}`;
   const claimsNeutral = NEUTRAL_KEYWORDS.test(nameAndSummary);
 
