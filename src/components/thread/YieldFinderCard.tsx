@@ -5,7 +5,8 @@ import { useAccount } from "wagmi";
 import { resolveOrderForLeg } from "@/lib/assetMap";
 import type { Order } from "@/lib/execution";
 import { legChainId } from "@/lib/chains";
-import type { TradeLeg } from "@/lib/tradePlan";
+import type { TradeLeg, TradePlan } from "@/lib/tradePlan";
+import { StrategyLegContext } from "@/components/thread/strategyLegContext";
 import { useLivePrices } from "@/hooks/useLivePrices";
 import { useBestYield } from "@/hooks/useBestYield";
 import { useHlpApr, useLlpApr } from "@/hooks/useVaultYields";
@@ -20,6 +21,21 @@ function YieldOptionRow({ option, asset, sizeUsd }: { option: MergedYieldOption;
   const leg: TradeLeg = { side: "Supply", asset, protocol: option.protocol, sizeUsd, chain: option.chain };
   const resolved = resolveOrderForLeg(leg, undefined, prices, legChainId(leg, chain?.id));
   const isMorpho = option.protocol === "Morpho";
+  // A one-step strategy, so the deposit is tracked in the Strategies tab and celebrated like any other.
+  const plan: TradePlan = useMemo(
+    () => ({
+      intent: "supply",
+      asset,
+      sizeUsd,
+      summary: `Supply ${asset} on ${option.protocol} (${option.chain}).`,
+      variantLabel: `${option.protocol} ${asset} on ${option.chain}`,
+      apyPct: option.apy,
+      legs: [leg],
+    }),
+    // leg is rebuilt each render from these same values
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [asset, sizeUsd, option.protocol, option.chain, option.apy],
+  );
   const wired = option.wired && (isMorpho || !isUnsupported(resolved));
 
   return (
@@ -35,11 +51,13 @@ function YieldOptionRow({ option, asset, sizeUsd }: { option: MergedYieldOption;
         </p>
       )}
       {wired ? (
-        isMorpho ? (
-          <MorphoExecuteButton leg={leg} prices={prices} />
-        ) : (
-          <ValidatedExecuteButton order={resolved as Order} label={`Execute on ${option.protocol} →`} />
-        )
+        <StrategyLegContext.Provider value={{ plan, legIndex: 0 }}>
+          {isMorpho ? (
+            <MorphoExecuteButton leg={leg} prices={prices} />
+          ) : (
+            <ValidatedExecuteButton order={resolved as Order} label={`Execute on ${option.protocol} →`} />
+          )}
+        </StrategyLegContext.Provider>
       ) : (
         <NotWired
           venue={option.protocol}

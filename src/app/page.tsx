@@ -9,7 +9,9 @@ import { TickerBanner } from "@/components/TickerBanner";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { StrategiesPanel } from "@/components/StrategiesPanel";
+import { PortfolioDayChange, PortfolioHoldings } from "@/components/PortfolioHoldings";
 import { Celebration } from "@/components/Celebration";
+import { ProductTour, startTour } from "@/components/ProductTour";
 import { OPEN_STRATEGIES_EVENT, useTrackedStrategies } from "@/lib/strategyTracker";
 import { HyperliquidPanel } from "@/components/HyperliquidPanel";
 import { ExtendedConnectPanel } from "@/components/ExtendedConnectPanel";
@@ -19,7 +21,7 @@ import { VaultRiskPanel } from "@/components/VaultRiskPanel";
 import { SolanaPanel } from "@/components/SolanaPanel";
 import { McpStatusPanel } from "@/components/McpStatusPanel";
 import { BridgePanel } from "@/components/BridgePanel";
-import { LiveAsset, LivePortfolio, useLivePortfolio } from "@/hooks/useLivePortfolio";
+import { LiveAsset, useLivePortfolio } from "@/hooks/useLivePortfolio";
 import { useHaikuPortfolio } from "@/hooks/useHaikuPortfolio";
 import { NewsFeed } from "@/components/NewsFeed";
 import { ACTIVE_CHAIN_IDS, CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
@@ -43,38 +45,12 @@ const LIVE_TRACKED_PROTOCOLS = /aave|spark|compound|morpho/i;
 const CHAIN_NAMES = SUPPORTED_CHAINS.map((c) => CHAIN_LABEL[c.id]).join(", ");
 import { ThreadItem, fmtUsd } from "@/lib/data";
 
-const ALLOCATION_COLORS = [
-  "var(--color-accent-700)",
-  "var(--color-accent-500)",
-  "var(--color-accent-300)",
-  "var(--color-neutral-500)",
-  "var(--color-neutral-300)",
-];
 
 function formatAssetAmount(asset: LiveAsset): string {
   if (asset.usd > 0) return fmtUsd(asset.usd);
   return `${asset.balance.toFixed(4)} ${asset.symbol}`;
 }
 
-function buildLiveAllocation(live: LivePortfolio): { label: string; pct: number; color: string }[] {
-  const slices = live.assets.map((a) => ({ label: `${a.symbol} · ${a.chain}`, usd: a.usd }));
-  const aaveNet = live.aaveCollateralUsd - live.aaveDebtUsd;
-  if (aaveNet > 0) slices.push({ label: "Aave (net)", usd: aaveNet });
-
-  const total = slices.reduce((sum, s) => sum + s.usd, 0);
-  if (total <= 0) return [];
-
-  slices.sort((a, b) => b.usd - a.usd);
-  const top = slices.slice(0, 4);
-  const restUsd = slices.slice(4).reduce((sum, s) => sum + s.usd, 0);
-  const finalSlices = restUsd > 0 ? [...top, { label: "Other", usd: restUsd }] : top;
-
-  return finalSlices.map((s, i) => ({
-    label: s.label,
-    pct: Math.round((s.usd / total) * 1000) / 10,
-    color: ALLOCATION_COLORS[i],
-  }));
-}
 
 interface QuickPrompt {
   label: string;
@@ -181,8 +157,6 @@ export default function TerminalApp() {
         amount: fmtUsd(p.depositedUsd),
       })),
   ];
-  const displayPositions = isConnected ? livePositions : [];
-  const displayAllocation = isConnected ? buildLiveAllocation(live) : [];
 
   // Auto-scroll to bottom when thread changes or analysis starts
   useEffect(() => {
@@ -289,11 +263,12 @@ export default function TerminalApp() {
     <div className="app-shell" style={{ background: "var(--color-bg)", color: "var(--color-text)", height: "100vh", display: "flex", flexDirection: "column" }}>
       <TickerBanner />
       <Celebration />
+      <ProductTour />
       <div className="nav topbar" style={{ background: "var(--color-surface)", flex: "none" }}>
         <Link href="/" className="nav-brand" style={{ color: "var(--color-text)" }}>
           Meridian
         </Link>
-        <span className={`status-pill${isConnected ? " status-pill--on" : ""}`} title={`Meridian executes on ${ACTIVE_CHAIN_IDS.map((id) => CHAIN_LABEL[id]).join(", ")}`}>
+        <span data-tour="status" className={`status-pill${isConnected ? " status-pill--on" : ""}`} title={`Meridian executes on ${ACTIVE_CHAIN_IDS.map((id) => CHAIN_LABEL[id]).join(", ")}`}>
           <span className="status-pill__dot" aria-hidden="true" />
           {isConnected ? `Connected · ${chain?.name ?? "wallet"}` : "Not connected"}
           <span className="status-pill__sep" aria-hidden="true">·</span>
@@ -306,63 +281,54 @@ export default function TerminalApp() {
             {fmtUsd(portfolioValue)}
           </span>
         )}
+        <button type="button" className="tour-trigger" onClick={startTour} title="Take the product tour">
+          Tour
+        </button>
         <WalletConnectButton />
       </div>
 
       <div className="app-grid" style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "290px 1fr 320px", overflow: "hidden" }}>
         {/* Portfolio column */}
         <div className="col-scroll app-col-portfolio side-col" style={{ minWidth: 0, borderRight: "1px solid var(--color-divider)" }}>
-          <section className="panel-card">
+          <section className="panel-card" data-tour="portfolio">
             <div className="panel-card__head">
               <h6 className="panel-card__title">Portfolio</h6>
               <span className={`live-chip${isConnected ? " live-chip--on" : ""}`}>{isConnected ? (live.isLoading ? "Reading…" : "Live") : "No wallet"}</span>
             </div>
             {portfolioValue !== null && <p className="portfolio-value">{fmtUsd(portfolioValue)}</p>}
+            {isConnected && <PortfolioDayChange live={live} />}
             {!isConnected && (
               <div className="empty-hint">
-                <p>Connect a wallet to see your balances and positions across {SUPPORTED_CHAINS.length} chains, and to execute strategies.</p>
+                <p>Connect a wallet to see your balances and positions across {ACTIVE_CHAIN_IDS.length} chains, and to execute strategies.</p>
                 <WalletConnectButton />
               </div>
             )}
 
-            {displayAllocation.length > 0 && (
-              <>
-                <div className="alloc-bar" aria-hidden="true">
-                  {displayAllocation.map((a) => (
-                    <div key={a.label} style={{ width: `${a.pct}%`, background: a.color }} />
-                  ))}
-                </div>
-                <ul className="alloc-legend">
-                  {displayAllocation.map((a) => (
-                    <li key={a.label}>
-                      <span className="alloc-legend__swatch" style={{ background: a.color }} />
-                      <span>{a.label}</span>
-                      <span className="text-muted">{a.pct}%</span>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            )}
           </section>
 
           {isConnected && (
             <section className="panel-card">
               <div className="panel-card__head">
-                <h6 className="panel-card__title">Positions</h6>
+                <h6 className="panel-card__title">Holdings</h6>
                 <span className="text-muted" style={{ fontSize: 11 }}>{livePositions.length || ""}</span>
               </div>
               {livePositions.length > 0 ? (
-                <ul className="position-list">
-                  {displayPositions.map((pos, i) => (
-                    <li key={i} className="position-row">
-                      <span className="position-row__main">
-                        <span className="position-row__asset">{pos.asset}</span>
-                        <span className="position-row__venue">{pos.venue}</span>
-                      </span>
-                      <span className="position-row__amount">{pos.amount}</span>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <PortfolioHoldings live={live} />
+                  {haikuExtraPositions.length > 0 && (
+                    <ul className="position-list" style={{ marginTop: 8 }}>
+                      {haikuExtraPositions.map((p, i) => (
+                        <li key={i} className="position-row">
+                          <span className="position-row__main">
+                            <span className="position-row__asset">{`${p.protocol} ${p.type}`}</span>
+                            <span className="position-row__venue">{`${p.asset} · chain ${p.chainId}`}</span>
+                          </span>
+                          <span className="position-row__amount">{fmtUsd(p.depositedUsd)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </>
               ) : (
                 <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
                   {live.isLoading
@@ -373,7 +339,7 @@ export default function TerminalApp() {
             </section>
           )}
 
-          <div className="seg side-tabs" role="tablist" aria-label="Portfolio tools" ref={sideTabsRef}>
+          <div className="seg side-tabs" role="tablist" aria-label="Portfolio tools" ref={sideTabsRef} data-tour="tabs">
             <label className="seg-opt">
               <input type="radio" name="left-tab" checked={leftTab === "risk"} onChange={() => setLeftTab("risk")} />
               <span>Risk</span>
@@ -573,7 +539,7 @@ export default function TerminalApp() {
                 </button>
               </div>
             )}
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }} data-tour="composer">
               <textarea
                 ref={textareaRef}
                 className="input"
@@ -618,7 +584,7 @@ export default function TerminalApp() {
         </div>
 
         {/* News / Alpha column */}
-        <div className="col-scroll app-col-news side-col" style={{ minWidth: 0, borderLeft: "1px solid var(--color-divider)" }}>
+        <div className="col-scroll app-col-news side-col" style={{ minWidth: 0, borderLeft: "1px solid var(--color-divider)" }} data-tour="markets">
           <NewsFeed />
         </div>
       </div>
