@@ -215,6 +215,8 @@ Before returning your JSON, verify each strategy against this checklist:
 - [ ] Are spot legs (Supply/Stake/Swap/Buy) free of leverage fields?
 - [ ] Does every summary quote exact rates from the live data?
 - [ ] Does each strategy's "apy" match the rates in its leg notes, and is "exit" honest about lock-ups and queues?
+- [ ] Do the 3 strategies use 3 DIFFERENT mechanisms? The same legs on another chain or with another LST is the SAME mechanism: replace it.
+- [ ] Neutral or hedge goal with perps available and positive ETH funding: is one strategy the "LST + short perp" recipe?
 
 ## Leg Format (STRICT)
 

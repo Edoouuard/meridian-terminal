@@ -523,12 +523,9 @@ function carryRows(perChain: { chainId: number; reserves: AaveReserve[] }[], poo
     const carry = reserves.map((r) => ({ symbol: r.symbol, supplyApy: r.supplyAPY * 100, borrowApy: r.borrowAPY * 100, totalSupplyUsd: r.totalSupply }));
     rows.push(...neutralCarryRows(CHAIN_LABEL[chainId] ?? String(chainId), carry, staking, swappable));
   }
-  // The best LST per chain, best chains first.
-  const seen = new Set<string>();
-  return rows
-    .sort((a, b) => b.netApy - a.netApy)
-    .filter((r) => (seen.has(r.chain) ? false : (seen.add(r.chain), true)))
-    .slice(0, 6);
+  // Only the best chain + LST: given one row per chain, the planner filled all
+  // three strategies with the same carry on three chains.
+  return rows.sort((a, b) => b.netApy - a.netApy).slice(0, 1);
 }
 
 /* ---------- Handler ---------- */
