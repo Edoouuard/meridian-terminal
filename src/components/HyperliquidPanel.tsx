@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useAccount } from "wagmi";
-import { useHyperliquid } from "@/hooks/useHyperliquid";
+import { describeFill, useHyperliquid } from "@/hooks/useHyperliquid";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { fmtUsd } from "@/lib/data";
 import { setSharedHlAccount, useSharedHlAccount } from "@/hooks/useLivePortfolio";
@@ -175,10 +175,10 @@ export function HyperliquidPanel() {
 
       {status !== "idle" && (
         <p style={{ fontSize: 11, marginTop: 6 }}>
-          {status === "preparing" || status === "signing" || status === "submitting"
-            ? `${status === "signing" ? "Awaiting wallet signature…" : "Working…"}`
+          {status === "preparing" || status === "approving" || status === "submitting"
+            ? `${status === "approving" ? "Approve the Meridian trading key in your wallet (once)…" : "Working…"}`
             : status === "confirmed" && result
-              ? `Close order submitted: ${JSON.stringify(result.response)}`
+              ? `Closed: ${describeFill(result)}`
               : `Error: ${hlErr ?? "failed"}`}
           <button onClick={reset} style={{ marginLeft: 6, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 10 }}>
             clear

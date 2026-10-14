@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useAccount } from "wagmi";
 import { fmtUsd } from "@/lib/data";
 import type { TradeLeg } from "@/lib/tradePlan";
-import { useHyperliquid } from "@/hooks/useHyperliquid";
+import { describeFill, useHyperliquid } from "@/hooks/useHyperliquid";
 import { useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
 import { useExtendedAccount } from "@/hooks/useExtendedAccount";
 import { useExtendedPerp } from "@/hooks/useExtendedPerp";
@@ -18,9 +18,10 @@ import { recordExecution } from "@/lib/history";
 import { NotWired } from "@/components/thread/shared";
 
 /**
- * Live Hyperliquid perp execution. Fetches the live mid price + asset index,
- * signs the EIP-712 order with the wallet, submits to the exchange API, and
- * reports the real status. Honest: any failure surfaces as error, never a
+ * Live Hyperliquid perp execution: the first trade asks the wallet to approve a
+ * Meridian trading key once (it can trade, never withdraw); the IOC market
+ * order is then signed by that key and sent to Hyperliquid, and the real fill
+ * is reported. Honest: any failure surfaces as error, never a
  * fake success.
  *
  * Shares its testnet/mainnet selection with HyperliquidPanel's toggle
@@ -33,6 +34,9 @@ import { NotWired } from "@/components/thread/shared";
  * uses the caller's computed number rather than silently re-deriving it. The
  * notional and the approximate coin amount are shown before signing.
  */
+const HL_SIGNING_NOTE =
+  "IOC market order (fills now within 5% of the mid, or not at all). The first trade asks your wallet to approve a Meridian trading key once; it can trade, never withdraw.";
+
 export function PerpExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry[] }) {
   const { isConnected } = useAccount();
   const env = useSharedHlEnv();
@@ -77,13 +81,13 @@ export function PerpExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: Pri
     }
   }, [status, result, isBuy, symbol, coinQty]);
 
-  if (status === "preparing" || status === "signing" || status === "submitting") {
+  if (status === "preparing" || status === "approving" || status === "submitting") {
     return (
       <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>
         {status === "preparing"
           ? "Fetching Hyperliquid price…"
-          : status === "signing"
-            ? "Awaiting wallet signature…"
+          : status === "approving"
+            ? "Approve the Meridian trading key in your wallet (one time)…"
             : "Submitting order to Hyperliquid…"}
       </p>
     );
@@ -92,8 +96,7 @@ export function PerpExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: Pri
   if (status === "confirmed" && result) {
     return (
       <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-accent-700)" }}>
-        Order on Hyperliquid {env}: {result.marketPrice ? "$" + result.marketPrice.toFixed(4) : "n/a"} →{" "}
-        {JSON.stringify(result.response)}
+        Filled on Hyperliquid {env}: {describeFill(result)} {symbol}
         <button onClick={reset} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 11 }}>
           clear
         </button>
@@ -133,15 +136,14 @@ export function PerpExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: Pri
               <>
                 {" "}
                 ≈ <strong>{coinQty.toFixed(4)}</strong> {symbol.toUpperCase()} at ~$
-                {hlPrice!.toFixed(2)} each. The order is signed with your wallet, then submitted
-                to Hyperliquid.
+                {hlPrice!.toFixed(2)} each. {HL_SIGNING_NOTE}
               </>
             ) : (
-              <> A live mid price will be fetched, the order signed with your wallet, then submitted to Hyperliquid.</>
+              <> A live mid price will be fetched first. {HL_SIGNING_NOTE}</>
             )}
           </div>
         }
-        confirmLabel="Sign & submit"
+        confirmLabel="Submit order"
         warning={env === "testnet" ? "TESTNET — no real funds." : "Mainnet — real funds. Confirm carefully."}
         onConfirm={() => {
           setConfirming(false);

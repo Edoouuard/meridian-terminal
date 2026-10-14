@@ -31,6 +31,11 @@ import { EIGENLAYER_DEPOSIT_ABI, EIGENLAYER_RISK_NOTE, EIGENLAYER_STETH_STRATEGY
  * and converts to base units, rejecting zero / negative / over-precise amounts.
  */
 
+/** HyperEVM → HyperCore: an ERC20 sent to 0x20…{token index} lands in the sender's Hyperliquid spot balance. */
+export function isHyperCoreSystemAddress(chainId: number, to: string): boolean {
+  return chainId === 999 && /^0x20(00){11}[0-9a-f]{16}$/i.test(to);
+}
+
 export type OrderType = "supply" | "repay" | "borrow" | "withdraw" | "transfer" | "approve" | "stake" | "swap" | "unstake" | "claim";
 export type OrderProtocol = "aave" | "eth" | "erc20" | "lido" | "uniswap" | "morpho" | "compound" | "spark" | "maker" | "weth" | "rocketpool" | "frax" | "debridge" | "lifi" | "hyperliquid" | "extended" | "ondo" | "lighter" | "pendle" | "eigenlayer" | "variational" | "vault";
 
@@ -556,6 +561,17 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           args: [to, amount.value],
           description: `Deposit ${order.amount} USDC into your Hyperliquid account (official Bridge2 on Arbitrum)`,
           riskNote: "Hyperliquid credits the USDC to the sending address within about a minute. Trading and HLP deposits then happen on Hyperliquid.",
+        };
+      }
+      if (isHyperCoreSystemAddress(chainId, to)) {
+        return {
+          chainId,
+          address: token,
+          abi: ERC20_TRANSFER_ABI,
+          functionName: "transfer",
+          args: [to, amount.value],
+          description: `Move ${order.amount} ${assetLabel} from HyperEVM into your Hyperliquid spot balance`,
+          riskNote: "Sent to the token's HyperCore system address: Hyperliquid credits it to your own spot balance at the next block. It can be moved back from the Hyperliquid app.",
         };
       }
       return {
