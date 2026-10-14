@@ -1388,3 +1388,38 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .tour__spot, .tour__card { transition: none; animation: none; }
 }
+
+/* ── Holdings ──────────────────────────────────────────────────────────── */
+.portfolio-day { margin: -4px 0 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.holdings { display: flex; flex-direction: column; gap: 6px; }
+.holdings__bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; background: var(--color-divider); }
+.holdings__bar > div { height: 100%; transition: width 0.4s ease; }
+.holdings__group { border-top: 1px solid var(--color-divider); padding-top: 4px; }
+.holdings__group:first-of-type { border-top: none; }
+.holdings__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+}
+.holdings__swatch { width: 8px; height: 8px; border-radius: 2px; flex: none; }
+.holdings__label { font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; }
+.holdings__pct { font-size: 11px; }
+.holdings__usd { margin-left: auto; font-size: 13px; font-weight: 600; font-variant-numeric: lining-nums tabular-nums; }
+.holdings__chev { width: 10px; font-size: 10px; color: var(--color-neutral-500); }
+.hold-list { display: flex; flex-direction: column; margin: 0 0 4px; padding: 0; list-style: none; }
+.hold-row { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; padding: 5px 0 5px 14px; }
+.hold-row__main { display: flex; flex-direction: column; min-width: 0; }
+.hold-row__symbol { font-size: 13px; font-weight: 600; }
+.hold-row__sub { font-size: 11px; color: var(--color-neutral-600, var(--color-neutral-500)); font-variant-numeric: tabular-nums; }
+.hold-row__chains { font-size: 10px; color: var(--color-neutral-500); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hold-row__usd { flex: none; font-size: 13px; font-variant-numeric: lining-nums tabular-nums; }
+.hold-up { color: var(--risk-good, #27ae60); }
+.hold-down { color: var(--risk-bad, #c0392b); }
