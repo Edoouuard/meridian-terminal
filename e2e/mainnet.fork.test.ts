@@ -154,6 +154,22 @@ describe.skipIf(!ANVIL_ETH_URL)("Ethereum fork — Pendle PT and EigenLayer rest
     await buyPt(weth, amount, "ETH");
   }, 180_000);
 
+  it("supplies USDC to SparkLend through a planned Spark leg", async () => {
+    const usdc = findToken("USDC", mainnet.id)!;
+    const amount = 100_000_000n; // 100 USDC
+    try {
+      await testClient.request({ method: "anvil_dealERC20" as never, params: [usdc.address, account.address, toHex(amount)] as never });
+    } catch {
+      const slot = keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [account.address, 9n]));
+      await testClient.setStorageAt({ address: usdc.address as Address, index: slot, value: pad(toHex(amount)) });
+    }
+    const order = resolveOrderForLeg({ side: "Supply", asset: "USDC", protocol: "Spark", sizeUsd: 100 }, undefined, [{ symbol: "USDC", price: 1 }], 1) as Order;
+    expect(order).toMatchObject({ protocol: "spark", type: "supply" });
+    await run(order, "spark supply 100 USDC");
+    const left = await publicClient.readContract({ address: usdc.address as Address, abi: ERC20_ABI, functionName: "balanceOf", args: [account.address] });
+    expect(left).toBe(0n);
+  }, 120_000);
+
   it("stakes ETH on Lido, then restakes the stETH into EigenLayer", async () => {
     const prices = [{ symbol: "ETH", price: 2500 }];
     const stake = resolveOrderForLeg({ side: "Stake", asset: "ETH", protocol: "Lido", sizeUsd: 2500 }, undefined, prices, 1) as Order;

@@ -5,7 +5,8 @@
  *
  *   - Base (ANVIL_URL): Fluid fUSDC, Spark Savings sUSDC
  *   - Arbitrum (ANVIL_ARB_URL): Fluid fUSDT, Hyperliquid deposit (USDC → Bridge2)
- *   - Ethereum (ANVIL_ETH_URL): Sky sUSDS, Ethena sUSDe
+ *   - Ethereum (ANVIL_ETH_URL): Sky sUSDS, Ethena sUSDe, Spark Savings spUSDC /
+ *     spUSDT / spETH, Yearn yvUSDC-1 / yvWETH-1 / yvUSDS-1
  *
  * Each block is skipped without its fork URL (CI starts all three).
  */
@@ -34,7 +35,12 @@ import { executePreparedOrder, prepareOrder, type OrderRunnerClient, type OrderR
 // anvil's well-known default account #1 (local test key, holds no real funds). Not #0: the other
 // fork test files sign with #0 on the same forks in parallel, and a shared account races on nonces.
 const account = privateKeyToAccount("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d");
-const PRICES = ["USDC", "USDT", "USDS", "USDE"].map((symbol) => ({ symbol, price: 1 }));
+const PRICES = [
+  ...["USDC", "USDT", "USDS", "USDE"].map((symbol) => ({ symbol, price: 1 })),
+  // Only sizes the test deposit; any recent ETH price works.
+  { symbol: "ETH", price: 2500 },
+  { symbol: "WETH", price: 2500 },
+];
 
 function withoutChainId(args: Record<string, unknown>): Record<string, unknown> {
   const rest = { ...args };
@@ -139,4 +145,10 @@ describe.skipIf(!ETH_URL)("vaults on an Ethereum fork", () => {
   const kit = ETH_URL ? forkKit(ETH_URL, mainnet) : null;
   it("deposits USDS into Sky sUSDS", () => kit!.depositLeg("Sky", "USDS", "Ethereum", 100), 120_000);
   it("deposits USDe into Ethena sUSDe", () => kit!.depositLeg("Ethena", "USDe", "Ethereum", 100), 120_000);
+  it("deposits USDC into Spark Savings spUSDC", () => kit!.depositLeg("Spark Savings", "USDC", "Ethereum", 100), 120_000);
+  it("deposits USDT into Spark Savings spUSDT", () => kit!.depositLeg("Spark Savings", "USDT", "Ethereum", 100), 120_000);
+  it("deposits WETH into Spark Savings spETH", () => kit!.depositLeg("Spark Savings", "ETH", "Ethereum", 100), 120_000);
+  it("deposits USDC into Yearn yvUSDC-1", () => kit!.depositLeg("Yearn", "USDC", "Ethereum", 100), 120_000);
+  it("deposits WETH into Yearn yvWETH-1", () => kit!.depositLeg("Yearn", "WETH", "Ethereum", 100), 120_000);
+  it("deposits USDS into Yearn yvUSDS-1", () => kit!.depositLeg("Yearn", "USDS", "Ethereum", 100), 120_000);
 });
