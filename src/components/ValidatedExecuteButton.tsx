@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAccount, useSwitchChain } from "wagmi";
 import type { Order } from "@/lib/execution";
 import { CHAIN_LABEL } from "@/lib/onchain";
@@ -12,6 +12,8 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { guardrailFromSimulation } from "@/lib/safety";
 import { useHealthPreview } from "@/hooks/useHealthPreview";
 import type { OrderFlowState } from "@/lib/executionPlan";
+import { confirmStrategyLeg } from "@/lib/strategyTracker";
+import { useStrategyLeg } from "@/components/thread/strategyLegContext";
 
 const STATUS_LABEL: Partial<Record<OrderFlowState, string>> = {
   VALIDATING: "Checking your balance…",
@@ -56,9 +58,17 @@ export function ValidatedExecuteButton({
   const [dismissedPlan, setDismissedPlan] = useState<typeof builtPlan>(null);
   const dialogOpen = state === "READY_FOR_SIGNATURE" && builtPlan !== dismissedPlan;
 
+  // Inside a strategy, a confirmed step is recorded for monitoring and celebrated (once per hash).
+  const strategyLeg = useStrategyLeg();
+  const recordedHash = useRef<string | null>(null);
   useEffect(() => {
-    if (state === "CONFIRMED" && mainHash) onConfirmed?.(mainHash);
-  }, [state, mainHash, onConfirmed]);
+    if (state !== "CONFIRMED" || !mainHash) return;
+    onConfirmed?.(mainHash);
+    if (strategyLeg && recordedHash.current !== mainHash) {
+      recordedHash.current = mainHash;
+      confirmStrategyLeg(strategyLeg.plan, strategyLeg.legIndex, { hash: mainHash, chainId: order.chainId, owner: address });
+    }
+  }, [state, mainHash, onConfirmed, strategyLeg, order.chainId, address]);
 
   // Health-factor guardrail for REAL-money borrow/withdraw. On Aave the
   // resulting health factor is simulated by the Aave MCP (preview_action) as
@@ -92,7 +102,8 @@ export function ValidatedExecuteButton({
   if (state === "CONFIRMED" && mainHash) {
     const url = explorerUrlFor(order.chainId, mainHash);
     return (
-      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-accent-700)" }}>
+      <p className="exec-done" style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-accent-700)" }}>
+        <span className="exec-done__check" aria-hidden="true">✓</span>
         Signed onchain ·{" "}
         <a href={url} target="_blank" rel="noreferrer" style={{ color: "inherit", textDecoration: "underline" }}>
           view {mainHash.slice(0, 10)}…

@@ -8,6 +8,9 @@ import { RiskPanel } from "@/components/RiskPanel";
 import { TickerBanner } from "@/components/TickerBanner";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
 import { HistoryPanel } from "@/components/HistoryPanel";
+import { StrategiesPanel } from "@/components/StrategiesPanel";
+import { Celebration } from "@/components/Celebration";
+import { OPEN_STRATEGIES_EVENT, useTrackedStrategies } from "@/lib/strategyTracker";
 import { HyperliquidPanel } from "@/components/HyperliquidPanel";
 import { ExtendedConnectPanel } from "@/components/ExtendedConnectPanel";
 import { LifiPerpsConnectPanel } from "@/components/LifiPerpsConnectPanel";
@@ -137,9 +140,20 @@ export default function TerminalApp() {
   // Everything below Positions used to stack 9 panels in one long scroll
   // (Risk, Vault risk, 4 venue connect panels, History, Chains, Solana) --
   // grouped into tabs so the left column stays scannable instead of dense.
-  const [leftTab, setLeftTab] = useState<"risk" | "venues" | "activity">("risk");
+  const [leftTab, setLeftTab] = useState<"risk" | "strategies" | "venues" | "activity">("risk");
+  const sideTabsRef = useRef<HTMLDivElement>(null);
+  // "Monitor it" from the celebration opens the Strategies tab.
+  useEffect(() => {
+    const open = () => {
+      setLeftTab("strategies");
+      sideTabsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    window.addEventListener(OPEN_STRATEGIES_EVENT, open);
+    return () => window.removeEventListener(OPEN_STRATEGIES_EVENT, open);
+  }, []);
 
   const { isConnected, address, chain } = useAccount();
+  const trackedStrategies = useTrackedStrategies(address);
   const live = useLivePortfolio();
   const { data: livePrices } = useLivePrices();
   const haikuData = useHaikuPortfolio();
@@ -274,6 +288,7 @@ export default function TerminalApp() {
   return (
     <div className="app-shell" style={{ background: "var(--color-bg)", color: "var(--color-text)", height: "100vh", display: "flex", flexDirection: "column" }}>
       <TickerBanner />
+      <Celebration />
       <div className="nav topbar" style={{ background: "var(--color-surface)", flex: "none" }}>
         <Link href="/" className="nav-brand" style={{ color: "var(--color-text)" }}>
           Meridian
@@ -358,10 +373,17 @@ export default function TerminalApp() {
             </section>
           )}
 
-          <div className="seg side-tabs" role="tablist" aria-label="Portfolio tools">
+          <div className="seg side-tabs" role="tablist" aria-label="Portfolio tools" ref={sideTabsRef}>
             <label className="seg-opt">
               <input type="radio" name="left-tab" checked={leftTab === "risk"} onChange={() => setLeftTab("risk")} />
               <span>Risk</span>
+            </label>
+            <label className="seg-opt">
+              <input type="radio" name="left-tab" checked={leftTab === "strategies"} onChange={() => setLeftTab("strategies")} />
+              <span>
+                Strategies
+                {trackedStrategies.length > 0 && <span className="tab-count">{trackedStrategies.length}</span>}
+              </span>
             </label>
             <label className="seg-opt">
               <input type="radio" name="left-tab" checked={leftTab === "venues"} onChange={() => setLeftTab("venues")} />
@@ -406,6 +428,7 @@ export default function TerminalApp() {
               </details>
             </>
           )}
+          {leftTab === "strategies" && <StrategiesPanel />}
           {leftTab === "activity" && <HistoryPanel />}
         </div>
 
