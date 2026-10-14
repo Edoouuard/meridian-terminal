@@ -47,6 +47,26 @@ describe("strategyIntegrity — neutral strategies", () => {
     expect(out.legs.reduce((s, l) => s + (l.side === "Short" ? 0 : (l.sizeUsd ?? 0)), 0)).toBe(5000);
   });
 
+  it("resizes an added hedge to the budget: notional = budget × L / (L + 1)", () => {
+    const out = validateAndFixStrategy(
+      strat("Neutral ETH perp hedge", [
+        { side: "Supply", asset: "USDC", protocol: "Aave", chain: "Base", sizeUsd: 2500 },
+        { side: "Deposit", asset: "USDC", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 2500 },
+        { side: "Short", asset: "ETH PERP", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 5000, leverage: 2 },
+      ]),
+    );
+    const size = (side: string) => out.legs.find((l) => l.side === side)?.sizeUsd;
+    expect(size("Swap")).toBe(3333);
+    expect(size("Short")).toBe(3333);
+    expect(size("Deposit")).toBe(1667);
+    expect(out.legs.find((l) => l.side === "Supply")).toBeUndefined();
+  });
+
+  it("keeps a stablecoin-only strategy labelled neutral as it is", () => {
+    const out = validateAndFixStrategy(strat("Market-neutral stables", [{ side: "Supply", asset: "USDC", protocol: "Fluid", sizeUsd: 2500 }]));
+    expect(out.name).toBe("Market-neutral stables");
+  });
+
   it("relabels a 'neutral' strategy with no short side as directional", () => {
     const out = validateAndFixStrategy(strat("Neutral yield", [{ side: "Stake", asset: "stETH", protocol: "Lido", sizeUsd: 1000 }]));
     expect(out.name).toMatch(/Directional/);

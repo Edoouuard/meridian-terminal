@@ -176,7 +176,7 @@ export function validateAndFixStrategy(strategy: LLMStrategy): LLMStrategy {
         note: `Spot long ${asset} (held as ${token}) to offset the short perp — required for neutrality.`,
       });
     }
-    const fixedLegs = [...addedLegs, ...rest].map(fixSpotLeverage);
+    const fixedLegs = fitPerpHedgeToBudget([...addedLegs, ...rest], legs).map(fixSpotLeverage);
     const assetList = [...shortAssets].join(", ");
     return {
       ...strategy,
@@ -186,6 +186,8 @@ export function validateAndFixStrategy(strategy: LLMStrategy): LLMStrategy {
   }
 
   if (!hasShort) {
+    // Only stablecoins: no price exposure to hedge, so "neutral" is true.
+    if (!legs.some(isRealLongExposure)) return { ...strategy, legs: legs.map(fixSpotLeverage) };
     // No short legs — relabel as directional.
     return {
       ...strategy,
@@ -196,6 +198,31 @@ export function validateAndFixStrategy(strategy: LLMStrategy): LLMStrategy {
   }
 
   return { ...strategy, legs: legs.map(fixSpotLeverage) };
+}
+
+/**
+ * After a spot long was added for a perp short: when the long + margin now
+ * cost more than the strategy put in (the stablecoin supply it replaced plus
+ * the perp margin deposit), resize to the recipe — notional N = budget × L /
+ * (L + 1) for the spot long and the short, the rest as margin.
+ */
+function fitPerpHedgeToBudget(fixed: LLMLeg[], original: LLMLeg[]): LLMLeg[] {
+  const spend = (ls: LLMLeg[]) =>
+    ls.filter((l) => /^(supply|deposit|swap|stake|buy)$/i.test(l.side.trim())).reduce((s, l) => s + (l.sizeUsd ?? 0), 0);
+  const budget = spend(original);
+  const shorts = fixed.filter((l) => l.side.toLowerCase() === "short");
+  const deposit = fixed.find((l) => l.side.toLowerCase() === "deposit" && /hyperliquid/i.test(l.protocol));
+  if (!deposit || shorts.length !== 1 || !(budget > 0) || spend(fixed) <= budget * 1.01) return fixed;
+  const lev = Math.max(1, shorts[0].leverage ?? 1);
+  const others = spend(fixed.filter((l) => l !== deposit && !(l.side.toLowerCase() === "swap" && l.note?.startsWith("Spot long"))));
+  const usable = budget - others;
+  if (!(usable > 0)) return fixed;
+  const notional = Math.floor((usable * lev) / (lev + 1));
+  return fixed.map((l) => {
+    if (l === deposit) return { ...l, sizeUsd: Math.floor(usable - notional) };
+    if (l === shorts[0] || (l.side.toLowerCase() === "swap" && l.note?.startsWith("Spot long"))) return { ...l, sizeUsd: notional };
+    return l;
+  });
 }
 
 /** Spot/lending sides never carry leverage. */
