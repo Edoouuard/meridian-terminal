@@ -14,6 +14,7 @@ import { useHealthPreview } from "@/hooks/useHealthPreview";
 import type { OrderFlowState } from "@/lib/executionPlan";
 import { confirmStrategyLeg } from "@/lib/strategyTracker";
 import { useStrategyLeg } from "@/components/thread/strategyLegContext";
+import { TxProgress } from "@/components/TxProgress";
 
 const STATUS_LABEL: Partial<Record<OrderFlowState, string>> = {
   VALIDATING: "Checking your balance…",
@@ -119,21 +120,20 @@ export function ValidatedExecuteButton({
   }
 
   const statusText = STATUS_LABEL[state];
-  if (statusText) {
+  if (state === "APPROVAL_PENDING" || state === "APPROVAL_CONFIRMED" || state === "SUPPLY_PENDING" || state === "CONFIRMING") {
     return (
-      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>
-        {statusText}
-        {approvalHash && state !== "APPROVAL_PENDING" && (
-          <>
-            {" "}
-            ·{" "}
-            <a href={explorerUrlFor(order.chainId, approvalHash)} target="_blank" rel="noreferrer" style={{ color: "inherit" }}>
-              approval {approvalHash.slice(0, 8)}…
-            </a>
-          </>
-        )}
-      </p>
+      <TxProgress
+        key={state}
+        state={state}
+        chainId={order.chainId}
+        needsApproval={needsApproval}
+        approvalHash={approvalHash}
+        mainHash={mainHash}
+      />
     );
+  }
+  if (statusText) {
+    return <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>{statusText}</p>;
   }
 
   const isFailure = state !== "DRAFT" && state !== "READY_FOR_SIGNATURE" && message !== null && !statusText;

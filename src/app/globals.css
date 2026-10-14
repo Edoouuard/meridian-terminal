@@ -1288,3 +1288,53 @@ body {
 .side-tabs .seg-opt input:checked + span .tab-count { background: var(--color-accent-700); color: #fff; }
 .strat-legs li.is-skipped { opacity: 0.55; }
 .strat-legs li.is-skipped .strat-legs__label { text-decoration: line-through; text-decoration-color: var(--color-neutral-400); }
+
+/* ── Transaction in flight ─────────────────────────────────────────────── */
+.txp {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-divider);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-accent-100) 45%, var(--color-bg));
+  font-size: 12px;
+  animation: exec-done-in 0.3s ease-out;
+}
+.txp--slow { border-color: color-mix(in srgb, var(--color-accent-500) 55%, var(--color-divider)); }
+.txp__steps { display: flex; gap: 12px; margin: 0; padding: 0; list-style: none; font-size: 11px; color: var(--color-neutral-500); flex-wrap: wrap; }
+.txp__steps li { display: flex; align-items: center; gap: 5px; }
+.txp__steps li.is-active { color: var(--color-text); font-weight: 600; }
+.txp__steps li.is-done { color: var(--risk-good, #27ae60); }
+.txp__dot {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--color-surface);
+  font-size: 9px;
+}
+.txp__steps li.is-active .txp__dot { background: var(--color-accent-500); color: #fff; }
+.txp__steps li.is-done .txp__dot { background: var(--risk-good, #27ae60); color: #fff; }
+.txp__main { display: flex; gap: 10px; align-items: flex-start; }
+.txp__main strong { display: block; font-size: 13px; font-variant-numeric: tabular-nums; }
+.txp__main span { display: block; color: var(--color-neutral-500); line-height: 1.45; }
+.txp__spinner {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 1px;
+  border: 2px solid var(--color-accent-200);
+  border-top-color: var(--color-accent-600);
+  border-radius: 50%;
+  animation: txp-spin 0.9s linear infinite;
+}
+@keyframes txp-spin { to { transform: rotate(360deg); } }
+.txp__hint { margin: 0; padding: 6px 8px; border-radius: 8px; background: color-mix(in srgb, var(--color-accent-200) 50%, transparent); }
+.txp__links { display: flex; gap: 12px; font-size: 11px; }
+.txp__links a { color: var(--color-accent-700); }
+@media (prefers-reduced-motion: reduce) {
+  .txp, .txp__spinner { animation: none; }
+}

@@ -21,6 +21,7 @@ import { FEATURES } from "@/lib/features";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
 import { StrategyLegContext } from "@/components/thread/strategyLegContext";
 import { confirmStrategyLeg } from "@/lib/strategyTracker";
+import { typicalWait } from "@/components/TxProgress";
 import { BridgeExecuteButton } from "@/components/BridgeExecuteButton";
 import { ExtendedPerpExecuteButton, LifiPerpExecuteButton, PerpExecuteButton } from "@/components/execute/PerpExecuteButtons";
 import { LidoUnstakeButton, MorphoExecuteButton, MorphoWithdrawButton, PendleExecuteButton, SwapExecuteButton } from "@/components/execute/VenueExecuteButtons";
@@ -299,6 +300,20 @@ export function ExecuteStrategyButton({ plan }: { plan: TradePlan }) {
             }}
           />
         </div>
+        {progress.status === "running" && (() => {
+          const current = progress.legs[progress.currentLeg];
+          const entry = resolvedOrders[progress.currentLeg];
+          if (!current || !entry) return null;
+          const chain = CHAIN_LABEL[entry.order.chainId] ?? "the network";
+          const waitingWallet = current.status === "approving" || current.status === "executing" || current.status === "switching-chain";
+          return (
+            <p className="txp__hint" style={{ fontSize: 11 }}>
+              {waitingWallet
+                ? "Check your wallet: each step asks for its own signature. Nothing moves until you approve it."
+                : `Waiting for ${chain} to confirm (${typicalWait(entry.order.chainId)}). Your funds are safe meanwhile.`}
+            </p>
+          );
+        })()}
         {/* Per-leg status */}
         {progress.legs.map((lp, i) => {
           const entry = resolvedOrders[i];

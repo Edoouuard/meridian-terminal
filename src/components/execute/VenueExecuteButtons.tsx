@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQueries } from "@tanstack/react-query";
 import { zeroAddress } from "viem";
 import { useAccount, useBalance, useReadContract, useReadContracts } from "wagmi";
 import { findToken, DEFAULT_CHAIN_ID } from "@/lib/assetMap";
