@@ -279,14 +279,15 @@ function num(v: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function parseClearinghouseState(data: {
-  clearinghouseState?: {
-    marginSummary?: Record<string, number>;
-    withdrawable?: string;
-    assetPositions?: RawPosition[];
-  };
-}): HlAccount {
-  const ch = data?.clearinghouseState ?? {};
+interface RawClearinghouse {
+  marginSummary?: Record<string, number | string>;
+  withdrawable?: string;
+  assetPositions?: RawPosition[];
+}
+
+/** The info API returns the state at the top level (older wrappers nested it under `clearinghouseState`). */
+export function parseClearinghouseState(data: (RawClearinghouse & { clearinghouseState?: RawClearinghouse }) | null): HlAccount {
+  const ch: RawClearinghouse = data?.clearinghouseState ?? data ?? {};
   const positions = (ch.assetPositions ?? [])
     .map((ap) => ap.position)
     .filter((p): p is NonNullable<typeof p> => !!p)
@@ -324,35 +325,125 @@ export async function fetchClearinghouseState(
   return parseClearinghouseState(data);
 }
 
-/** What the user holds on Hyperliquid outside perps margin: spot balances and vault (e.g. HLP) equity. */
+/**
+ * What the user holds on Hyperliquid outside perps margin.
+ *
+ * Verified against live accounts: a lent ("Earn") amount stays inside the
+ * spot `total`, so `supplied` is the part of `total` that is lent out; a
+ * borrow is not a negative balance, so it comes back separately as debt. In
+ * the unified / portfolio-margin account modes the perps collateral is the
+ * spot USDC itself, so the perps account value must not be added on top.
+ */
 export interface HlHoldings {
-  spot: { coin: string; total: number }[];
+  /** Spot balances; `supplied` (≤ total) is lent out, `px` is Hyperliquid's own USD mark (0 when unknown). */
+  spot: { coin: string; total: number; supplied: number; px: number }[];
+  /** Borrowed tokens (debt), with their USD mark. */
+  borrows: { coin: string; amount: number; px: number }[];
+  /** Lending health factor (null when nothing is borrowed). */
+  lendingHealthFactor: number | null;
+  /** Staked HYPE: delegated + undelegated staking balance + pending withdrawals. */
+  stakedHype: number;
+  /** HYPE's USD mark, for the staking row. */
+  hypePx: number;
+  /** Unified / portfolio-margin account: perps collateral is the spot USDC. */
+  unified: boolean;
   vaults: { vaultAddress: string; equity: number }[];
 }
 
-/** Parse `spotClearinghouseState` + `userVaultEquities` (pure; unit-tested). */
-export function parseHlHoldings(spotData: unknown, vaultData: unknown): HlHoldings {
-  const balances = (spotData as { balances?: { coin?: string; total?: string }[] } | null)?.balances;
-  const spot = (Array.isArray(balances) ? balances : [])
-    .map((b) => ({ coin: String(b.coin ?? ""), total: num(b.total) }))
-    .filter((b) => b.coin && b.total > 0);
-  const vaults = (Array.isArray(vaultData) ? (vaultData as { vaultAddress?: string; equity?: string }[]) : [])
-    .map((v) => ({ vaultAddress: String(v.vaultAddress ?? ""), equity: num(v.equity) }))
-    .filter((v) => v.vaultAddress && v.equity > 0);
-  return { spot, vaults };
+export interface HlHoldingsRaw {
+  spot?: unknown;
+  vaults?: unknown;
+  borrowLend?: unknown;
+  delegator?: unknown;
+  abstraction?: unknown;
+  spotMeta?: unknown;
 }
 
-/** Read-only: the user's Hyperliquid spot balances and vault equities. */
+/** USD mark per spot token index, from `spotMetaAndAssetCtxs` (the token's pair against USDC). */
+function spotMarks(spotMeta: unknown): Map<number, number> {
+  const marks = new Map<number, number>([[0, 1]]);
+  if (!Array.isArray(spotMeta) || spotMeta.length < 2) return marks;
+  const meta = spotMeta[0] as { universe?: { tokens?: number[]; index?: number }[] } | null;
+  const ctxs = spotMeta[1] as { markPx?: string; midPx?: string | null }[] | null;
+  if (!Array.isArray(meta?.universe) || !Array.isArray(ctxs)) return marks;
+  for (const pair of meta.universe) {
+    const [base, quote] = pair.tokens ?? [];
+    if (quote !== 0 || typeof base !== "number" || typeof pair.index !== "number" || marks.has(base)) continue;
+    const ctx = ctxs[pair.index];
+    const px = num(ctx?.midPx ?? ctx?.markPx);
+    if (px > 0) marks.set(base, px);
+  }
+  return marks;
+}
+
+/** Parse the raw info responses into holdings (pure; unit-tested). */
+export function parseHlHoldings(raw: HlHoldingsRaw): HlHoldings {
+  const marks = spotMarks(raw.spotMeta);
+  const pxOf = (token: unknown, coin: string) => {
+    if (typeof token === "number" && marks.has(token)) return marks.get(token) as number;
+    return /^USD/.test(coin) ? 1 : 0;
+  };
+
+  const blState = raw.borrowLend as { tokenToState?: [number, { borrow?: { value?: string }; supply?: { value?: string } }][]; healthFactor?: string | null } | null;
+  const supplied = new Map<number, number>();
+  const borrowed = new Map<number, number>();
+  for (const entry of Array.isArray(blState?.tokenToState) ? blState.tokenToState : []) {
+    const [token, st] = entry;
+    if (num(st?.supply?.value) > 0) supplied.set(token, num(st?.supply?.value));
+    if (num(st?.borrow?.value) > 0) borrowed.set(token, num(st?.borrow?.value));
+  }
+
+  const balances = (raw.spot as { balances?: { coin?: string; token?: number; total?: string }[] } | null)?.balances;
+  const names = new Map<number, string>();
+  const spot = (Array.isArray(balances) ? balances : [])
+    .map((b) => {
+      const coin = String(b.coin ?? "");
+      if (typeof b.token === "number") names.set(b.token, coin);
+      const total = num(b.total);
+      const lent = typeof b.token === "number" ? Math.min(supplied.get(b.token) ?? 0, total) : 0;
+      return { coin, total, supplied: lent, px: pxOf(b.token, coin) };
+    })
+    .filter((b) => b.coin && b.total > 0);
+
+  const borrows = [...borrowed].map(([token, amount]) => {
+    const coin = names.get(token) ?? (token === 0 ? "USDC" : `#${token}`);
+    return { coin, amount, px: pxOf(token, coin) };
+  });
+
+  const d = raw.delegator as { delegated?: string; undelegated?: string; totalPendingWithdrawal?: string } | null;
+  const stakedHype = num(d?.delegated) + num(d?.undelegated) + num(d?.totalPendingWithdrawal);
+  const hypeToken = [...names].find(([, n]) => n === "HYPE")?.[0] ?? 150;
+
+  const vaults = (Array.isArray(raw.vaults) ? (raw.vaults as { vaultAddress?: string; equity?: string }[]) : [])
+    .map((v) => ({ vaultAddress: String(v.vaultAddress ?? ""), equity: num(v.equity) }))
+    .filter((v) => v.vaultAddress && v.equity > 0);
+
+  return {
+    spot,
+    borrows,
+    lendingHealthFactor: blState?.healthFactor ? num(blState.healthFactor) : null,
+    stakedHype,
+    hypePx: marks.get(hypeToken) ?? 0,
+    unified: raw.abstraction === "unifiedAccount" || raw.abstraction === "portfolioMargin",
+    vaults,
+  };
+}
+
+/** Read-only: the user's Hyperliquid spot, lending, staking and vault holdings. */
 export async function fetchHlHoldings(address: string, env: HyperliquidEnv): Promise<HlHoldings> {
   const post = (body: object) =>
-    fetch(env.infoUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).then((r) =>
-      r.ok ? r.json() : null,
-    );
-  const [spot, vaults] = await Promise.all([
-    post({ type: "spotClearinghouseState", user: address }).catch(() => null),
-    post({ type: "userVaultEquities", user: address }).catch(() => null),
+    fetch(env.infoUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+  const [spot, vaults, borrowLend, delegator, abstraction, spotMeta] = await Promise.all([
+    post({ type: "spotClearinghouseState", user: address }),
+    post({ type: "userVaultEquities", user: address }),
+    post({ type: "borrowLendUserState", user: address }),
+    post({ type: "delegatorSummary", user: address }),
+    post({ type: "userAbstraction", user: address }),
+    post({ type: "spotMetaAndAssetCtxs" }),
   ]);
-  return parseHlHoldings(spot, vaults);
+  return parseHlHoldings({ spot, vaults, borrowLend, delegator, abstraction, spotMeta });
 }
 
 export interface HlOpenOrder {

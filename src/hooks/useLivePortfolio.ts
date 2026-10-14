@@ -348,14 +348,25 @@ export function useLivePortfolio(): LivePortfolio {
     }
   }
 
-  // Funds on Hyperliquid L1 (not an EVM chain): perps account value, spot balances, vault equity.
+  // Funds on Hyperliquid L1 (not an EVM chain): perps account, spot (minus what is lent out), staked HYPE, vault equity.
+  // Lending (Earn) is reported below as a lending position. In unified / portfolio-margin mode the perps
+  // collateral is the spot USDC, so only the perps' unrealized PnL is added, never the account value.
   const hlAssets: LiveAsset[] = [];
-  if (hlAccount && hlAccount.accountValue > 0) {
+  const hlUnified = hlHoldings?.unified ?? false;
+  const hlPerpPnl = (hlAccount?.positions ?? []).reduce((sum, p) => sum + p.unrealizedPnl, 0);
+  if (hlAccount && !hlUnified && hlAccount.accountValue > 0) {
     hlAssets.push({ symbol: "USDC", venue: "Hyperliquid perps", chain: "Hyperliquid L1", balance: hlAccount.accountValue, usd: hlAccount.accountValue });
   }
+  const hlPx = (coin: string, px: number) => px || priceOf(coin.replace(/^U(?=ETH|BTC|SOL)/, "")) || (/^USD/.test(coin) ? 1 : 0);
   for (const b of hlHoldings?.spot ?? []) {
-    const px = /^USD/.test(b.coin) ? 1 : priceOf(b.coin.replace(/^U(?=ETH|BTC|SOL)/, ""));
-    if (px > 0) hlAssets.push({ symbol: b.coin, venue: "Hyperliquid spot", chain: "Hyperliquid L1", balance: b.total, usd: b.total * px });
+    const px = hlPx(b.coin, b.px);
+    const free = b.total - b.supplied;
+    const pnl = hlUnified && b.coin === "USDC" ? hlPerpPnl : 0;
+    if (px > 0 && free > 0) hlAssets.push({ symbol: b.coin, venue: "Hyperliquid spot", chain: "Hyperliquid L1", balance: free, usd: free * px + pnl });
+  }
+  if (hlHoldings && hlHoldings.stakedHype > 0) {
+    const px = hlPx("HYPE", hlHoldings.hypePx);
+    hlAssets.push({ symbol: "HYPE", venue: "Hyperliquid staking", chain: "Hyperliquid L1", balance: hlHoldings.stakedHype, usd: hlHoldings.stakedHype * px });
   }
   for (const v of hlHoldings?.vaults ?? []) {
     const isHlp = v.vaultAddress.toLowerCase() === HLP_VAULT_ADDRESS;
@@ -421,6 +432,23 @@ export function useLivePortfolio(): LivePortfolio {
       healthFactor: null,
     });
   });
+
+  // Hyperliquid lending (Earn): lent spot tokens as collateral, borrows as debt.
+  if (hlHoldings) {
+    const lentUsd = hlHoldings.spot.reduce((sum, b) => sum + b.supplied * hlPx(b.coin, b.px), 0);
+    const borrowedUsd = hlHoldings.borrows.reduce((sum, b) => sum + b.amount * hlPx(b.coin, b.px), 0);
+    if (lentUsd > 0 || borrowedUsd > 0) {
+      aavePositions.push({
+        chain: "Hyperliquid L1",
+        protocol: "Hyperliquid lending",
+        collateralUsd: lentUsd,
+        debtUsd: borrowedUsd,
+        availableToBorrowUsd: 0,
+        ltvPct: 0,
+        healthFactor: borrowedUsd > 0 ? hlHoldings.lendingHealthFactor : null,
+      });
+    }
+  }
 
   const aaveCollateralUsd = aavePositions.reduce((sum, p) => sum + p.collateralUsd, 0);
   const aaveDebtUsd = aavePositions.reduce((sum, p) => sum + p.debtUsd, 0);
