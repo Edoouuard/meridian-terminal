@@ -219,7 +219,7 @@ export function ExtendedPerpExecuteButton({ leg, prices }: { leg: TradeLeg; pric
   if (status === "confirmed" && result) {
     return (
       <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-accent-700)" }}>
-        Order on Extended {result.network}: {result.market} {JSON.stringify(result.order)}
+        Order submitted on Extended {result.network}: {result.market}{result.qty ? ` · ${result.qty}` : ""}. Check the fill in the Extended panel.
         <button onClick={reset} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 11 }}>
           clear
         </button>
@@ -342,7 +342,7 @@ export function LifiPerpExecuteButton({ leg, prices, provider }: { leg: TradeLeg
   if (status === "confirmed" && result) {
     return (
       <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-accent-700)" }}>
-        Order on {label}: {JSON.stringify(result.results)}
+        Order submitted on {label}. Check the fill in the {label} panel.
         <button onClick={reset} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 11 }}>
           clear
         </button>

@@ -7,6 +7,7 @@ import { ThreadCard } from "@/components/ThreadCard";
 import { RiskPanel } from "@/components/RiskPanel";
 import { TickerBanner } from "@/components/TickerBanner";
 import { WalletConnectButton } from "@/components/WalletConnectButton";
+import { FeedbackButton } from "@/components/FeedbackButton";
 import { HistoryPanel } from "@/components/HistoryPanel";
 import { StrategiesPanel } from "@/components/StrategiesPanel";
 import { PortfolioDayChange, PortfolioHoldings } from "@/components/PortfolioHoldings";
@@ -286,6 +287,7 @@ export default function TerminalApp() {
         <button type="button" className="tour-trigger" onClick={startTour} title="Take the product tour">
           Tour
         </button>
+        <FeedbackButton lastRequest={thread[thread.length - 1]?.text} />
         <WalletConnectButton />
       </div>
 

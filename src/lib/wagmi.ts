@@ -19,7 +19,15 @@ import {
   sonic,
   zkSync,
 } from "wagmi/chains";
-import { injected } from "wagmi/connectors";
+import { injected, walletConnect } from "wagmi/connectors";
+
+/**
+ * WalletConnect lets phone wallets connect (QR code on desktop, deep link on
+ * mobile). It needs a free Reown project id: set NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID.
+ * Without it, only browser-extension / in-app-browser wallets connect.
+ */
+const WC_PROJECT_ID = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID;
+export const WALLETCONNECT_ENABLED = !!WC_PROJECT_ID;
 
 export const wagmiConfig = createConfig({
   chains: [
@@ -41,7 +49,12 @@ export const wagmiConfig = createConfig({
     sonic,
     celo,
   ],
-  connectors: [injected()],
+  connectors: [
+    injected(),
+    ...(WC_PROJECT_ID
+      ? [walletConnect({ projectId: WC_PROJECT_ID, showQrModal: true, metadata: { name: "Meridian", description: "DeFi strategies from plain words", url: "https://meridian-terminal-liart.vercel.app", icons: [] } })]
+      : []),
+  ],
   transports: {
     [mainnet.id]: fallback(RPC_URLS[mainnet.id].map((url) => http(url))),
     [base.id]: fallback(RPC_URLS[base.id].map((url) => http(url))),

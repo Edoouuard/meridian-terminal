@@ -332,8 +332,8 @@ export function LidoUnstakeButton({ leg, prices }: { leg: TradeLeg; prices?: Pri
   );
 }
 
-/** A Pendle quote is dropped after this, so a fresh one is fetched before signing (its aggregator leg expires). */
-const QUOTE_TTL_MS = 60_000;
+/** When a Pendle quote was fetched (called from the quote handler, never during render). */
+const quoteClock = () => Date.now();
 
 /**
  * Pendle fixed yield: buy the PT of a live market and hold it to maturity.
@@ -346,7 +346,7 @@ const QUOTE_TTL_MS = 60_000;
 export function PendleExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry[] }) {
   const { address, chain } = useAccount();
   const legChain = legChainId(leg, chain?.id) ?? DEFAULT_CHAIN_ID;
-  const [quote, setQuote] = useState<{ order: Order; ptOut?: string } | null>(null);
+  const [quote, setQuote] = useState<{ order: Order; ptOut?: string; at: number } | null>(null);
   const [quoting, setQuoting] = useState(false);
   const [quoteError, setQuoteError] = useState<string | null>(null);
 
@@ -382,7 +382,7 @@ export function PendleExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
   // that expires within minutes, so it's fetched only once the allowance is
   // in place and signed right away — never quoted, then held through an
   // approval round-trip (that ordering reverted on a fork).
-  const { data: allowance } = useReadContract({
+  const { data: allowance, isError: allowanceError, refetch: refetchAllowance } = useReadContract({
     address: spend?.address,
     abi: ERC20_ALLOWANCE_ABI,
     functionName: "allowance",
@@ -418,12 +418,15 @@ export function PendleExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ chainId, pt: market.pt, tokenIn: spend.address, amountIn: amount.amountBase.toString(), receiver: address }),
       });
-      const body = await res.json();
+      const body = await res.json().catch(() => ({ error: `Pendle didn't answer (HTTP ${res.status}). Try again in a moment.` }));
       if (!res.ok) throw new Error(body.error ?? "Pendle quote failed");
       const q = body as PendleBuyQuote;
-      // The quote's aggregator leg expires: drop it after QUOTE_TTL_MS so a stale one is never signed.
-      setTimeout(() => setQuote(null), QUOTE_TTL_MS);
+      // The aggregator leg inside the route expires within minutes. The quote
+      // stays mounted (a transaction already being signed keeps its progress);
+      // the transaction is simulated right before signing, so a stale one fails
+      // safely, and "Refresh quote" replaces it.
       setQuote({
+        at: quoteClock(),
         ptOut: q.ptOut,
         order: {
           type: "swap",
@@ -456,6 +459,13 @@ export function PendleExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
       <OrderRow label="Liquidity" value={`$${Math.round(market.liquidityUsd).toLocaleString()}${market.isPrime ? " · Pendle prime" : " · major stablecoin"}`} />
       {!address ? (
         <NotWired venue="Pendle" reason="Connect a wallet to get a quote." />
+      ) : allowance === undefined && allowanceError ? (
+        <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--risk-bad, #c0392b)" }}>
+          Couldn&apos;t read your {spend.symbol} allowance.{" "}
+          <button onClick={() => void refetchAllowance()} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-accent-700)", fontSize: 12, padding: 0 }}>
+            Retry
+          </button>
+        </p>
       ) : allowance === undefined ? (
         <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>Reading your {spend.symbol} allowance…</p>
       ) : allowance < amount.amountBase ? (
@@ -464,7 +474,15 @@ export function PendleExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
           label={`1/2 · Approve ${amount.amount} ${spend.symbol} for Pendle →`}
         />
       ) : quote ? (
-        <ValidatedExecuteButton order={quote.order} label={`2/2 · Buy PT-${market.name} →`} />
+        <>
+          <ValidatedExecuteButton key={quote.at} order={quote.order} label={`2/2 · Buy PT-${market.name} →`} />
+          <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--color-neutral-500)" }}>
+            Quote from {new Date(quote.at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}: Pendle routes expire within minutes.{" "}
+            <button onClick={fetchQuote} disabled={quoting} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-accent-700)", fontSize: 11, padding: 0 }}>
+              {quoting ? "Refreshing…" : "Refresh quote"}
+            </button>
+          </p>
+        </>
       ) : (
         <button className="btn btn-primary" style={{ fontSize: 13, marginTop: 6, cursor: "pointer" }} disabled={quoting} onClick={fetchQuote}>
           {quoting ? "Quoting on Pendle…" : `Get quote: ${amount.amount} ${spend.symbol} → PT-${market.name}`}
