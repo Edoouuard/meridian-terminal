@@ -136,3 +136,39 @@ describe("orderRunner — executePreparedOrder", () => {
     expect(writes).toHaveLength(0);
   });
 });
+
+describe("orderRunner — gas headroom", () => {
+  it("sends each write with its estimate + 25% when the client can estimate", async () => {
+    const { deps } = fakeDeps();
+    const gasSeen: (bigint | undefined)[] = [];
+    deps.client.estimateContractGas = async () => 100_000n;
+    const write = deps.writeContract;
+    deps.writeContract = async (args: { gas?: bigint }) => {
+      gasSeen.push(args.gas);
+      return write(args);
+    };
+    const prepared = await prepareOrder(deps, supply());
+    if (!prepared.ok) throw new Error(prepared.message);
+    const res = await executePreparedOrder(deps, prepared);
+    expect(res.ok).toBe(true);
+    expect(gasSeen.length).toBeGreaterThan(0);
+    expect(gasSeen.every((g) => g === 125_000n)).toBe(true);
+  });
+
+  it("leaves gas to the wallet when the estimate fails", async () => {
+    const { deps } = fakeDeps();
+    const gasSeen: (bigint | undefined)[] = [];
+    deps.client.estimateContractGas = async () => {
+      throw new Error("estimate failed");
+    };
+    const write = deps.writeContract;
+    deps.writeContract = async (args: { gas?: bigint }) => {
+      gasSeen.push(args.gas);
+      return write(args);
+    };
+    const prepared = await prepareOrder(deps, supply());
+    if (!prepared.ok) throw new Error(prepared.message);
+    expect((await executePreparedOrder(deps, prepared)).ok).toBe(true);
+    expect(gasSeen.every((g) => g === undefined)).toBe(true);
+  });
+});
