@@ -1,76 +1,58 @@
 # Meridian — Master document
 
-> Vision, architecture, état réel et roadmap. **Ce fichier est la source de vérité** : toute PR doit faire avancer un item de la roadmap ci-dessous, et le mettre à jour.
+> **Ce fichier est ma feuille de route (Claude) et la source de vérité du projet.** À chaque session : lire ce fichier, reprendre la première case non cochée de la phase en cours, la livrer avec sa preuve, cocher la case dans la même PR. Ne rien construire qui ne soit pas dans la phase en cours.
 >
-> Dernière mise à jour : 2026-10-13 · Phase 1 (hors wallet) faite sur `claude/focused-clarke-5s4k4i`
+> Dernière mise à jour : 2026-10-15 · Phase en cours : **Phase 0 — Ouvrir la bêta privée**
+>
+> Légende : **[moi]** = je le code et le livre · **[toi]** = action du propriétaire (wallet, comptes, décisions) · chaque case dit sa **preuve** (test, hash de transaction, capture, log).
 
 ---
 
 ## 1. Vision
 
-**Meridian est un terminal DeFi « prompt-to-trade » : tu décris ce que tu veux en langage naturel, Meridian trouve la meilleure exécution on-chain et te la fait signer en sécurité.**
+**Meridian est un terminal agentique pour toute la finance : tu décris ce que tu veux en langage naturel, Meridian comprend ton patrimoine, trouve la meilleure exécution et la fait signer en sécurité — puis, dans les limites que tu fixes, la surveille et agit pour toi.**
 
-> « Place 1 000 USDC au meilleur rendement sûr » → Meridian compare Aave / Compound / Morpho sur les chaînes supportées, propose le meilleur, bridge si nécessaire, simule, puis tu signes.
+Le chemin, par ordre de friction croissante :
+1. **Aujourd'hui** : DeFi « prompt-to-trade » — 8 chaînes EVM + Hyperliquid, prêt, staking, vaults, taux fixe, bridges, perps.
+2. **Ensuite** : un agent — il surveille le portefeuille et agit selon des mandats (clés de session bornées, révocables).
+3. **Ensuite** : toute la finance — TradFi tokenisée on-chain, puis lecture et exécution TradFi via des partenaires régulés.
 
 ### Pour qui
-Un utilisateur DeFi déjà équipé d'un wallet (MetaMask, Rabby…) qui gère quelques milliers à quelques centaines de milliers de dollars sur plusieurs chaînes et qui en a marre de jongler entre 10 interfaces.
+Un utilisateur DeFi équipé d'un wallet, qui gère de quelques milliers à quelques centaines de milliers de dollars sur plusieurs chaînes et en a assez de jongler entre dix interfaces. Plus tard : toute personne qui veut piloter crypto et patrimoine traditionnel au même endroit.
 
-### La promesse (ce qui doit être vrai pour que le produit ait de la valeur)
-1. **Comprendre** : l'intention en langage naturel devient un plan clair (quoi, où, combien, pourquoi).
-2. **Comparer** : données live (prix, APY, TVL, risque), meilleure route (deBridge vs LI.FI).
-3. **Exécuter sans risque** : Meridian ne signe jamais à ta place, ne fait jamais confiance à une adresse venant d'un LLM ou d'une API, simule avant de signer.
-4. **Suivre** : le portefeuille se met à jour après exécution, l'historique est conservé.
+### La promesse
+1. **Comprendre** : l'intention devient un plan clair (quoi, où, combien, pourquoi), dimensionné sur le solde libre réel.
+2. **Comparer** : données live (prix, APY, TVL, risque, coût de bridge), meilleure route.
+3. **Exécuter sans risque** : Meridian ne détient jamais tes fonds, ne fait jamais confiance à une adresse venant d'un LLM ou d'une API, simule avant de signer.
+4. **Suivre et agir** : le portefeuille se met à jour, les stratégies sont suivies, l'agent alerte puis agit dans son mandat.
 
-### Ce que Meridian n'est PAS (non-objectifs)
-- Pas un wallet, pas de custody, pas de clés privées côté serveur.
-- Pas un bot de trading autonome : chaque transaction est signée par l'utilisateur.
-- Pas (pour l'instant) une plateforme de perps : les perps sont un module secondaire, pas le cœur.
+### Non-objectifs
+- Pas de custody : aucune clé utilisateur côté serveur (une clé de session bornée en Phase 3 sera une décision explicite, voir D7).
+- Pas de nouvelle surface (chaîne, protocole, venue) tant que les parcours existants ne sont pas prouvés en réel.
 
 ---
 
-## 2. État réel (vérifié le 2026-10-12)
+## 2. État réel (2026-10-15)
 
-| Brique | État | Preuve |
+| Brique | État | Preuve / manque |
 |---|---|---|
-| 3 MCP (deBridge, LI.FI, Aave) | ✅ fonctionnels | `/api/mcp?action=health` → 3/3 healthy |
-| Prix live (30 tokens) | ✅ | `/api/prices` |
-| Rendements (Aave, Compound, ~12 chaînes) | ✅ | `/api/best-yield?symbol=USDC` |
-| Alpha (DefiLlama) | ✅ | `/api/alpha` |
-| Devis bridge comparés deBridge vs LI.FI | ✅ | ARB→BASE 10 USDC : LI.FI 9,97 vs deBridge 9,68, LI.FI choisi |
-| Rate limit API + mot de passe bêta | ✅ | PR #16, testé en local |
-| Mobile | 🟡 codé, jamais vu sur téléphone | PR #16 |
-| Chat IA (`parse-intent`, OpenRouter / Gemini Flash) | ✅ vérifié en prod | 3 prompts types, 3 stratégies chacun |
-| Exécution (validation → approve exact → simulation → signature) | 🟡 prouvée sur un fork de Base (vrais contrats Aave/USDC), **pas encore avec un vrai wallet** | CI `fork` + tests unitaires |
-| Positions utilisateur | 🟡 non vérifiées | liste vide sur l'adresse de test |
-| Coffres earn LI.FI | ✅ données live (clé ajoutée le 2026-10-13, APY corrigés : l'API renvoie des %) | `/api/haiku?action=yields` |
-| Routes deBridge avec swap | ❌ refusées (décision D2) | swap + bridge via LI.FI |
-| Portefeuille sans wallet | ✅ affiche « — » et invite à connecter un wallet (faux portefeuille supprimé) | Phase 1 |
+| Planner IA (`/api/parse-intent`, OpenRouter Gemini Flash) | ✅ prod, 3 stratégies, taux live (cookie bêta transmis, PR #35), dimensionné sur le solde libre (`budgetFit`) | Pas de jeu d'évaluation : qualité non mesurée |
+| Validateur déterministe (`strategyIntegrity`, `fundingPlanner`, `budgetFit`) | ✅ 441 tests | — |
+| Portefeuille (8 chaînes EVM + compte Hyperliquid) | ✅ soldes, Aave, donut d'allocation, prix de tous les jetons suivis | Positions Morpho, Pendle, Spark Savings, Fluid, Yearn, EigenLayer non lues |
+| Exécution spot (Aave, Morpho, Spark, Fluid, Yearn, Sky, Ethena, Lido, EigenLayer, Pendle, Uniswap, wrap WETH) | 🟡 prouvée sur forks en CI | Aucune transaction réelle confirmée par protocole |
+| Bridges (deBridge, LI.FI) | 🟡 prouvés sur fork Arbitrum | Aucun bridge réel de bout en bout |
+| Hyperliquid (dépôt, perps, vente spot UETH/UBTC) | 🟡 signature identique au SDK officiel (vecteurs testés) | Jamais exécuté sur un vrai compte |
+| Perps Extended, Ondo, Lighter | 🟡 codés, activés en prod | Jamais exécutés en réel |
+| Bêta (mot de passe, bug report `/api/feedback`, Sentry, `[exec-log]`, WalletConnect si configuré) | ✅ | WalletConnect à configurer ; aucun testeur |
+| TradFi | ❌ absent (hors perps Ondo) | — |
 
-**En une phrase : les données marchent, l'exécution est construite mais n'a jamais été prouvée de bout en bout.** Tant qu'une vraie transaction n'est pas passée, le produit n'est pas « fonctionnel ».
+**En une phrase : la planification marche, l'exécution est construite et prouvée sur forks, mais presque rien n'a été prouvé avec un vrai wallet. C'est le seul vrai écart avant la bêta.**
 
 ---
 
-## 3. Pourquoi on a l'impression de ne pas avancer
+## 3. Architecture
 
-Diagnostic honnête du code (≈ 22 000 lignes, 80 commits, 16 PR) :
-
-1. **Trop large, pas assez profond.** Le produit annonce 16 chaînes, 20+ protocoles, 4 venues de perps (Hyperliquid, Extended, Ondo, Lighter), Solana, Base/Aerodrome/Moonwell, Haiku… mais **aucun parcours n'a été validé de bout en bout**. Chaque PR ajoute de la surface au lieu de terminer un parcours.
-2. **Pas de « definition of done ».** « Ça build et les tests passent » a été traité comme « ça marche ». La seule preuve qui compte (une transaction réelle confirmée et visible dans le portefeuille) n'a jamais été faite.
-3. **Plusieurs implémentations de la même chose.**
-   - **Exécution : 4 chemins parallèles.** `useExecuteOrder` + `ValidatedExecuteButton` (le bon, avec simulation et allowlist), `useExecute` (ancien, encore utilisé pour le claim Lido), `useStrategyExecutor` (multi-legs, **sans simulation ni lecture d'allowance** : il approuve et envoie directement), plus les chemins perps séparés.
-   - **MCP : 3 couches.** `lib/mcp/*.ts` (implémentation), `lib/mcp/providers/*` (adaptateurs), `lib/mcp/router.ts` (comparaison).
-   - **Intent : 3 parseurs.** `tradePlan.ts` (règles, 825 lignes), `routeThesis.ts`, `intentEngine.ts` (LLM).
-4. **Code mort qui brouille la lecture** : `lib/orchestrator.ts`, `lib/mcp/index.ts`, `lib/mcp/providers/index.ts`, `lib/integrations/index.ts`, `lib/heroArt.ts`, `hooks/useBaseMcp.ts`, `hooks/useLiveFeed.ts`, `hooks/useReveal.ts`, le composant `ExecuteButton` de `ThreadCard` (0 usage).
-5. **Un fichier monstre** : `components/ThreadCard.tsx` (1 730 lignes) mélange affichage, résolution d'ordres et 9 boutons d'exécution différents.
-6. **Rien ne mesure l'avancement** : pas de roadmap écrite, pas de critère de sortie. Ce document corrige ça.
-
-> **Mise à jour Phase 1 (2026-10-13)** : les points 3, 4 et 5 sont traités — un seul chemin d'exécution, code mort supprimé, `ThreadCard` découpé. Le point 1 (prouver un parcours en vrai) reste la Phase 0, qui demande ton wallet.
-
----
-
-## 4. Architecture
-
-### 4.1 Vue d'ensemble
+### 3.1 Vue d'ensemble
 
 ```
 ┌──────────────────────────── Navigateur (Next.js client) ────────────────────────────┐
@@ -110,7 +92,7 @@ Diagnostic honnête du code (≈ 22 000 lignes, 80 commits, 16 PR) :
   APIs : DefiLlama · CoinGecko · Morpho · Philidor · OpenRouter
 ```
 
-### 4.2 Modules clés
+### 3.2 Modules clés
 
 | Couche | Fichiers | Rôle |
 |---|---|---|
@@ -125,99 +107,39 @@ Diagnostic honnête du code (≈ 22 000 lignes, 80 commits, 16 PR) :
 | Portefeuille | `hooks/useLivePortfolio.ts`, `app/api/positions` | Soldes et positions on-chain |
 | Infra | `proxy.ts`, `lib/rateLimit.ts`, `lib/betaGate.ts`, `lib/features.ts` | Rate limit, accès bêta, feature flags |
 
-### 4.3 Invariants de sécurité (non négociables)
+### 3.3 Invariants de sécurité (non négociables)
 
 1. **Aucune adresse de contrat ne vient d'un LLM ou d'une API.** Les cibles de transaction viennent de `onchain.ts` (protocoles) ou `routerAllowlist.ts` (routeurs LI.FI Diamond / deBridge DlnSource).
 2. **Approbations au montant exact**, jamais illimitées ; allowance lue on-chain avant.
 3. **Simulation avant signature.** Une simulation qui échoue bloque.
 4. **Health factor** : tout borrow/withdraw Aave simulé ; refus sous 1,10.
 5. **Meridian ne signe jamais** : le serveur ne détient aucune clé.
-6. **Un seul chemin d'exécution** : tout ordre wallet passe par `lib/orderRunner.ts` (via `useExecuteOrder` ou `useStrategyExecutor`). Seuls les perps (signatures EIP-712 / StarkEx propres à chaque venue) ont leur propre chemin, et ils sont désactivés par défaut.
+6. **Un seul chemin d'exécution** : tout ordre wallet passe par `lib/orderRunner.ts` (via `useExecuteOrder` ou `useStrategyExecutor`). Seuls les perps et le spot Hyperliquid ont leur propre chemin : Hyperliquid signe avec une clé de trading générée dans le navigateur et approuvée une fois par le wallet (`lib/integrations/hyperliquidTrade.ts`, elle peut trader, jamais retirer) ; Extended (StarkEx) et Ondo/Lighter (LI.FI Perps) ont leur signature propre.
+7. **Budget** : aucune stratégie ne demande plus de capital frais que le solde libre (`lib/budgetFit.ts`, appliqué côté serveur après le LLM).
 
-### 4.4 Configuration (Vercel)
+### 3.4 Configuration (Vercel)
 
 | Variable | Rôle | État |
 |---|---|---|
-| `OPENROUTER_API_KEY` | Chat IA | Production uniquement |
+| `OPENROUTER_API_KEY` | Chat IA | production + preview |
 | `BETA_PASSWORD` | Accès bêta | présent (sensible, production) ; `NEXT_PUBLIC_BETA_PASSWORD` obsolète, à supprimer |
 | `LIFI_API_KEY` | Coffres earn LI.FI + quotas LI.FI | présente (sensible, production + preview) |
 | `BLOB_READ_WRITE_TOKEN` | Stockage | présent |
-| `NEXT_PUBLIC_SENTRY_DSN` | Suivi d'erreurs + journal des exécutions dans Sentry | **à créer** (sans DSN : journal dans les logs Vercel uniquement) |
-| `NEXT_PUBLIC_ALCHEMY_API_KEY` / `NEXT_PUBLIC_INFURA_API_KEY` | RPC dédiés sur les 7 chaînes (`lib/rpc.ts` : URL explicite `NEXT_PUBLIC_RPC_<CHAIN>` → Alchemy → Infura → publics) | **à créer** ; clés exposées au navigateur, à restreindre aux domaines Meridian côté fournisseur |
+| `NEXT_PUBLIC_SENTRY_DSN` | Suivi d'erreurs + journal des exécutions dans Sentry | présent |
+| `NEXT_PUBLIC_ALCHEMY_API_KEY` / `NEXT_PUBLIC_INFURA_API_KEY` | RPC dédiés (`lib/rpc.ts` : URL explicite `NEXT_PUBLIC_RPC_<CHAIN>` → Alchemy → Infura → publics) | présents ; restreints aux domaines Meridian côté fournisseur |
+| `NEXT_PUBLIC_FEATURE_PERPS` | Venues perps (Hyperliquid, Extended, Ondo, Lighter) | `1` en prod (demande du propriétaire) |
+| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | Wallets mobiles (WalletConnect / Reown) | **à créer** (gratuit, cloud.reown.com) |
 
----
-
-## 5. Roadmap
-
-Règle : **on ne commence pas une phase tant que la précédente n'a pas atteint son critère de sortie.**
-
-### Phase 0 — Prouver le parcours d'or (cette semaine)
-
-**Objectif : une vraie transaction, de bout en bout, sur un seul parcours.**
-
-Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → signature → position visible dans le portefeuille.
-
-- [x] Mot de passe bêta : nouveau `BETA_PASSWORD` (sensible, production) ; l'ancien `NEXT_PUBLIC_BETA_PASSWORD` est ignoré (à supprimer dans Vercel)
-- [x] Chat IA vérifié en prod (2026-10-13) : connexion bêta OK, 3 prompts → 3 stratégies chacun en 5–20 s
-- [x] Bug corrigé : chaque étape du plan porte sa chaîne (`leg.chain`) ; l'ordre est construit sur cette chaîne (et non celle du wallet), le bouton propose « Switch wallet to Base » si besoin
-- [ ] Exécuter le parcours d'or avec un vrai wallet, petit montant (**toi**)
-- [ ] Corriger tout ce qui casse pendant ce test (**moi**, sur retour d'erreur)
-- [ ] Vérifier que la position Aave apparaît après confirmation
-- [x] Remplacer le faux portefeuille de 128 400 $ par un état « connecte ton wallet » clair (Phase 1)
-- [x] Preuve sans wallet : le parcours d'or exécuté par le vrai code contre les vrais contrats Aave + USDC sur un **fork de Base** en CI (`e2e/aaveSupply.fork.test.ts`, aucun argent réel). *Preuve : CI run [38393651681](https://github.com/Edoouuard/meridian-terminal/actions/runs/38393651681) — approve exact → supply → `CONFIRMED`, allowance consommée à 0, collatéral ≈ 100 $ visible dans Aave ; refus avant signature si solde insuffisant.* Ne remplace pas le test avec ton wallet (UI, wallet, réseau réel), mais la logique d'exécution est prouvée.
-- [x] Bug corrigé (retour du test wallet) : « morpho supply requires a vaultAddress » / « deBridge order requires routerTx » — les étapes Morpho, bridge, Uniswap et perps passent par leur bouton dédié (données live : coffre ≥ 1 M$ TVL, route cotée, prix) ; « Execute Strategy » n'apparaît que si toutes les étapes sont signables ; le bridge cote de `leg.chain` vers `leg.toChain` (PR #20)
-- [x] Preuve sans wallet du bridge : devis live deBridge + LI.FI → même constructeur d'ordre que le bouton (`lib/bridgeOrder.ts`) → vrai `orderRunner` sur un **fork d'Arbitrum** en CI (`e2e/bridge.fork.test.ts`) : approve exact au routeur vérifié, calldata acceptée on-chain, 5 USDC sortis du wallet, allowance à 0. *Preuve : CI run [38428480844](https://github.com/Edoouuard/meridian-terminal/actions/runs/38428480844).* L'arrivée sur Base (remplie par le bridge) reste à voir avec ton wallet.
-- [x] Position visible : le portefeuille lit `getUserAccountData` du pool Aave Base (le même appel vérifié par la preuve fork) et se rafraîchit après chaque confirmation
-- [ ] Deuxième parcours : bridge 5 USDC Arbitrum → Base (**toi**)
-
-**Critère de sortie :** 2 transactions réelles confirmées (supply Aave + bridge), visibles dans l'app, sans intervention manuelle.
-
-### Phase 1 — Consolider (1 à 2 semaines)
-
-**Objectif : moins de code, un seul chemin, un code lisible.**
-
-- [x] Un seul chemin d'exécution : `lib/orderRunner.ts` (prépare → simule → signe), utilisé par `useExecuteOrder` **et** `useStrategyExecutor`. Les stratégies multi-legs sont désormais vérifiées (solde, allowance, simulation) avant chaque signature, et chaque leg utilise le client de sa propre chaîne. *Preuve : 9 tests unitaires `orderRunner.test.ts` (wallet et chaîne simulés).*
-- [x] Claim Lido migré sur le chemin validé ; `useExecute` et l'`ExecuteButton` inutilisé supprimés ; `explorerUrlFor` → `lib/explorer.ts`
-- [x] Code mort supprimé : ~3 000 lignes nettes (orchestrator, policy, broadcast, feeds, registre perps + stubs, barrels, hooks inutilisés, données démo, `/api/swap` sans appelant, fonctions MCP mortes)
-- [x] `ThreadCard.tsx` découpé : 1 730 → 295 lignes (`components/execute/*`, `components/thread/*`)
-- [x] Couches MCP fusionnées : un module par fournisseur (`lib/mcp/{client,aave,debridge,lifi,router}.ts`) ; `providers/` ne garde que Haiku et Base
-- [x] Surface réduite par flags (`lib/features.ts`) : perps et Solana masqués par défaut (`NEXT_PUBLIC_FEATURE_PERPS=1` / `NEXT_PUBLIC_FEATURE_SOLANA=1` pour les réactiver) ; le chat ne propose plus de perps tant qu'ils sont coupés
-- [x] Chaînes (D1) : exécution et propositions du chat limitées à 7 chaînes (`ACTIVE_CHAIN_IDS` : Ethereum, Base, Arbitrum, Optimism, Polygon, Avalanche, BNB Chain) ; le portefeuille lit toujours toutes les chaînes (aucun fonds caché) ; bridges LI.FI/deBridge étendus à Avalanche et BNB Chain
-- [x] Double comptage Haiku corrigé : Haiku relisait les mêmes soldes (LI.FI) et positions Aave (Aave MCP) ; seules ses positions hors protocoles déjà suivis sont ajoutées
-- [x] Bug démo corrigé : un wallet connecté sans staking affichait 42 % de concentration staking (valeur démo)
-- [x] `LIFI_API_KEY` ajoutée dans Vercel (production + preview) ; bug d'unité des APY earn corrigé (×100)
-- [x] Coffres earn : jamais proposés sous **1 M$ de TVL** (`MIN_VAULT_TVL_USD`, appliqué au chat et à `/api/haiku?action=yields`)
-- [x] Audit protocole × chaîne × action (560 combinaisons) + audit on-chain de toutes les adresses (`npm run audit:onchain`, workflow dédié) : prix WETH manquant, alias MATIC→WETH, adresses fausses (wstETH OP, USDC Mantle, AAVE Avalanche, Uniswap Scroll/Linea), checksums invalides, Uniswap multi-niveaux de frais, venues sans contrat retirées
-- [x] Plan ajusté au wallet (`lib/fundingPlanner.ts`) : chaque étape est financée par les soldes réels — bridge ajouté depuis la chaîne où sont les fonds, étape gardée sur place si le bridge ne se rembourse pas en 90 jours de rendement en plus (devis live + APY DefiLlama), montant réduit sinon ; l'étape suivant un bridge attend l'arrivée des fonds (`FundsArrivalGate`)
-- [x] Pendle exécutable (`lib/integrations/pendle.ts`, `/api/pendle`, `PendleExecuteButton`) : achat de PT sur les marchés live **prime ou stable majeur uniquement** (sélection curée par Pendle, ou sous-jacent USDC/USDT/DAI/USDS/USDe et leurs versions d'épargne, GHO, PYUSD ; ≥ 1 M$ de liquidité, > 14 jours avant échéance) sur Ethereum, Arbitrum et Base, appel du RouterV4 coté par l'API Pendle et vérifié contre notre adresse ; marchés injectés dans les données du chat
-- [x] EigenLayer exécutable (`lib/integrations/eigenlayer.ts`) : restake stETH sur Ethereum (StrategyManager → stratégie stETH) ; la délégation à un opérateur (nécessaire pour les récompenses) reste dans l'app EigenLayer, retraits ~14 jours — dit avant signature
-- [x] Preuves fork Ethereum en CI (`e2e/mainnet.fork.test.ts`) : USDC → PT Pendle sur le meilleur marché stable majeur live (aucun marché stable n'est prime sur Ethereum), ETH → stETH (Lido) → restake EigenLayer
-
-**Critère de sortie :** un seul hook d'exécution, `ThreadCard` < 500 lignes, aucun module mort, les parcours de la Phase 0 passent toujours.
-
-### Phase 2 — Bêta privée (2 à 3 semaines)
-
-**Objectif : 5 à 10 utilisateurs réels sans que tu sois derrière eux.**
-
-- [x] RPC dédiés (Alchemy / Infura) pour les chaînes gardées — `lib/rpc.ts` ; clés posées dans Vercel (type Config, restreintes aux domaines Meridian) ; Infura vérifié sur les 7 chaînes, Alchemy activé sur les 7
-- [~] Observabilité — câblé : journal serveur des exécutions (`lib/execLog.ts` → `/api/exec-log` : une ligne `[exec-log]` par issue — succès / échec / raison, protocole, chaîne, montant, wallet, tx — dans les logs Vercel ; avec Sentry, un log Sentry par issue + une issue par échec actionnable : simulation, approbation, revert, RPC, timeout) ; suivi d'erreurs Sentry (`instrumentation.ts`, `instrumentation-client.ts`, error boundaries ; sans IP, cookies, en-têtes ni corps). Reste : créer le projet Sentry et poser `NEXT_PUBLIC_SENTRY_DSN` dans Vercel
-- [~] Rate limit strict via Vercel WAF (le limiteur actuel est par instance) — règles prêtes : `/api/parse-intent` 15 req/min/IP, `/api/*` 300 req/min/IP ; bloqué : le pare-feu du projet n'est pas encore initialisé (l'API répond « config not found »). Ouvrir une fois l'onglet *Firewall* du projet dans Vercel, puis les poser
-- [x] Test e2e automatisé du parcours d'or sur un fork (Anvil) en CI — voir Phase 0
-- [x] CI GitHub : lint + typecheck + tests + build sur chaque push (`.github/workflows/ci.yml`)
-- [x] Onboarding : 3 prompts suggérés calés sur les parcours prouvés (stables, stake ETH, taux fixe Pendle) ; états vides (portefeuille, positions, risque « chiffres d'exemple ») ; erreurs en langage clair (`lib/errorText.ts` : gas, solde, approbation, slippage, quote expirée, tx en attente, mauvais réseau, cap, marché gelé, RPC ; raison technique courte en suffixe) et raison affichée quand le chat retombe sur le plan local (429, session bêta expirée, hors ligne, planner indisponible)
-- [x] Décision deBridge CrosschainForwarder (routes avec swap) : **non** (D2). Les routes swap + bridge passent par LI.FI, déjà autorisé, qui agrège lui-même deBridge ; le Forwarder exécuterait des appels arbitraires vers des agrégateurs, pour un gain marginal
-
-**Critère de sortie :** 10 utilisateurs, ≥ 20 transactions réelles, taux d'échec < 10 % avec cause connue pour chaque échec.
-
-### Hyperliquid
+### 3.5 Hyperliquid
 
 - **HyperEVM (chaîne 999)** : 8e chaîne active. Jetons suivis (USDT0, USDe, WHYPE, UETH, UBTC — symbole et décimales vérifiés on-chain), solde natif HYPE, RPC officiel, bridges entrants/sortants via LI.FI (diamond propre à HyperEVM, `0x0a07…ce1A`, confirmé par l'API LI.FI et on-chain) et deBridge (DlnSource, id interne 100000022). Un stable USD bridgé vers HyperEVM arrive en USDT0.
 - **Dépôt Hyperliquid exécutable** : USDC natif d'Arbitrum → Bridge2 officiel (`0x2Df1…3dF7`, ~400 M$ USDC), crédité sur le compte Hyperliquid en ~1 min. Garde-fous dans le builder : USDC Arbitrum uniquement, minimum 5 USDC (en dessous, perdu). Prouvé sur fork Arbitrum en CI.
 - **Portefeuille** : le compte Hyperliquid réel (mainnet, lecture seule) — marge perps, soldes spot, part HLP — s'ajoute aux avoirs. Avant : lu sur le testnet, donc jamais vu.
-- **Pas encore exécutable** : dépôt HLP, trading perps, staking HYPE (actions L1 signées via un « agent wallet » Hyperliquid — chantier dédié). Le chat propose le dépôt puis renvoie vers l'app Hyperliquid pour ces étapes.
+- **Trading** : perps (IOC au marché, levier) et vente spot UETH/UBTC signés par une clé de trading approuvée une fois par le wallet (`hyperliquidExchange.ts` vérifié contre le SDK Python officiel, `hyperliquidTrade.ts`) ; UETH sur HyperEVM transféré vers l'adresse système HyperCore avant la vente. **Jamais exécuté en réel (Phase 0.1).**
+- **Pas encore exécutable** : dépôt HLP, staking HYPE (renvoi vers l'app Hyperliquid).
 - **Données** : HLP (APR live), écosystème HyperEVM via DefiLlama (« Hyperliquid L1 ») : HyperLend, Kinetiq, Felix en comparaison, onglet Yields « HYPE ».
 
-### Couverture des protocoles (DefiLlama)
+### 3.6 Couverture des protocoles (DefiLlama)
 
 - **Exécutables (intégration dédiée)** : Aave, Compound, Morpho, Spark (SparkLend), Lido, Rocket Pool, Pendle, EigenLayer.
 - **Exécutables (vaults ERC-4626 vérifiés, un seul chemin de signature)** : Fluid (fUSDC/fUSDT/fWETH sur Ethereum, Arbitrum, Base), Sky sUSDS (Ethereum), Spark Savings sUSDC (Ethereum, Base, Arbitrum), Ethena sUSDe (Ethereum, sortie en 7 jours). Chaque vault : `asset()` vérifié on-chain avant ajout et à chaque audit, dépôt prouvé sur fork en CI.
@@ -225,31 +147,228 @@ Parcours d'or : *« Place 100 USDC sur Aave sur Base »* → plan affiché → s
 - Onglet **Yields** (colonne droite) et contexte du planner : meilleurs rendements mono-actif ≥ 5 M$ de TVL sur les 7 chaînes, séparés « exécutable » / « comparaison ».
 - Ajouter un protocole = une ligne dans `registry.ts` (et, pour un vault ERC-4626, une ligne vérifiée dans `vaults.ts`).
 
-### Phase 3 — Produit (après la bêta)
+---
 
-Seulement une fois la bêta stable, selon les retours :
-- Stratégies multi-legs (rotation de rendement, delta neutre) sur le chemin unique
-- Bridge + dépôt en un parcours (« place mes USDC d'Arbitrum sur le meilleur rendement de Base »)
-- Alertes (health factor, APY qui chute)
-- Réintégration progressive des perps et de Solana, un par un, chacun avec son parcours d'or
-- Monétisation (hypothèse à valider) : frais d'intégrateur LI.FI / deBridge sur les routes
+## 4. Roadmap
+
+Règle : **une phase s'ouvre seulement quand la précédente a atteint son critère de sortie** (un chiffre mesuré, pas une date).
+
+```
+Phase 0  Ouvrir la bêta privée ........ semaines 1-2   porte : 10 testeurs · 30 tx réelles · 0 perte
+Phase 1  Bêta fermée, fiabiliser ...... semaines 3-8   porte : 50 testeurs · >90 % tx confirmées · 30 % reviennent
+Phase 2  Produit solide, bêta ouverte . mois 3-4       porte : 500 actifs/mois · revenu mesurable · audit OK
+Phase 3  Terminal agentique ........... mois 4-7       porte : 20 % des actifs ont un mandat · 0 action hors mandat
+Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenisé + courtier pilotés depuis Meridian
+```
+
+### Phase 0 — Ouvrir la bêta privée (en cours)
+
+**Objectif : 10 testeurs de confiance passent une vraie transaction sans aide. On prouve et on réduit ; rien de nouveau.**
+
+**0.1 Prouver chaque parcours en réel** (20-50 $ par parcours)
+- [ ] [toi] Supply 20 USDC sur Aave (Base) depuis le planner → position visible. *Preuve : hash.*
+- [ ] [toi] Bridge 10 USDC Arbitrum → Base, puis dépôt de l'étape suivante après arrivée. *Preuve : 2 hashes.*
+- [ ] [toi] Stake 0,01 ETH sur Lido ; achat PT Pendle 20 USDC. *Preuve : hashes.*
+- [ ] [toi] Wrap ETH → WETH ajouté automatiquement puis supply WETH. *Preuve : hashes.*
+- [ ] [toi] Hyperliquid : dépôt 10 USDC, approbation de la clé de trading, short ETH 10 $ puis fermeture, vente UETH spot. *Preuve : hashes + fills affichés.*
+- [ ] [moi] Corriger chaque blocage remonté, une PR par bug, avec le hash ou le log qui prouve le correctif.
+- [ ] [moi] Tableau « parcours prouvés » dans ce fichier (§2) : protocole · chaîne · hash · date.
+
+**0.2 Montrer seulement ce qui marche**
+- [ ] [moi] Flags par venue dans `lib/features.ts` (`hlPerps`, `hlSpot`, `extended`, `ondo`, `lighter`), chacun piloté par sa variable `NEXT_PUBLIC_FEATURE_*`. *Preuve : tests unitaires des flags.*
+- [ ] [moi] Une venue désactivée : absente du prompt du planner (`parse-intent`), du validateur et des boutons (`StrategyLegs` → `NotWired`). *Preuve : test qu'aucune stratégie ne la propose quand le flag est off.*
+- [ ] [moi] Plafond par transaction en bêta (`NEXT_PUBLIC_BETA_MAX_TX_USD`, défaut 1 000 $) vérifié dans `orderRunner.prepareOrder` et les boutons Hyperliquid, message clair. *Preuve : test orderRunner refusant 1 001 $.*
+- [ ] [toi] Décider quelles venues restent visibles (D1).
+
+**0.3 Configuration de prod**
+- [ ] [toi] `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` (cloud.reown.com) puis redéploiement.
+- [ ] [toi] Supprimer `NEXT_PUBLIC_BETA_PASSWORD` dans Vercel.
+- [ ] [toi] Initialiser le pare-feu Vercel (onglet Firewall) ; [moi] poser les règles WAF prêtes (`/api/parse-intent` 15 req/min/IP, `/api/*` 300 req/min/IP).
+- [ ] [toi] Alerte email Sentry sur les issues `Execution …`.
+
+**0.4 Accueillir les testeurs**
+- [ ] [moi] Page `/welcome` affichée une fois après la connexion bêta : ce que fait Meridian (3 lignes), 3 prompts à essayer, risques (vrais fonds, bêta, plafond), comment signaler un bug. *Preuve : capture desktop + mobile.*
+- [ ] [moi] Lien « Report a bug » visible aussi sur mobile (barre du haut repliée). *Preuve : capture mobile.*
+- [ ] [toi] Recruter 10 testeurs (DeFi actifs, 500-50 000 $, 2 chaînes ou plus) et ouvrir un groupe Telegram.
+
+**0.5 Mesurer dès le premier jour**
+- [ ] [moi] Persister `[exec-log]` et `[feedback]` dans Vercel Blob (un fichier JSONL par jour), en plus des logs. *Preuve : test de la route + fichier visible dans Blob.*
+- [ ] [moi] Page `/admin` protégée (`ADMIN_PASSWORD`) : plans générés, tx signées / confirmées / échouées par protocole et par raison, rapports de bug, wallets actifs sur 7 jours. *Preuve : capture avec données réelles.*
+- [ ] [moi] Journaliser chaque plan généré (`[plan-log]` : prompt tronqué, stratégies, budget, facteur d'échelle) pour l'évaluation de la Phase 1.
+
+**Critère de sortie :** 10 testeurs actifs · ≥ 30 transactions réelles confirmées · aucune perte de fonds · chaque parcours visible a un hash de preuve.
+
+### Phase 1 — Bêta fermée : apprendre et fiabiliser (semaines 3-8)
+
+**Objectif : 50 testeurs, plus de 90 % des transactions signées confirmées.**
+
+**1.1 Boucle de retours**
+- [ ] [moi] Routine hebdomadaire : lire `/admin` + rapports, classer les 5 problèmes qui font perdre le plus d'utilisateurs, les corriger dans la semaine. Compte rendu daté dans le journal (§7).
+
+**1.2 Évaluer le planner**
+- [ ] [moi] `eval/prompts.json` : 50 prompts réels (issus de `[plan-log]`) ; `eval/wallets.json` : 5 portefeuilles types (petit stable, ETH holder, multi-chaînes, Hyperliquid, vide).
+- [ ] [moi] `scripts/eval-planner.ts` : appelle la même chaîne que `/api/parse-intent` (prompt + validateur) et note chaque stratégie : chaque étape a un bouton exécutable (`resolveOrderForLeg` / bouton dédié) · capital frais ≤ solde libre (`freshCapitalUsd`) · APY cité présent dans les données live · 3 mécanismes distincts · aucune venue désactivée. Sortie : rapport markdown + score global.
+- [ ] [moi] Workflow GitHub manuel (`workflow_dispatch`) qui lance l'évaluation avec le secret OpenRouter. *Preuve : run vert + rapport en artefact.*
+- [ ] [moi] Comparer Gemini Flash, Claude Sonnet et un modèle rapide via `OPENROUTER_MODEL` : score, latence, coût par plan ; tableau dans ce fichier ; [toi] choisir (D4).
+
+**1.3 Exécution multi-étapes fiable**
+- [ ] [moi] « Exécuter tout » couvre les étapes dédiées (bridge → attente d'arrivée → dépôt, Pendle, Morpho), pas seulement les ordres directs (`useStrategyExecutor`).
+- [ ] [moi] Reprise après erreur : progression persistée par plan (localStorage), bouton « reprendre à l'étape N ».
+- [ ] [moi] Test fork de bout en bout d'une stratégie à 3 étapes (bridge simulé + supply + swap). *Preuve : CI.*
+
+**1.4 Positions complètes**
+- [ ] [moi] Lire les parts des vaults ERC-4626 suivis (`lib/protocols/vaults.ts` : Fluid, Spark Savings, Sky, Ethena, Yearn) via `balanceOf` + `convertToAssets`.
+- [ ] [moi] Lire les parts Morpho (coffres MetaMorpho), les PT Pendle détenus (+ échéance), les parts EigenLayer (`StrategyManager`), les demandes de retrait Lido.
+- [ ] [moi] Afficher ces positions dans le portefeuille et les compter dans la valeur nette (jamais dans le solde libre). *Preuve : tests de parsing + capture avec un wallet réel.*
+
+**1.5 Suivre les stratégies**
+- [ ] [moi] Page « Mes stratégies » (`lib/strategyTracker.ts`) : valeur d'entrée, valeur actuelle (depuis les positions), rendement réalisé, étapes confirmées avec hashes.
+- [ ] [moi] Bouton « Sortir » : génère le plan inverse (withdraw, unstake, vente PT ou attente d'échéance) et l'exécute par le chemin validé.
+
+**1.6 Réactiver ce qui a été masqué**
+- [ ] [moi]+[toi] Une venue à la fois (Hyperliquid perps d'abord, puis Extended, Ondo, Lighter) : parcours prouvé en réel → flag activé → ligne dans le tableau des parcours prouvés.
+
+**Critère de sortie :** 50 testeurs · > 90 % des tx signées confirmées · 30 % des testeurs reviennent chaque semaine · score d'évaluation du planner > 85 %.
+
+### Phase 2 — Produit solide, bêta ouverte (mois 3-4)
+
+**Objectif : ouvrir sans mot de passe et prouver un revenu.**
+
+**2.1 Comptes et persistance**
+- [ ] [toi] Choisir la base (D5 : Neon Postgres via Vercel Marketplace recommandé).
+- [ ] [moi] Connexion par signature de wallet (SIWE, EIP-4361) : `/api/auth/nonce`, `/api/auth/verify`, cookie de session signé.
+- [ ] [moi] Historique, stratégies suivies et préférences en base (migration depuis localStorage au premier login).
+
+**2.2 Profil de risque**
+- [ ] [moi] 3 questions (horizon, perte acceptable, besoin de liquidité) → profil stocké ; envoyé au planner ; le validateur écarte les stratégies hors profil (levier, lock-up, perps).
+
+**2.3 Alertes**
+- [ ] [moi] Vercel Cron toutes les 15 min : health factor sous un seuil, APY d'une position qui chute de plus de 30 %, PT à 7 jours de l'échéance, funding qui s'inverse sur un short.
+- [ ] [moi] Notifications email (Resend) et Telegram (bot), avec le lien vers le plan de réaction pré-rempli.
+
+**2.4 Sécurité**
+- [ ] [moi] Dossier d'audit : chemin d'exécution, allowlists, simulation, signature Hyperliquid, menaces connues.
+- [ ] [toi] Audit externe du chemin d'exécution ; bug bounty.
+- [ ] [moi] Page publique « Comment Meridian protège vos fonds ».
+
+**2.5 Monétisation**
+- [ ] [moi] Frais d'intégrateur LI.FI (`integrator` + `fee` dans les devis) et deBridge (affiliate fee), affichés avant signature.
+- [ ] [moi] Builder code Hyperliquid (champ `builder` des ordres + `approveBuilderFee` signé par l'utilisateur).
+- [ ] [moi] Revenu par jour et par utilisateur dans `/admin`.
+- [ ] [toi] Fixer les taux de frais (D3).
+
+**2.6 Juridique et ouverture**
+- [ ] [toi] Avis d'avocat (outil non custodial, pas de conseil en investissement, MiCA), CGU, pays exclus.
+- [ ] [moi] CGU et mentions de risque dans l'app, géoblocage des pays exclus.
+- [ ] [moi] Remplacer le mot de passe par des codes d'invitation, puis liste d'attente, puis accès libre.
+- [ ] [moi] Parcours complet testé en viewport mobile (Playwright) + [toi] test réel sur téléphone via WalletConnect.
+
+**Critère de sortie :** 500 utilisateurs actifs par mois · revenu récurrent mesurable · audit sans faille critique ouverte.
+
+### Phase 3 — Le terminal agentique (mois 4-7)
+
+**Objectif : Meridian surveille et agit dans des mandats fixés par l'utilisateur.**
+
+**3.1 Agent à outils**
+- [ ] [moi] Remplacer le prompt unique par une boucle d'appels d'outils : `getPortfolio`, `getYields(asset, chain)`, `quoteBridge`, `getFunding`, `simulatePlan`, `validatePlan` ; chaque chiffre cité vient d'un outil.
+- [ ] [moi] Le validateur déterministe reste la porte finale ; l'évaluation de la Phase 1 doit garder un score ≥ celui du prompt unique.
+- [ ] [moi] Afficher le raisonnement de l'agent pas à pas (outils appelés, résultats).
+
+**3.2 Mandats**
+- [ ] [moi] Modèle de mandat en base : condition (health factor, écart de taux + rentabilité du bridge, funding), action autorisée, plafonds (montant, fréquence), protocoles autorisés, expiration.
+- [ ] [moi] Interface de création, liste, pause, révocation en un clic.
+
+**3.3 Exécution déléguée bornée**
+- [ ] [toi] Décider du modèle (D7) : smart account ERC-4337 / ERC-7702 avec session keys.
+- [ ] [moi] Session key limitée aux cibles d'`onchain.ts`, aux montants et à la durée du mandat, révocable on-chain. *Preuve : test fork qu'une action hors mandat est refusée on-chain.*
+
+**3.4 Surveillance et décisions**
+- [ ] [moi] Service de surveillance (cron ou worker) qui évalue les mandats et déclenche l'agent.
+- [ ] [moi] Journal de chaque décision (données lues, raison, action, hash) visible par l'utilisateur.
+
+**3.5 Propose avant d'agir**
+- [ ] [moi] Mode « propose » : notification + validation en un clic ; mesurer le taux d'acceptation.
+- [ ] [moi] Mode « agit » ouvert par mandat seulement quand l'acceptation dépasse 80 %.
+
+**3.6 Stratégies avancées**
+- [ ] [moi] Rotation de rendement, delta neutre géré (rebalancement), boucles de levier avec garde-fous, roulement des PT Pendle à l'échéance — chacune avec preuve fork.
+
+**Critère de sortie :** 20 % des utilisateurs actifs ont un mandat actif · zéro action hors mandat.
+
+### Phase 4 — Toute la finance : DeFi + TradFi (mois 6-12)
+
+**Objectif : l'agent raisonne et agit sur tout le patrimoine.**
+
+**4.1 TradFi tokenisée (moteur on-chain existant)**
+- [ ] [moi] Bons du Trésor tokenisés non permissionnés (USDY, USTB…), or (PAXG, XAUT) : adresses vérifiées on-chain dans `onchain.ts`, prix, rendements, achat via Uniswap/LI.FI ; ceux qui exigent un KYC (BUIDL, OUSG) marqués « éligibles seulement ».
+- [ ] [moi] Actions tokenisées (Ondo Global Markets, xStocks, Backed) là où elles sont accessibles, avec les restrictions par pays.
+- [ ] [moi] Perps actions et indices (Hyperliquid HIP-3, Ondo, Lighter) dans le planner.
+
+**4.2 Lecture du patrimoine traditionnel**
+- [ ] [toi] Choisir l'agrégateur (D8 : Powens ou Bridge en Europe, Plaid ailleurs ; Interactive Brokers en direct).
+- [ ] [moi] Connexion en lecture seule des comptes courtier et bancaires ; positions dans le portefeuille global.
+
+**4.3 Données de marché TradFi**
+- [ ] [moi] Cours actions et ETF, taux (T-bills), calendrier macro et résultats ; injectés dans les outils de l'agent.
+
+**4.4 Exécution TradFi via partenaires**
+- [ ] [toi] Partenaire courtier régulé (Alpaca, Interactive Brokers, ou un courtier européen) et cadre juridique.
+- [ ] [moi] Ordres actions et ETF via l'API du partenaire, avec le même schéma : plan → confirmation → exécution → suivi.
+
+**4.5 Allocation globale**
+- [ ] [moi] L'agent propose une allocation crypto + traditionnelle selon le profil de risque et exécute chaque jambe sur le bon rail.
+
+**Critère de sortie :** un utilisateur voit et pilote crypto, actifs tokenisés et compte courtier depuis Meridian.
+
+### Indicateurs
+
+| Indicateur | Source | Phase 0 | Phase 1 | Phase 2 | Phase 3 |
+|---|---|---|---|---|---|
+| Utilisateurs actifs | wallets connectés | 10 | 50 | 500/mois | 2 000/mois |
+| Tx réelles confirmées | `[exec-log]` | 30 | 500 | 5 000/mois | — |
+| Taux de réussite (confirmées / signées) | `[exec-log]` | mesuré | > 90 % | > 95 % | > 97 % |
+| Plans exécutables (évaluation) | `eval-planner` | mesuré | > 85 % | > 95 % | > 95 % |
+| Rétention hebdomadaire | wallets revenus | — | 30 % | 35 % | 40 % |
+| Fonds perdus par un bug | incidents | 0 | 0 | 0 | 0 |
+| Revenu | frais intégrateur | — | — | mesurable | couvre l'infra |
+| Mandats actifs | base | — | — | — | 20 % des actifs |
 
 ---
 
-## 6. Décisions ouvertes (à trancher par toi)
+## 5. Décisions ouvertes (à trancher par toi)
 
 | # | Décision | Recommandation |
 |---|---|---|
-| D1 | Réduire la surface visible (masquer perps / Solana / chaînes secondaires) ? | **Oui**, derrière un flag : on réactive ce qui est prouvé |
-| D2 | Ajouter le deBridge CrosschainForwarder à l'allowlist ? | **Tranché : non.** LI.FI couvre swap + bridge (et route lui-même via deBridge) ; deBridge reste pour les bridges même-token |
-| D3 | Créer une `LIFI_API_KEY` ? | Oui, gratuit, débloque les coffres earn |
-| D4 | Modèle LLM du chat (Gemini Flash aujourd'hui) | Garder tant que le parcours d'or n'est pas validé |
+| D1 | Venues visibles pendant la bêta | Masquer Extended, Ondo, Lighter jusqu'à preuve en réel ; garder Hyperliquid si 0.1 est prouvé |
+| D2 | deBridge CrosschainForwarder | **Tranché : non** (LI.FI couvre swap + bridge) |
+| D3 | Modèle de revenu | Frais d'intégrateur sur les routes en Phase 2 ; abonnement pour l'agent en Phase 3 |
+| D4 | Modèle du planner | Trancher après l'évaluation 1.2 |
+| D5 | Base de données | Neon Postgres (Vercel Marketplace) |
+| D6 | Plafond par transaction en bêta | 1 000 $ |
+| D7 | Exécution déléguée (Phase 3) | Smart account + session keys bornées et révocables ; décision explicite car elle touche l'invariant 5 |
+| D8 | Marché TradFi | Europe d'abord (agrégateur Powens/Bridge), partenaire courtier régulé |
+| D9 | Recrutement | Un profil smart contracts / sécurité avant la Phase 3 |
 
 ---
 
-## 7. Règles de travail
+## 6. Règles de travail (pour moi)
 
-1. **Une PR = un item coché de cette roadmap.** Pas de PR « fourre-tout ».
-2. **Done = prouvé**, pas « ça build » : chaque item dit comment il a été vérifié (test, capture, hash de transaction).
-3. **Pas de nouvelle fonctionnalité** tant que la phase en cours n'a pas atteint son critère de sortie.
-4. **Ce fichier est mis à jour dans la même PR** que le travail (cases cochées, tableau d'état §2).
+1. **Début de session** : lire ce fichier, prendre la première case non cochée **[moi]** de la phase en cours. Si elle attend une case **[toi]**, le dire en une ligne et passer à la suivante.
+2. **Une PR = une case** (ou un petit groupe de cases liées). Pas de PR fourre-tout, pas de fonctionnalité hors de la phase en cours.
+3. **Done = prouvé** : chaque case cochée cite sa preuve (test, run CI, hash, capture, log). « Ça build » n'est pas une preuve.
+4. **Ce fichier est mis à jour dans la même PR** : case cochée, tableau d'état §2, parcours prouvés.
+5. Bug remonté par un testeur ou par toi : il passe avant toute case de la roadmap.
+6. Avant chaque push : `tsc`, `eslint`, `vitest`, et `next build` si des routes ou de l'UI changent ; CI verte avant de proposer le merge.
+
+---
+
+## 7. Journal
+
+| Date | Fait | Preuve |
+|---|---|---|
+| 2026-10-15 | Solde libre réel, budget appliqué, taux live derrière le mot de passe, prix de tous les jetons, wrap ETH auto, bug report, WalletConnect | PR #35 |
+| 2026-10-14 | Signature Hyperliquid officielle (clé de trading), vente spot UETH/UBTC | PR #34 |
+| 2026-10-13 | Un seul chemin d'exécution, code mort supprimé, parcours d'or et bridge prouvés sur forks, Pendle et EigenLayer exécutables | PR #16-#33 |
+
+---
+
