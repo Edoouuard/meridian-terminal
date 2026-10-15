@@ -1,6 +1,16 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { privateKeyToAccount } from "viem/accounts";
-import { hyperliquidEnv, withdrawUsdcToArbitrum, withdrawableUsd, type WalletSign } from "@/lib/integrations/hyperliquidTrade";
+import {
+  fetchPerpAccount,
+  fundingAprForSide,
+  hyperliquidEnv,
+  marginNeededUsd,
+  perpMarketOrder,
+  protectionPrices,
+  withdrawUsdcToArbitrum,
+  withdrawableUsd,
+  type WalletSign,
+} from "@/lib/integrations/hyperliquidTrade";
 
 const wallet = privateKeyToAccount("0x0123456789012345678901234567890123456789012345678901234567890123");
 const walletSign: WalletSign = (td) => wallet.signTypedData(td as never);
@@ -59,5 +69,64 @@ describe("withdrawUsdcToArbitrum", () => {
     const out = await withdrawUsdcToArbitrum({ user, env, walletSign, walletChainId: 42161, amount: 69 });
     expect(out.ok).toBe(true);
     expect(sent.map((a) => `${a.type}:${a.amount}`)).toEqual(["usdClassTransfer:59.00", "withdraw3:69.00"]);
+  });
+});
+
+describe("perps: funding, margin, protection", () => {
+  it("signs funding for the side: a short earns positive funding, a long pays it", () => {
+    expect(fundingAprForSide(0.0000125, false)).toBeCloseTo(10.95, 2);
+    expect(fundingAprForSide(0.0000125, true)).toBeCloseTo(-10.95, 2);
+  });
+
+  it("needs notional / leverage of margin, plus 2%", () => {
+    expect(marginNeededUsd(300, 3)).toBeCloseTo(102);
+    expect(marginNeededUsd(50, undefined)).toBeCloseTo(51);
+  });
+
+  it("puts the stop-loss on the losing side and the take-profit on the winning side", () => {
+    expect(protectionPrices(2000, true, { stopLossPct: 10, takeProfitPct: 20 })).toEqual({ sl: 1800, tp: 2400 });
+    expect(protectionPrices(2000, false, { stopLossPct: 10 })).toEqual({ sl: 2200, tp: undefined });
+  });
+
+  it("counts the shared balance as margin in a unified account, and reads the open position", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (_url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body);
+      const json = (v: unknown) => ({ ok: true, status: 200, json: async () => v });
+      if (body.type === "clearinghouseState") return json({ withdrawable: "0", assetPositions: [{ position: { coin: "ETH", szi: "-0.05" } }] });
+      if (body.type === "spotClearinghouseState") return json({ balances: [{ coin: "USDC", total: "69", hold: "0" }] });
+      if (body.type === "userAbstraction") return json("unifiedAccount");
+      return json(null);
+    }));
+    expect(await fetchPerpAccount(env, wallet.address, "ETH PERP")).toEqual({ freeMargin: 69, spotUsdc: 69, unified: true, position: -0.05 });
+  });
+
+  it("opens, then places a reduce-only stop-loss for what filled, priced from the fill", async () => {
+    const isEntry = (action: unknown) => {
+      const first = (action as { orders?: { t: object }[] }).orders?.[0];
+      return !!first && "limit" in first.t;
+    };
+    const sent = mockHyperliquid({ withdrawable: "100", spotUsdc: "0", abstraction: null }, (action) =>
+      isEntry(action)
+        ? { status: "ok", response: { type: "order", data: { statuses: [{ filled: { totalSz: "0.05", avgPx: "2000" } }] } } }
+        : { status: "ok", response: { type: "order", data: { statuses: ["waitingForTrigger"] } } },
+    );
+    const realFetch = globalThis.fetch as unknown as (u: string, i: { body: string }) => Promise<unknown>;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body);
+      const json = (v: unknown) => ({ ok: true, status: 200, json: async () => v });
+      if (body.type === "meta") return json({ universe: [{ name: "BTC", szDecimals: 5, maxLeverage: 40 }, { name: "ETH", szDecimals: 4, maxLeverage: 25 }] });
+      if (body.type === "allMids") return json({ ETH: "2000" });
+      return realFetch(url, init);
+    }));
+    const out = await perpMarketOrder(env, "0x0123456789012345678901234567890123456789012345678901234567890123", {
+      coin: "ETH",
+      isBuy: true,
+      sizeUsd: 100,
+      stopLossPct: 10,
+    });
+    expect(out.ok).toBe(true);
+    expect(out.protection).toMatchObject({ ok: true, sl: 1800 });
+    const trigger = sent.at(-1) as unknown as { orders: { a: number; b: boolean; r: boolean; s: string; t: unknown }[] };
+    expect(trigger.orders[0]).toMatchObject({ a: 1, b: false, r: true, s: "0.05", t: { trigger: { isMarket: true, triggerPx: "1800", tpsl: "sl" } } });
   });
 });

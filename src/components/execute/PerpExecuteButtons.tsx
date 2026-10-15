@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useAccount } from "wagmi";
+import { useQuery } from "@tanstack/react-query";
+import { useAccount, useSignTypedData } from "wagmi";
+import type { Address } from "viem";
 import { fmtUsd } from "@/lib/data";
 import type { TradeLeg } from "@/lib/tradePlan";
 import { describeFill, useHyperliquid } from "@/hooks/useHyperliquid";
@@ -12,49 +14,75 @@ import { useLifiPerpsSetup } from "@/hooks/useLifiPerpsSetup";
 import { useLifiPerpOrder } from "@/hooks/useLifiPerpOrder";
 import { LIFI_PROVIDER_LABEL, type LifiPerpsProviderId } from "@/lib/integrations/lifiPerps";
 import { useSharedOndoEnv } from "@/hooks/useOndoEnv";
-import { resolvePriceFromList, usdToTokenAmount, type PriceEntry } from "@/lib/quote";
+import { resolvePriceFromList, type PriceEntry } from "@/lib/quote";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { recordExecution } from "@/lib/history";
-import { NotWired } from "@/components/thread/shared";
+import { NotWired, OrderRow } from "@/components/thread/shared";
+import {
+  HL_MIN_ORDER_USD,
+  fetchPerpAccount,
+  fetchPerpContext,
+  fundingAprForSide,
+  hyperliquidEnv,
+  marginNeededUsd,
+  moveSpotUsdcToPerps,
+  protectionPrices,
+} from "@/lib/integrations/hyperliquidTrade";
 
 /**
- * Live Hyperliquid perp execution: the first trade asks the wallet to approve a
- * Meridian trading key once (it can trade, never withdraw); the IOC market
- * order is then signed by that key and sent to Hyperliquid, and the real fill
- * is reported. Honest: any failure surfaces as error, never a
- * fake success.
- *
- * Shares its testnet/mainnet selection with HyperliquidPanel's toggle
- * (useSharedHlEnv) rather than hardcoding testnet — opening a position from
- * a thesis and closing one from the panel now always agree on which network
- * they're touching.
- *
- * The USD notional is quoted to an exact coin quantity via the live price list
- * (passed in), and that coinQty is handed to the Hyperliquid layer so the fill
- * uses the caller's computed number rather than silently re-deriving it. The
- * notional and the approximate coin amount are shown before signing.
+ * Live Hyperliquid perp execution, in the order a trader needs it:
+ *   1. the market (mark, max leverage) and its funding for this side;
+ *   2. the margin on the Hyperliquid account against what the order needs —
+ *      polled while a deposit from an earlier step lands, with a one-signature
+ *      move of spot USDC to perps when that is where the money sits;
+ *   3. an IOC market order signed by the Meridian trading key (approved once
+ *      by the wallet; it can trade, never withdraw), then an optional
+ *      reduce-only stop-loss / take-profit priced from the real fill.
+ * Shares its testnet/mainnet selection with HyperliquidPanel (useSharedHlEnv).
+ * Any failure surfaces as an error, never a fake success.
  */
 const HL_SIGNING_NOTE =
   "IOC market order (fills now within 5% of the mid, or not at all). The first trade asks your wallet to approve a Meridian trading key once; it can trade, never withdraw.";
+const muted = { margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" } as const;
 
-export function PerpExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry[] }) {
-  const { isConnected } = useAccount();
-  const env = useSharedHlEnv();
+/** Stop-loss at half the distance to liquidation, at most 10% of price. */
+export function defaultStopLossPct(leverage: number): number {
+  return Math.max(1, Math.min(10, Math.round(50 / Math.max(1, leverage))));
+}
+
+export function PerpExecuteButton({ leg, hedged = false }: { leg: TradeLeg; hedged?: boolean }) {
+  const { address, isConnected, chainId } = useAccount();
+  const { signTypedDataAsync } = useSignTypedData();
+  const envName = useSharedHlEnv();
+  const env = hyperliquidEnv(envName === "testnet");
   const { status, result, error, execute, reset } = useHyperliquid();
-  const [confirming, setConfirming] = useState(false);
+  const [confirming, setConfirming] = useState<"open" | "close" | null>(null);
+  const [slOn, setSlOn] = useState(!hedged);
+  const [tpOn, setTpOn] = useState(false);
+  const [moving, setMoving] = useState<string | null>(null);
 
-  const symbol = (leg.asset || "HYPE").replace(/PERP$/i, "").trim() || "HYPE";
-  const sizeUsd = leg.sizeUsd && leg.sizeUsd > 0 ? leg.sizeUsd : 1000;
+  const symbol = (leg.asset || "").replace(/[-\s]?PERP$/i, "").trim().toUpperCase();
+  const sizeUsd = leg.sizeUsd && leg.sizeUsd > 0 ? leg.sizeUsd : 0;
   const side = (leg.side || "").toLowerCase();
   const isBuy = side.startsWith("long") || side === "buy";
-  const leverage = leg.leverage;
 
-  // Exact coin quantity from the USD notional at the live price (8-decimal HL precision).
-  const hlPrice = resolvePriceFromList(prices, symbol);
-  const coinQty = hlPrice !== null ? sizeUsd / hlPrice : undefined;
-
-  // Exact quote (8-decimal HL precision) used to show the implied coin amount.
-  const hlQuote = hlPrice !== null ? usdToTokenAmount(symbol, sizeUsd, hlPrice, 8) : null;
+  const ctx = useQuery({
+    queryKey: ["hl-perp-ctx", envName, symbol],
+    queryFn: () => fetchPerpContext(env, symbol),
+    enabled: !!symbol,
+    staleTime: 30_000,
+  });
+  const leverage = Math.min(Math.max(1, Math.round(leg.leverage ?? 1)), ctx.data?.maxLeverage ?? 50);
+  const needed = marginNeededUsd(sizeUsd, leverage);
+  const acct = useQuery({
+    queryKey: ["hl-perp-acct", envName, address, symbol],
+    queryFn: () => fetchPerpAccount(env, address as Address, symbol),
+    enabled: !!address && !!symbol,
+    // Poll while the margin isn't there yet (a deposit is landing) or a position just changed.
+    refetchInterval: (q) => ((q.state.data?.freeMargin ?? 0) < needed || status === "confirmed" ? 5000 : false),
+  });
+  const [slPct, setSlPct] = useState(() => defaultStopLossPct(leg.leverage ?? 1));
+  const [tpPct, setTpPct] = useState(() => 2 * defaultStopLossPct(leg.leverage ?? 1));
 
   const recordedRef = useRef<string | null>(null);
   useEffect(() => {
@@ -63,93 +91,223 @@ export function PerpExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: Pri
       recordExecution({
         type: isBuy ? "buy" : "sell",
         label: `${isBuy ? "Long" : "Short"} ${symbol}`,
-        amount: coinQty !== undefined ? String(coinQty) : undefined,
+        amount: result.filled ? String(result.filled.totalSz) : undefined,
         asset: symbol,
         protocol: "Hyperliquid",
         status: "confirmed",
       });
     } else if (status === "error" && recordedRef.current !== "error") {
       recordedRef.current = "error";
-      recordExecution({
-        type: isBuy ? "buy" : "sell",
-        label: `${isBuy ? "Long" : "Short"} ${symbol} (failed)`,
-        amount: coinQty !== undefined ? String(coinQty) : undefined,
-        asset: symbol,
-        protocol: "Hyperliquid",
-        status: "error",
-      });
+      recordExecution({ type: isBuy ? "buy" : "sell", label: `${isBuy ? "Long" : "Short"} ${symbol} (failed)`, asset: symbol, protocol: "Hyperliquid", status: "error" });
     }
-  }, [status, result, isBuy, symbol, coinQty]);
+  }, [status, result, isBuy, symbol]);
+
+  const clearBtn = (
+    <button onClick={() => { recordedRef.current = null; reset(); }} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 11 }}>
+      clear
+    </button>
+  );
+
+  if (!sizeUsd) return <NotWired venue="Hyperliquid" reason="This position came back without a size. Ask again with the amount you want." />;
+  if (!isConnected || !address || !chainId) return <p style={muted}>Connect a wallet to trade {symbol} on Hyperliquid.</p>;
+  if (ctx.isLoading) return <p style={muted}>Reading the {symbol} market on Hyperliquid…</p>;
+  const m = ctx.data;
+  if (!m || !(m.mark > 0)) return <NotWired venue="Hyperliquid" reason={`${symbol} has no live perp market on Hyperliquid ${envName}.`} />;
+
+  const funding = fundingAprForSide(m.fundingHourly, isBuy);
+  const free = acct.data?.freeMargin ?? 0;
+  const position = acct.data?.position ?? 0;
+  const coinQty = sizeUsd / m.mark;
+  const lowNotional = sizeUsd < HL_MIN_ORDER_USD;
+  const shortBy = Math.max(0, needed - free);
+  const movable = !acct.data?.unified && (acct.data?.spotUsdc ?? 0) >= shortBy && shortBy > 0;
+  const { sl, tp } = protectionPrices(m.mark, isBuy, { stopLossPct: slOn ? slPct : undefined, takeProfitPct: tpOn ? tpPct : undefined });
+
+  const info = (
+    <>
+      <OrderRow label="Market" value={`${m.coin} $${m.mark.toLocaleString("en-US", { maximumFractionDigits: 4 })} · max ${m.maxLeverage}x`} />
+      <OrderRow
+        label="Funding"
+        value={`${funding >= 0 ? "+" : ""}${funding.toFixed(1)}%/yr ${funding >= 0 ? "earned" : "paid"} by a ${isBuy ? "long" : "short"}`}
+        valueColor={funding >= 0 ? "var(--color-accent-700)" : "var(--risk-bad, #c0392b)"}
+      />
+      <OrderRow
+        label="Margin"
+        value={acct.isLoading ? "…" : `$${free.toFixed(2)} free · needs ~$${needed.toFixed(2)} (${leverage}x)`}
+        valueColor={!acct.isLoading && shortBy > 0 ? "var(--risk-bad, #c0392b)" : undefined}
+      />
+      {position !== 0 && <OrderRow label="Open now" value={`${position > 0 ? "Long" : "Short"} ${Math.abs(position)} ${m.coin}`} />}
+    </>
+  );
 
   if (status === "preparing" || status === "approving" || status === "submitting") {
     return (
-      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>
-        {status === "preparing"
-          ? "Fetching Hyperliquid price…"
-          : status === "approving"
-            ? "Approve the Meridian trading key in your wallet (one time)…"
-            : "Submitting order to Hyperliquid…"}
-      </p>
+      <>
+        {info}
+        <p style={muted}>
+          {status === "approving" ? "Approve the Meridian trading key in your wallet (one time)…" : status === "preparing" ? "Fetching the Hyperliquid price…" : "Submitting to Hyperliquid…"}
+        </p>
+      </>
     );
   }
 
   if (status === "confirmed" && result) {
+    const prot = result.protection;
     return (
-      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-accent-700)" }}>
-        Filled on Hyperliquid {env}: {describeFill(result)} {symbol}
-        <button onClick={reset} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 11 }}>
-          clear
-        </button>
-      </p>
+      <>
+        <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-accent-700)" }}>
+          Filled on Hyperliquid {envName}: {describeFill(result)} {m.coin}
+          {prot?.ok && (prot.sl || prot.tp)
+            ? ` · ${[prot.sl ? `stop-loss $${prot.sl.toPrecision(5)}` : "", prot.tp ? `take-profit $${prot.tp.toPrecision(5)}` : ""].filter(Boolean).join(" · ")}`
+            : ""}
+          {clearBtn}
+        </p>
+        {prot && !prot.ok && (
+          <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--risk-bad, #c0392b)" }}>
+            The position is open but the stop-loss / take-profit was refused: {prot.error}. Set it in the Hyperliquid app or close the position below.
+          </p>
+        )}
+        {position !== 0 && (
+          <button className="btn" style={{ fontSize: 12, marginTop: 6, cursor: "pointer" }} onClick={() => setConfirming("close")}>
+            Close {position > 0 ? "long" : "short"} {Math.abs(position)} {m.coin} →
+          </button>
+        )}
+        <ConfirmDialog
+          open={confirming === "close"}
+          title={`Close ${m.coin} on Hyperliquid ${envName}`}
+          body={<div>Reduce-only market order closing {Math.abs(position)} {m.coin} (fills now within 5% of the mid, or not at all).</div>}
+          confirmLabel="Close position"
+          warning={envName === "testnet" ? "TESTNET — no real funds." : "Mainnet — real funds."}
+          onConfirm={() => {
+            setConfirming(null);
+            recordedRef.current = null;
+            execute({ symbol: m.coin, isBuy: position < 0, sizeUsd: 0, coinQty: Math.abs(position), reduceOnly: true, testnet: envName === "testnet" });
+          }}
+          onCancel={() => setConfirming(null)}
+        />
+      </>
     );
   }
 
   if (status === "error") {
     return (
-      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--risk-bad, #c0392b)" }}>
-        {`HL: ${error ?? "execution failed"}`}
-        <button onClick={reset} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 11 }}>
-          clear
-        </button>
-      </p>
+      <>
+        {info}
+        <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--risk-bad, #c0392b)" }}>
+          {`Hyperliquid: ${error ?? "the order failed"}`}
+          {clearBtn}
+        </p>
+      </>
     );
   }
 
+  if (lowNotional) {
+    return <>{info}<p style={muted}>Hyperliquid&apos;s minimum order is ${HL_MIN_ORDER_USD} of notional; this position is ${sizeUsd.toFixed(2)}.</p></>;
+  }
+
+  if (!acct.isLoading && shortBy > 0) {
+    return (
+      <>
+        {info}
+        {movable ? (
+          <>
+            <button
+              className="btn btn-primary"
+              style={{ fontSize: 13, marginTop: 6, cursor: "pointer" }}
+              disabled={moving === "pending"}
+              onClick={async () => {
+                setMoving("pending");
+                try {
+                  const amount = Math.ceil(shortBy * 100) / 100;
+                  const out = await moveSpotUsdcToPerps({
+                    env,
+                    walletSign: (td) => signTypedDataAsync(td as Parameters<typeof signTypedDataAsync>[0]),
+                    walletChainId: chainId,
+                    amount,
+                  });
+                  setMoving(out.ok ? null : out.error ?? "refused");
+                  void acct.refetch();
+                } catch (e) {
+                  const msg = e instanceof Error ? e.message : String(e);
+                  setMoving(/user rejected|denied/i.test(msg) ? "Signature declined in the wallet." : msg);
+                }
+              }}
+            >
+              {moving === "pending" ? "Moving USDC to perps…" : `Move $${(Math.ceil(shortBy * 100) / 100).toFixed(2)} USDC from spot to perps →`}
+            </button>
+            {moving && moving !== "pending" && <p style={{ ...muted, color: "var(--risk-bad, #c0392b)" }}>{moving}</p>}
+          </>
+        ) : (
+          <p style={muted}>
+            Waiting for ${shortBy.toFixed(2)} more margin on your Hyperliquid account. A deposit from the step above is credited about a minute after its
+            transaction; this checks every 5 seconds.
+          </p>
+        )}
+      </>
+    );
+  }
+
+  const pctInput = (value: number, set: (n: number) => void, label: string) => (
+    <input
+      type="number"
+      min={0.5}
+      max={90}
+      step={0.5}
+      value={value}
+      aria-label={label}
+      onChange={(e) => set(Math.max(0, Number(e.target.value) || 0))}
+      style={{ width: 56, marginLeft: 6, fontSize: 12 }}
+    />
+  );
+
   return (
     <>
-      <button
-        className="btn btn-primary"
-        style={{ fontSize: 13, marginTop: 6, cursor: "pointer" }}
-        onClick={() => setConfirming(true)}
-        title={isConnected ? undefined : "Connect a wallet first"}
-      >
-        Open {side === "short" ? "short" : "long"} {symbol} on Hyperliquid {env} →
+      {info}
+      <button className="btn btn-primary" style={{ fontSize: 13, marginTop: 6, cursor: "pointer" }} onClick={() => setConfirming("open")}>
+        Open {isBuy ? "long" : "short"} {m.coin} {fmtUsd(sizeUsd)} at {leverage}x on Hyperliquid →
       </button>
       <ConfirmDialog
-        open={confirming}
-        title={`Confirm ${isBuy ? "long" : "short"} ${symbol} on Hyperliquid ${env}`}
+        open={confirming === "open"}
+        title={`Confirm ${isBuy ? "long" : "short"} ${m.coin} on Hyperliquid ${envName}`}
         body={
           <div>
-            Market order: {isBuy ? "long" : "short"} {symbol.toUpperCase()} ({fmtUsd(sizeUsd)}
-            {leverage ? ` at ${leverage}x` : ""}) on Hyperliquid {env}.
-            {hlQuote && coinQty !== undefined ? (
-              <>
-                {" "}
-                ≈ <strong>{coinQty.toFixed(4)}</strong> {symbol.toUpperCase()} at ~$
-                {hlPrice!.toFixed(2)} each. {HL_SIGNING_NOTE}
-              </>
-            ) : (
-              <> A live mid price will be fetched first. {HL_SIGNING_NOTE}</>
+            <p style={{ margin: 0 }}>
+              Market {isBuy ? "long" : "short"} of {fmtUsd(sizeUsd)} ≈ <strong>{coinQty.toFixed(4)}</strong> {m.coin} at ~${m.mark.toLocaleString("en-US", { maximumFractionDigits: 4 })}, {leverage}x cross
+              margin (~${needed.toFixed(2)}). Funding now: {funding >= 0 ? "+" : ""}
+              {funding.toFixed(1)}%/yr for this side. {HL_SIGNING_NOTE}
+            </p>
+            <label style={{ display: "block", marginTop: 8, fontSize: 12 }}>
+              <input type="checkbox" checked={slOn} onChange={(e) => setSlOn(e.target.checked)} /> Stop-loss
+              {pctInput(slPct, setSlPct, "Stop-loss distance in %")}% {slOn && sl ? `(≈ $${sl.toPrecision(5)})` : ""}
+            </label>
+            <label style={{ display: "block", marginTop: 4, fontSize: 12 }}>
+              <input type="checkbox" checked={tpOn} onChange={(e) => setTpOn(e.target.checked)} /> Take-profit
+              {pctInput(tpPct, setTpPct, "Take-profit distance in %")}% {tpOn && tp ? `(≈ $${tp.toPrecision(5)})` : ""}
+            </label>
+            {hedged && slOn && (
+              <p style={{ margin: "6px 0 0", fontSize: 11, color: "var(--risk-bad, #c0392b)" }}>
+                This short hedges a spot position: a stop-loss would remove the hedge when the price rises.
+              </p>
             )}
           </div>
         }
         confirmLabel="Submit order"
-        warning={env === "testnet" ? "TESTNET — no real funds." : "Mainnet — real funds. Confirm carefully."}
+        warning={envName === "testnet" ? "TESTNET — no real funds." : "Mainnet — real funds. Confirm carefully."}
         onConfirm={() => {
-          setConfirming(false);
-          execute({ symbol, isBuy, sizeUsd, leverage, testnet: env === "testnet", coinQty });
+          setConfirming(null);
+          recordedRef.current = null;
+          execute({
+            symbol: m.coin,
+            isBuy,
+            sizeUsd,
+            leverage,
+            testnet: envName === "testnet",
+            coinQty,
+            stopLossPct: slOn ? slPct : undefined,
+            takeProfitPct: tpOn ? tpPct : undefined,
+          });
         }}
-        onCancel={() => setConfirming(false)}
+        onCancel={() => setConfirming(null)}
       />
     </>
   );

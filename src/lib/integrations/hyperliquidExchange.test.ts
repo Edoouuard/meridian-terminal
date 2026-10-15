@@ -4,6 +4,7 @@ import { planSpotSell } from "@/lib/integrations/hyperliquidTrade";
 import { isHyperCoreSystemAddress } from "@/lib/execution";
 import {
   approveAgentAction,
+  firstOrderError,
   floatToWire,
   l1TypedData,
   orderAction,
@@ -15,6 +16,7 @@ import {
   usdClassTransferAction,
   withdrawAction,
   systemAddressForToken,
+  triggerOrderWire,
   updateLeverageAction,
 } from "@/lib/integrations/hyperliquidExchange";
 
@@ -35,6 +37,23 @@ describe("hyperliquidExchange — signatures match the official SDK", () => {
       v: 28,
     });
     expect((await l1(order, 0, false)).r).toBe("0x82b2ba28e76b3d761093aaded1b1cdad4960b3af30212b343fb2e6cdfa4e3d54");
+  });
+
+  it("signs a stop-loss and a take-profit (trigger orders)", async () => {
+    const action = orderAction([
+      triggerOrderWire({ asset: 1, isBuy: false, px: 1800, sz: 0.05, triggerPx: 2000, tpsl: "sl" }),
+      triggerOrderWire({ asset: 1, isBuy: false, px: 2475, sz: 0.05, triggerPx: 2750, tpsl: "tp" }),
+    ]);
+    expect(action.orders[0]).toEqual({ a: 1, b: false, p: "1800", s: "0.05", r: true, t: { trigger: { isMarket: true, triggerPx: "2000", tpsl: "sl" } } });
+    const sig = await l1(action, 1700000000123, true);
+    expect(BigInt(sig.r)).toBe(BigInt("0x2ef9312aafd4858e8dfee8eb0ed74102111c5d5cf337f1909ae5f46b401ee2b"));
+    expect(BigInt(sig.s)).toBe(BigInt("0x157aadf4e03e9fd0aa46cbaa381c15ef362a6c6edf4901d7f1c4272a1d084a7d"));
+    expect(sig.v).toBe(27);
+  });
+
+  it("reads the first error of a multi-order response", () => {
+    expect(firstOrderError({ status: "ok", response: { type: "order", data: { statuses: ["waitingForTrigger", { error: "Invalid TP/SL price." }] } } })).toBe("Invalid TP/SL price.");
+    expect(firstOrderError({ status: "ok", response: { type: "order", data: { statuses: ["waitingForTrigger", "waitingForTrigger"] } } })).toBeUndefined();
   });
 
   it("signs a leverage update and a spot IOC sell", async () => {

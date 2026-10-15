@@ -41,7 +41,7 @@ Un utilisateur DeFi équipé d'un wallet, qui gère de quelques milliers à quel
 | Portefeuille (8 chaînes EVM + compte Hyperliquid) | ✅ soldes, Aave, donut d'allocation, prix de tous les jetons suivis | Positions Morpho, Pendle, Spark Savings, Fluid, Yearn, EigenLayer non lues |
 | Exécution spot (Aave, Morpho, Spark, Fluid, Yearn, Sky, Ethena, Lido, EigenLayer, Pendle, Uniswap, wrap WETH) | 🟡 prouvée sur forks en CI | Aucune transaction réelle confirmée par protocole |
 | Bridges (deBridge, LI.FI) | 🟡 prouvés sur fork Arbitrum | Aucun bridge réel de bout en bout |
-| Hyperliquid (dépôt, perps, vente spot UETH/UBTC) | 🟡 signature identique au SDK officiel (vecteurs testés) | Jamais exécuté sur un vrai compte |
+| Hyperliquid (dépôt, perps avec SL/TP, vente spot UETH/UBTC, retrait) | 🟡 signature identique au SDK officiel (vecteurs testés) ; retrait vers Compound confirmé par le propriétaire | Perps jamais exécutés sur un vrai compte |
 | Perps Extended, Ondo, Lighter | 🟡 codés, activés en prod | Jamais exécutés en réel |
 | Bêta (mot de passe, bug report `/api/feedback`, Sentry, `[exec-log]`, WalletConnect si configuré) | ✅ | WalletConnect à configurer ; aucun testeur |
 | TradFi | ❌ absent (hors perps Ondo) | — |
@@ -198,6 +198,29 @@ Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenis�
 - [ ] [moi] Journaliser chaque plan généré (`[plan-log]` : prompt tronqué, stratégies, budget, facteur d'échelle) pour l'évaluation de la Phase 1.
 
 **Critère de sortie :** 10 testeurs actifs · ≥ 30 transactions réelles confirmées · aucune perte de fonds · chaque parcours visible a un hash de preuve.
+
+### Piste prioritaire — Perps et protocoles (demandée le 2026-10-15)
+
+**Objectif : chaque perp et chaque protocole proposé par le planner s'exécute de bout en bout depuis Meridian, avec les garde-fous d'un vrai terminal de trading.** Passe avant les cases [moi] de la Phase 0 hors bugs.
+
+**P1 Perps Hyperliquid complets**
+- [x] [moi] Bouton perp : marché, funding annualisé pour le côté choisi, marge libre (compte unifié inclus) contre la marge nécessaire, attente automatique du dépôt, transfert spot → perps en une signature. *Preuve : tests `hyperliquidTrade` (marge unifiée, funding).*
+- [x] [moi] Stop-loss / take-profit réduits (ordres trigger) posés après le fill, au prix réel d'entrée ; désactivés par défaut sur un short qui couvre un spot. *Preuve : signature identique au SDK officiel (test `hyperliquidExchange`), test du flux ouverture → SL.*
+- [x] [moi] Fermer la position depuis l'étape de la stratégie. 
+- [ ] [toi] Ouvrir puis fermer un short ETH de 10 $ avec stop-loss sur mainnet. *Preuve : fills affichés + ordre SL visible dans l'app Hyperliquid.*
+- [ ] [moi] Ordres limite (GTC) et modification / annulation des TP/SL dans le panneau Hyperliquid.
+
+**P2 Perps HIP-3 sur Hyperliquid (actions, indices, matières premières)**
+- [ ] [moi] Marchés des dex HIP-3 (`perpDexs`, ex. `xyz:TSLA`, `xyz:NVDA`, `xyz:GOLD`, `xyz:XYZ100`) : identifiant d'actif `110000 + i × 10000 + index`, prix et funding par dex, collatéral du dex. *Preuve : vecteur de signature SDK + test des identifiants.*
+- [ ] [moi] Le planner les propose (« short Tesla », « long or ») et le bouton perp les exécute, marge du dex incluse.
+
+**P3 Plus de protocoles exécutables**
+- [ ] [moi] Vaults ERC-4626 vérifiés on-chain : Euler v2, Morpho (coffres supplémentaires), Yearn v3, Silo v2 — une ligne par vault dans `vaults.ts`, dépôt prouvé sur fork.
+- [ ] [moi] Restaking liquide : ether.fi (weETH), Kelp (rsETH), Renzo (ezETH) — dépôt direct ou swap Uniswap.
+- [ ] [moi] Moonwell / Venus (forks Compound) sur Base et BNB.
+
+**P4 Autres venues perps**
+- [ ] [moi] Prouver Extended, Ondo, Lighter en réel (aujourd'hui codés, jamais exécutés) puis GMX v2 (Arbitrum, ordres on-chain via `onchain.ts`).
 
 ### Phase 1 — Bêta fermée : apprendre et fiabiliser (semaines 3-8)
 
@@ -367,6 +390,7 @@ Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenis�
 
 | Date | Fait | Preuve |
 |---|---|---|
+| 2026-10-15 | Perps Hyperliquid : marge et funding avant signature, attente du dépôt, transfert spot → perps, stop-loss / take-profit (ordres trigger) après le fill, fermeture depuis l'étape ; retrait Hyperliquid pour comptes unifiés (PR #38) | tests `hyperliquidExchange` (vecteur SDK trigger), `hyperliquidTrade`, `hedgesSpot` |
 | 2026-10-15 | Retrait Hyperliquid → Arbitrum (withdraw3 signé par le wallet, vecteurs SDK) inséré automatiquement quand une stratégie hors perps a besoin des USDC du compte Hyperliquid ; bridge et dépôt suivants attendent l'arrivée | tests `hyperliquidExchange`, `budgetFit`, `fundingPlanner` |
 | 2026-10-15 | Solde libre réel, budget appliqué, taux live derrière le mot de passe, prix de tous les jetons, wrap ETH auto, bug report, WalletConnect | PR #35 |
 | 2026-10-14 | Signature Hyperliquid officielle (clé de trading), vente spot UETH/UBTC | PR #34 |

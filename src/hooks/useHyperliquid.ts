@@ -22,6 +22,8 @@ export interface HlResult {
   size?: number;
   /** What actually filled (IOC orders fill now or not at all). */
   filled?: { totalSz: number; avgPx: number };
+  /** Stop-loss / take-profit placed after the fill. */
+  protection?: MarketOrderResult["protection"];
   error?: string;
 }
 
@@ -42,6 +44,9 @@ export interface UseHyperliquidResult extends HlState {
     /** Exact coin quantity; when positive it is used instead of sizeUsd / mid. */
     coinQty?: number;
     reduceOnly?: boolean;
+    /** Reduce-only stop-loss / take-profit, in % of price from the fill. */
+    stopLossPct?: number;
+    takeProfitPct?: number;
   }) => Promise<void>;
   /** Sell a spot token (UETH, UBTC, HYPE…) for USDC on Hyperliquid spot; at most what the account holds. */
   sellSpot: (p: { token: string; amount?: number; testnet?: boolean }) => Promise<void>;
@@ -82,7 +87,7 @@ export function useHyperliquid(): UseHyperliquidResult {
             return last;
           },
         );
-        const result: HlResult = { ok: out.ok, marketPrice: last.mid ?? null, size: last.size, filled: out.filled, error: out.error };
+        const result: HlResult = { ok: out.ok, marketPrice: last.mid ?? null, size: last.size, filled: out.filled, protection: last.protection, error: out.error };
         // An IOC order that didn't fill at all is not a success, whatever the transport said.
         if (out.ok && out.filled === undefined) {
           setState({ status: "error", result, error: "The order didn't fill (no liquidity within 5% of the mid). Nothing was traded." });
@@ -102,7 +107,16 @@ export function useHyperliquid(): UseHyperliquidResult {
   const execute = useCallback<UseHyperliquidResult["execute"]>(
     (p) =>
       run(p.testnet, (env, key) =>
-        perpMarketOrder(env, key, { coin: p.symbol, isBuy: p.isBuy, sizeUsd: p.sizeUsd, coinQty: p.coinQty, leverage: p.leverage, reduceOnly: p.reduceOnly }),
+        perpMarketOrder(env, key, {
+          coin: p.symbol,
+          isBuy: p.isBuy,
+          sizeUsd: p.sizeUsd,
+          coinQty: p.coinQty,
+          leverage: p.leverage,
+          reduceOnly: p.reduceOnly,
+          stopLossPct: p.stopLossPct,
+          takeProfitPct: p.takeProfitPct,
+        }),
       ),
     [run],
   );

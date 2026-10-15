@@ -16,6 +16,7 @@ import type { Address, Hex } from "viem";
 import {
   HL_WITHDRAW_FEE_USD,
   approveAgentAction,
+  firstOrderError,
   isUnknownAgentError,
   l1TypedData,
   orderAction,
@@ -24,6 +25,7 @@ import {
   roundPrice,
   roundSize,
   splitSignature,
+  triggerOrderWire,
   updateLeverageAction,
   usdClassTransferAction,
   withdrawAction,
@@ -216,13 +218,15 @@ export interface MarketOrderResult extends ExchangeOutcome {
   mid?: number;
   /** Size sent, in coin units. */
   size?: number;
+  /** Stop-loss / take-profit placed after the fill, when asked. */
+  protection?: { ok: boolean; error?: string; sl?: number; tp?: number };
 }
 
 /** Perp market order (IOC through the mid), with the leverage set first when asked. */
 export async function perpMarketOrder(
   env: HyperliquidEnv,
   agentKey: Hex,
-  o: { coin: string; isBuy: boolean; sizeUsd?: number; coinQty?: number; leverage?: number; reduceOnly?: boolean },
+  o: { coin: string; isBuy: boolean; sizeUsd?: number; coinQty?: number; leverage?: number; reduceOnly?: boolean; stopLossPct?: number; takeProfitPct?: number },
 ): Promise<MarketOrderResult> {
   const market = await fetchPerpMarket(env, o.coin);
   if (!market) return { ok: false, error: `${o.coin} isn't listed on Hyperliquid.` };
@@ -237,7 +241,11 @@ export async function perpMarketOrder(
   if (!(size > 0)) return { ok: false, error: "Order size rounds to zero.", mid };
   const px = roundPrice(o.isBuy ? mid * (1 + MARKET_SLIPPAGE) : mid * (1 - MARKET_SLIPPAGE), market.szDecimals, false);
   const out = await sendL1(env, agentKey, orderAction([orderWire({ asset: market.asset, isBuy: o.isBuy, px, sz: size, reduceOnly: o.reduceOnly, tif: "Ioc" })]));
-  return { ...out, mid, size };
+  if (!out.ok || !out.filled || o.reduceOnly || !(o.stopLossPct || o.takeProfitPct)) return { ...out, mid, size };
+  // Protect what actually filled, priced from the real entry.
+  const { sl, tp } = protectionPrices(out.filled.avgPx, o.isBuy, o);
+  const placed = await placeProtection(env, agentKey, { asset: market.asset, szDecimals: market.szDecimals, isLong: o.isBuy, size: out.filled.totalSz, sl, tp });
+  return { ...out, mid, size, protection: { ...placed, sl, tp } };
 }
 
 /** Sell a spot token for USDC at market (IOC through the mid), at most what the account holds. */
@@ -252,6 +260,111 @@ export async function spotMarketSell(env: HyperliquidEnv, agentKey: Hex, o: { us
   const px = roundPrice(mid * (1 - MARKET_SLIPPAGE), market.szDecimals, true);
   const out = await sendL1(env, agentKey, orderAction([orderWire({ asset: market.asset, isBuy: false, px, sz: size, tif: "Ioc" })]));
   return { ...out, mid, size };
+}
+
+/* ─── Perp context, margin and protection ────────────────────────────── */
+
+export interface PerpContext extends PerpMarket {
+  coin: string;
+  mark: number;
+  /** Hourly funding rate (positive: longs pay shorts). */
+  fundingHourly: number;
+}
+
+/** A perp's market, mark price and funding, in one read. */
+export async function fetchPerpContext(env: HyperliquidEnv, coin: string): Promise<PerpContext | null> {
+  const [meta, ctxs] = await infoPost<[{ universe?: { name: string; szDecimals: number; maxLeverage: number }[] }, { markPx?: string; midPx?: string | null; funding?: string }[]]>(env, {
+    type: "metaAndAssetCtxs",
+  });
+  const name = coin.toUpperCase().replace(/[-\s]?PERP$/, "").trim();
+  const asset = (meta.universe ?? []).findIndex((u) => u.name.toUpperCase() === name);
+  if (asset < 0) return null;
+  const u = meta.universe![asset];
+  const c = ctxs[asset] ?? {};
+  const mark = Number(c.midPx ?? c.markPx);
+  return { asset, coin: u.name, szDecimals: u.szDecimals, maxLeverage: u.maxLeverage, mark: Number.isFinite(mark) ? mark : 0, fundingHourly: Number(c.funding ?? 0) || 0 };
+}
+
+/** Funding an open position earns (+) or pays (−) per year, in % of notional. */
+export function fundingAprForSide(fundingHourly: number, isLong: boolean): number {
+  return (isLong ? -1 : 1) * fundingHourly * 24 * 365 * 100;
+}
+
+/** The user's free margin and open position on one coin. */
+export interface PerpAccount {
+  /** USDC a new order can use as margin now. */
+  freeMargin: number;
+  /** Free USDC in the spot balance (movable to perps outside unified mode). */
+  spotUsdc: number;
+  unified: boolean;
+  /** Signed size of the open position on the coin (negative: short). */
+  position: number;
+}
+
+export async function fetchPerpAccount(env: HyperliquidEnv, user: Address, coin: string): Promise<PerpAccount> {
+  const [ch, spotUsdc, abstraction] = await Promise.all([
+    infoPost<{ withdrawable?: string; assetPositions?: { position?: { coin?: string; szi?: string } }[] }>(env, { type: "clearinghouseState", user }),
+    fetchSpotBalance(env, user, "USDC"),
+    infoPost<unknown>(env, { type: "userAbstraction", user }).catch(() => null),
+  ]);
+  const unified = isUnifiedAbstraction(abstraction);
+  const perps = Math.max(0, Number(ch.withdrawable ?? 0));
+  const name = coin.toUpperCase().replace(/[-\s]?PERP$/, "").trim();
+  const pos = (ch.assetPositions ?? []).find((p) => p.position?.coin?.toUpperCase() === name);
+  return { freeMargin: unified ? Math.max(perps, spotUsdc) : perps, spotUsdc, unified, position: Number(pos?.position?.szi ?? 0) || 0 };
+}
+
+/** Margin an order needs: notional / leverage, plus 2% for the fill's slippage and fees. */
+export function marginNeededUsd(sizeUsd: number, leverage: number | undefined): number {
+  return (sizeUsd / Math.max(1, leverage ?? 1)) * 1.02;
+}
+
+/** Stop-loss and take-profit prices `pct`% away from the entry, on the losing / winning side. */
+export function protectionPrices(entry: number, isLong: boolean, p: { stopLossPct?: number; takeProfitPct?: number }): { sl?: number; tp?: number } {
+  const away = (pct: number, up: boolean) => entry * (1 + ((up ? 1 : -1) * pct) / 100);
+  return {
+    sl: p.stopLossPct && p.stopLossPct > 0 ? away(p.stopLossPct, !isLong) : undefined,
+    tp: p.takeProfitPct && p.takeProfitPct > 0 ? away(p.takeProfitPct, isLong) : undefined,
+  };
+}
+
+/**
+ * Reduce-only stop-loss / take-profit trigger orders for a position of
+ * `size` coins (market when triggered, at most 10% through the trigger).
+ */
+export async function placeProtection(
+  env: HyperliquidEnv,
+  agentKey: Hex,
+  o: { asset: number; szDecimals: number; isLong: boolean; size: number; sl?: number; tp?: number },
+): Promise<{ ok: boolean; error?: string }> {
+  const close = !o.isLong; // closing a long sells, closing a short buys
+  const wires = (
+    [
+      ["sl", o.sl],
+      ["tp", o.tp],
+    ] as const
+  )
+    .filter((x): x is readonly ["sl" | "tp", number] => typeof x[1] === "number" && x[1] > 0)
+    .map(([tpsl, trigger]) => {
+      const triggerPx = roundPrice(trigger, o.szDecimals, false);
+      const px = roundPrice(close ? triggerPx * 1.1 : triggerPx * 0.9, o.szDecimals, false);
+      return triggerOrderWire({ asset: o.asset, isBuy: close, px, sz: roundSize(o.size, o.szDecimals, true), triggerPx, tpsl });
+    });
+  if (wires.length === 0) return { ok: true };
+  const nonce = Date.now();
+  const action = orderAction(wires);
+  const sig = await privateKeyToAccount(agentKey).signTypedData(l1TypedData(action, nonce, !env.testnet) as never);
+  const error = firstOrderError(await postExchange(env, { action, nonce, signature: splitSignature(sig), vaultAddress: null }));
+  return error ? { ok: false, error } : { ok: true };
+}
+
+/** Move USDC from the spot balance to perps margin (one wallet signature; not for unified accounts). */
+export async function moveSpotUsdcToPerps(p: { env: HyperliquidEnv; walletSign: WalletSign; walletChainId: number; amount: number }): Promise<{ ok: boolean; error?: string }> {
+  const nonce = Date.now();
+  const { action, typedData } = usdClassTransferAction({ amount: usdc2(p.amount), toPerp: true, nonce, isMainnet: !p.env.testnet, signatureChainId: p.walletChainId });
+  const signature = splitSignature(await p.walletSign(typedData));
+  const out = parseExchangeResponse(await postExchange(p.env, { action, nonce, signature, vaultAddress: null }));
+  return out.ok ? { ok: true } : { ok: false, error: out.error };
 }
 
 /* ─── Withdraw to Arbitrum ───────────────────────────────────────────── */

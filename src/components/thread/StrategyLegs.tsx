@@ -174,7 +174,7 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
             ) : isPerp && !FEATURES.perps ? (
               <NotWired venue={leg.protocol} reason="Perps are paused during the beta while spot execution is validated end to end." />
             ) : isPerp && /hyperliquid/i.test(leg.protocol || "") ? (
-              <PerpExecuteButton leg={leg} prices={prices} />
+              <PerpExecuteButton leg={leg} hedged={hedgesSpot(leg, plan.legs)} />
             ) : /extended/i.test(leg.protocol || "") ? (
               <ExtendedPerpExecuteButton leg={leg} prices={prices} />
             ) : /ondo/i.test(leg.protocol || "") ? (
@@ -410,4 +410,12 @@ export function ExecuteStrategyButton({ plan }: { plan: TradePlan }) {
       />
     </>
   );
+}
+
+/** A short whose asset the plan also holds spot (ETH vs wstETH, weETH, WETH): a hedge, not a bet. */
+export function hedgesSpot(perp: TradeLeg, legs: TradeLeg[]): boolean {
+  if (!/^short$/i.test(perp.side.trim())) return false;
+  const base = perp.asset.replace(/[-\s]?PERP$/i, "").trim().toUpperCase();
+  if (!base) return false;
+  return legs.some((l) => l !== perp && !/^(long|short)$/i.test(l.side.trim()) && l.asset.toUpperCase().split(/[\s→]+/).some((t) => t.endsWith(base)));
 }
