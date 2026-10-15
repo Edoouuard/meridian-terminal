@@ -171,6 +171,7 @@ Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenis�
 - [ ] [toi] Stake 0,01 ETH sur Lido ; achat PT Pendle 20 USDC. *Preuve : hashes.*
 - [ ] [toi] Wrap ETH → WETH ajouté automatiquement puis supply WETH. *Preuve : hashes.*
 - [ ] [toi] Hyperliquid : dépôt 10 USDC, approbation de la clé de trading, short ETH 10 $ puis fermeture, vente UETH spot. *Preuve : hashes + fills affichés.*
+- [ ] [toi] Hyperliquid → Compound/Fluid : « bridge mes stables de Hyperliquid vers le meilleur rendement » → retrait vers Arbitrum, bridge, dépôt. *Preuve : 3 étapes confirmées.*
 - [ ] [moi] Corriger chaque blocage remonté, une PR par bug, avec le hash ou le log qui prouve le correctif.
 - [ ] [moi] Tableau « parcours prouvés » dans ce fichier (§2) : protocole · chaîne · hash · date.
 
@@ -366,6 +367,7 @@ Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenis�
 
 | Date | Fait | Preuve |
 |---|---|---|
+| 2026-10-15 | Retrait Hyperliquid → Arbitrum (withdraw3 signé par le wallet, vecteurs SDK) inséré automatiquement quand une stratégie hors perps a besoin des USDC du compte Hyperliquid ; bridge et dépôt suivants attendent l'arrivée | tests `hyperliquidExchange`, `budgetFit`, `fundingPlanner` |
 | 2026-10-15 | Solde libre réel, budget appliqué, taux live derrière le mot de passe, prix de tous les jetons, wrap ETH auto, bug report, WalletConnect | PR #35 |
 | 2026-10-14 | Signature Hyperliquid officielle (clé de trading), vente spot UETH/UBTC | PR #34 |
 | 2026-10-13 | Un seul chemin d'exécution, code mort supprimé, parcours d'or et bridge prouvés sur forks, Pendle et EigenLayer exécutables | PR #16-#33 |

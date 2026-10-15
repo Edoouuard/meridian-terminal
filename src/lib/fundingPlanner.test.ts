@@ -47,6 +47,14 @@ describe("fundingPlanner — fundPlan", () => {
     expect(out).toBe(p);
   });
 
+  it("bridges what a Hyperliquid withdrawal delivers on Arbitrum to the next step's chain", async () => {
+    const p = plan({ side: "Withdraw", asset: "USDC", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 69 }, supply("Base", 68));
+    const out = await fundPlan(p, deps([{ symbol: "USDC", chain: "Base", usd: 0.2 }]));
+    expect(out.legs.map((l) => l.side)).toEqual(["Withdraw", "Bridge", "Supply"]);
+    expect(out.legs[1]).toMatchObject({ asset: "USDC", chain: "Arbitrum", toChain: "Base" });
+    expect(out.legs[1].sizeUsd).toBeLessThanOrEqual(68);
+  });
+
   it("wraps native ETH into WETH for a WETH leg, keeping some for gas", async () => {
     const out = await fundPlan(plan(supply("Base", 500, "Aave", "ETH")), deps([{ symbol: "ETH", chain: "Base", usd: 400 }]));
     expect(out.legs[0]).toMatchObject({ side: "Wrap", asset: "ETH", protocol: "WETH", chain: "Base", sizeUsd: 397 });

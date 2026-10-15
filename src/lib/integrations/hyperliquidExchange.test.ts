@@ -12,6 +12,8 @@ import {
   roundPrice,
   roundSize,
   splitSignature,
+  usdClassTransferAction,
+  withdrawAction,
   systemAddressForToken,
   updateLeverageAction,
 } from "@/lib/integrations/hyperliquidExchange";
@@ -108,5 +110,20 @@ describe("isHyperCoreSystemAddress", () => {
     expect(isHyperCoreSystemAddress(999, systemAddressForToken(221))).toBe(true);
     expect(isHyperCoreSystemAddress(42161, systemAddressForToken(221))).toBe(false);
     expect(isHyperCoreSystemAddress(999, "0x2222222222222222222222222222222222222222")).toBe(false);
+  });
+});
+
+describe("user-signed transfers (hyperliquid-python-sdk vectors, chain 0x66eee)", () => {
+  const wallet = privateKeyToAccount("0x0123456789012345678901234567890123456789012345678901234567890123");
+  it("signs withdraw3 like sign_withdraw_from_bridge_action", async () => {
+    const { action, typedData } = withdrawAction({ destination: "0x5e9ee1089755c3435139848e47e6635505d5a13a", amount: "68", time: 1700000000123, isMainnet: true, signatureChainId: 0x66eee });
+    expect(action).toMatchObject({ type: "withdraw3", hyperliquidChain: "Mainnet", signatureChainId: "0x66eee", amount: "68", time: 1700000000123 });
+    const sig = splitSignature(await wallet.signTypedData(typedData as never));
+    expect(sig).toEqual({ r: "0x5ccb4175a94f1ca529146b2b7afa1295f606481fb254ad8c5848671670163e63", s: "0x7b6ee53bc65c7a97d4ff4e1a3317371bb182032a1d40fa2789754f04de17ec66", v: 28 });
+  });
+  it("signs usdClassTransfer like sign_usd_class_transfer_action", async () => {
+    const { typedData } = usdClassTransferAction({ amount: "68", toPerp: true, nonce: 1700000000123, isMainnet: true, signatureChainId: 0x66eee });
+    const sig = splitSignature(await wallet.signTypedData(typedData as never));
+    expect(sig).toEqual({ r: "0x70bd432f1f53d219fbcd9b6345ab83eb28b19fbbc95f13390c59c97480beb123", s: "0x5bb489d6949b8671b597d597e978732bb461c76bbf4b2eb978c63d3475836fa1", v: 27 });
   });
 });

@@ -21,6 +21,7 @@ import { chainIdFromName } from "@/lib/chains";
 import { findToken } from "@/lib/assetMap";
 import { producedToken, spentSymbol } from "@/lib/fundingPlanner";
 import type { TradeLeg } from "@/lib/tradePlan";
+import { HL_WITHDRAW_FEE_USD } from "@/lib/integrations/hyperliquidExchange";
 
 export interface BudgetAsset {
   symbol: string;
@@ -74,7 +75,10 @@ export function freshCapitalUsd(legs: TradeLeg[], hlMarginUsd = 0): number {
     }
     const spent = spentSymbol(leg, chainId);
     if (spent) fresh += take(spent, size);
-    if (side === "deposit" && /hyperliquid/i.test(leg.protocol)) {
+    if (side === "withdraw" && /hyperliquid/i.test(leg.protocol)) {
+      // Out of the Hyperliquid account: USDC on Arbitrum, minus Hyperliquid's fee.
+      put("USDC", Math.max(0, size - HL_WITHDRAW_FEE_USD));
+    } else if (side === "deposit" && /hyperliquid/i.test(leg.protocol)) {
       put(HL_MARGIN, size);
     } else if (side === "bridge") {
       const to = chainIdFromName(leg.toChain) ?? 0;
@@ -92,11 +96,13 @@ export function freshCapitalUsd(legs: TradeLeg[], hlMarginUsd = 0): number {
  * legs unchanged when it already fits, with the factor applied otherwise.
  */
 export function fitLegsToBudget<L extends TradeLeg>(legs: L[], budgetUsd: number, hlMarginUsd = 0): { legs: L[]; scaled: number } {
-  const fresh = freshCapitalUsd(legs, hlMarginUsd);
+  // A withdrawal from the Hyperliquid account is part of the budget (the caller counts what it delivers), not a spend to scale.
+  const isHlWithdraw = (l: L) => /^withdraw$/i.test(l.side.trim()) && /hyperliquid/i.test(l.protocol);
+  const fresh = freshCapitalUsd(legs.filter((l) => !isHlWithdraw(l)), hlMarginUsd);
   if (!(fresh > 0) || fresh <= budgetUsd * 1.0001) return { legs, scaled: 1 };
   const k = Math.max(0, budgetUsd) / fresh;
   const scale = (l: L): L => {
-    if (!(l.sizeUsd && l.sizeUsd > 0)) return l;
+    if (!(l.sizeUsd && l.sizeUsd > 0) || isHlWithdraw(l)) return l;
     const size = Math.floor(l.sizeUsd * k * 100) / 100;
     // Hyperliquid doesn't credit deposits under $5: keep the minimum rather than plan a lost deposit.
     const isHlDeposit = /^deposit$/i.test(l.side.trim()) && /hyperliquid/i.test(l.protocol);

@@ -24,6 +24,7 @@ import { confirmStrategyLeg } from "@/lib/strategyTracker";
 import { typicalWait } from "@/components/TxProgress";
 import { BridgeExecuteButton } from "@/components/BridgeExecuteButton";
 import { HyperliquidSpotSellButton } from "@/components/execute/HyperliquidSpotSellButton";
+import { HyperliquidWithdrawButton } from "@/components/execute/HyperliquidWithdrawButton";
 import { ExtendedPerpExecuteButton, LifiPerpExecuteButton, PerpExecuteButton } from "@/components/execute/PerpExecuteButtons";
 import { LidoUnstakeButton, MorphoExecuteButton, MorphoWithdrawButton, PendleExecuteButton, SwapExecuteButton } from "@/components/execute/VenueExecuteButtons";
 import { NotWired, OrderRow, RISK_TIER_COLOR, isUnsupported, legRowValue } from "@/components/thread/shared";
@@ -90,6 +91,8 @@ function StakeYieldBadge({ leg }: { leg: TradeLeg }) {
   );
 }
 
+const ARBITRUM_ID = 42161;
+
 /** Renders execution legs for a single strategy. */
 export function StrategyLegs({ plan }: { plan: TradePlan }) {
   const { data: prices } = useLivePrices();
@@ -125,18 +128,20 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
         const isHlDeposit = /hyperliquid/i.test(leg.protocol || "") && (legSide === "deposit" || legSide === "supply" || legSide === "fund");
         // Selling UETH/UBTC on Hyperliquid spot: a move from HyperEVM, then a spot order — not a perp.
         const isHlSpotSell = /hyperliquid/i.test(leg.protocol || "") && legSide === "sell";
+        // Withdrawing USDC from the Hyperliquid account to Arbitrum: a wallet-signed Hyperliquid action, not an EVM order.
+        const isHlWithdraw = /hyperliquid/i.test(leg.protocol || "") && legSide === "withdraw";
         // Only an actual position is a perp order: "Stake HYPE" or "Withdraw" on Hyperliquid must never become a short.
         const isPerp = /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "") && /^(long|short|buy|open)$/.test(legSide) && !isHlSpotSell;
-        const isVenueOther = /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "") && !isPerp && !isHlDeposit && !isHlSpotSell;
+        const isVenueOther = /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "") && !isPerp && !isHlDeposit && !isHlSpotSell && !isHlWithdraw;
         const isUniswap = /uniswap/i.test(leg.protocol || "");
         // PendleExecuteButton buys PT; selling or redeeming one is done in the Pendle app.
         const isPendle = /pendle/i.test(leg.protocol || "") && !/^(withdraw|sell|redeem)$/.test(legSide);
         const isPendleExit = /pendle/i.test(leg.protocol || "") && !isPendle;
-        const noSize = !(leg.sizeUsd && leg.sizeUsd > 0) && !leg.sizeToken && !isHlSpotSell;
+        const noSize = !(leg.sizeUsd && leg.sizeUsd > 0) && !leg.sizeToken && !isHlSpotSell && !isHlWithdraw;
         // These venues need live data (vault, route, on-chain quote, perp
         // signing) that only their dedicated button fetches — never hand their
         // shell order to the generic button.
-        const dedicated = isVenueOther || isPendleExit || isHlSpotSell || isPerp || isUniswap || isMorpho || isLidoWithdraw || isBridge || isLifiSwap || isPendle;
+        const dedicated = isHlWithdraw || isVenueOther || isPendleExit || isHlSpotSell || isPerp || isUniswap || isMorpho || isLidoWithdraw || isBridge || isLifiSwap || isPendle;
         const liveVenue = dedicated || isLidoStake;
         const building = isUnsupported(resolved) && !liveVenue;
         // A leg funded by an earlier bridge into its chain waits for the funds.
@@ -145,6 +150,11 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
           legChain !== undefined &&
           !isBridge &&
           plan.legs.slice(0, i).some((p) => p.side.toLowerCase() === "bridge" && chainIdFromName(p.toChain) === legChain);
+        // A Hyperliquid withdrawal earlier in the plan delivers USDC on Arbitrum: what spends it there (a bridge too) waits for it.
+        const fundedByHlWithdraw =
+          legChain === ARBITRUM_ID &&
+          !isHlWithdraw &&
+          plan.legs.slice(0, i).some((p) => /hyperliquid/i.test(p.protocol) && p.side.toLowerCase() === "withdraw");
         const execution = legChain !== undefined && !isActiveChain(legChain) ? (
           <NotWired
             venue={protocolLabel(leg.protocol)}
@@ -153,7 +163,9 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
         ) : noSize ? (
           <NotWired venue={protocolLabel(leg.protocol)} reason="This step came back without an amount. Ask again with the amount you want (e.g. “$500”) so nothing is guessed." />
         ) : dedicated || isUnsupported(resolved) ? (
-            isVenueOther ? (
+            isHlWithdraw ? (
+              <HyperliquidWithdrawButton leg={leg} />
+            ) : isVenueOther ? (
               <NotWired venue={protocolLabel(leg.protocol)} reason={`${leg.side} on ${protocolLabel(leg.protocol)} is done in its own app — Meridian places orders and deposits there.`} />
             ) : isPendleExit ? (
               <NotWired venue="Pendle" reason="Selling or redeeming a PT is done in the Pendle app (app.pendle.finance) for now." />
@@ -201,8 +213,8 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
             {leg.note && <span className="leg-card__note">{leg.note}</span>}
             <LegRiskBadge leg={leg} />
             <StakeYieldBadge leg={leg} />
-            {fundedByBridge && legChain !== undefined ? (
-              <FundsArrivalGate leg={leg} chainId={legChain} prices={prices}>
+            {(fundedByBridge || fundedByHlWithdraw) && legChain !== undefined ? (
+              <FundsArrivalGate leg={leg} chainId={legChain} prices={prices} from={fundedByHlWithdraw ? "hyperliquid" : "bridge"}>
                 {execution}
               </FundsArrivalGate>
             ) : (

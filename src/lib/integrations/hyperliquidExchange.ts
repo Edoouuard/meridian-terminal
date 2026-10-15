@@ -119,6 +119,55 @@ export function approveAgentAction(p: { agentAddress: Address; agentName: string
   return { action, typedData };
 }
 
+const WITHDRAW_TYPES = [
+  { name: "hyperliquidChain", type: "string" },
+  { name: "destination", type: "string" },
+  { name: "amount", type: "string" },
+  { name: "time", type: "uint64" },
+] as const;
+
+const USD_CLASS_TRANSFER_TYPES = [
+  { name: "hyperliquidChain", type: "string" },
+  { name: "amount", type: "string" },
+  { name: "toPerp", type: "bool" },
+  { name: "nonce", type: "uint64" },
+] as const;
+
+const userSignedDomain = (signatureChainId: number) => ({ name: "HyperliquidSignTransaction", version: "1", chainId: signatureChainId, verifyingContract: HL_ZERO_ADDRESS });
+
+/**
+ * Withdraw USDC from the Hyperliquid account to the same address on
+ * Arbitrum (withdraw3). Signed by the WALLET; Hyperliquid takes a $1 fee and
+ * the funds arrive in a few minutes. `time` is also the request's nonce.
+ */
+export function withdrawAction(p: { destination: Address; amount: string; time: number; isMainnet: boolean; signatureChainId: number }) {
+  const hyperliquidChain = p.isMainnet ? "Mainnet" : "Testnet";
+  const action = { type: "withdraw3", signatureChainId: `0x${p.signatureChainId.toString(16)}`, hyperliquidChain, destination: p.destination, amount: p.amount, time: p.time };
+  const typedData = {
+    domain: userSignedDomain(p.signatureChainId),
+    types: { "HyperliquidTransaction:Withdraw": WITHDRAW_TYPES },
+    primaryType: "HyperliquidTransaction:Withdraw" as const,
+    message: { hyperliquidChain, destination: p.destination, amount: p.amount, time: BigInt(p.time) },
+  };
+  return { action, typedData };
+}
+
+/** Move USDC between the spot and perps balances (only perps margin can be withdrawn outside unified mode). */
+export function usdClassTransferAction(p: { amount: string; toPerp: boolean; nonce: number; isMainnet: boolean; signatureChainId: number }) {
+  const hyperliquidChain = p.isMainnet ? "Mainnet" : "Testnet";
+  const action = { type: "usdClassTransfer", signatureChainId: `0x${p.signatureChainId.toString(16)}`, hyperliquidChain, amount: p.amount, toPerp: p.toPerp, nonce: p.nonce };
+  const typedData = {
+    domain: userSignedDomain(p.signatureChainId),
+    types: { "HyperliquidTransaction:UsdClassTransfer": USD_CLASS_TRANSFER_TYPES },
+    primaryType: "HyperliquidTransaction:UsdClassTransfer" as const,
+    message: { hyperliquidChain, amount: p.amount, toPerp: p.toPerp, nonce: BigInt(p.nonce) },
+  };
+  return { action, typedData };
+}
+
+/** Hyperliquid's fixed fee on a withdrawal to Arbitrum, in USDC. */
+export const HL_WITHDRAW_FEE_USD = 1;
+
 export function splitSignature(sig: Hex): { r: Hex; s: Hex; v: number } {
   const { r, s, v, yParity } = parseSignature(sig);
   return { r, s, v: Number(v ?? BigInt(27 + (yParity ?? 0))) };

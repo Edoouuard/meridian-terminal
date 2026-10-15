@@ -14,6 +14,7 @@
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import type { Address, Hex } from "viem";
 import {
+  HL_WITHDRAW_FEE_USD,
   approveAgentAction,
   isUnknownAgentError,
   l1TypedData,
@@ -24,6 +25,8 @@ import {
   roundSize,
   splitSignature,
   updateLeverageAction,
+  usdClassTransferAction,
+  withdrawAction,
   type ExchangeOutcome,
 } from "@/lib/integrations/hyperliquidExchange";
 import { hyperliquidEnv, type HyperliquidEnv } from "@/lib/integrations/hyperliquid-live";
@@ -149,7 +152,12 @@ export function clearAgent(user: Address, env: HyperliquidEnv) {
 }
 
 /** The wallet's EIP-712 signer (wagmi signTypedData). */
-export type WalletSign = (typedData: ReturnType<typeof approveAgentAction>["typedData"]) => Promise<Hex>;
+export type WalletSign = (
+  typedData:
+    | ReturnType<typeof approveAgentAction>["typedData"]
+    | ReturnType<typeof withdrawAction>["typedData"]
+    | ReturnType<typeof usdClassTransferAction>["typedData"],
+) => Promise<Hex>;
 
 /** One wallet signature: approve a fresh agent key (replaces any earlier "meridian" agent). */
 export async function approveAgent(p: { user: Address; env: HyperliquidEnv; walletSign: WalletSign; walletChainId: number }): Promise<StoredAgent> {
@@ -244,6 +252,67 @@ export async function spotMarketSell(env: HyperliquidEnv, agentKey: Hex, o: { us
   const px = roundPrice(mid * (1 - MARKET_SLIPPAGE), market.szDecimals, true);
   const out = await sendL1(env, agentKey, orderAction([orderWire({ asset: market.asset, isBuy: false, px, sz: size, tif: "Ioc" })]));
   return { ...out, mid, size };
+}
+
+/* ─── Withdraw to Arbitrum ───────────────────────────────────────────── */
+
+/** USDC the account can withdraw now (perps `withdrawable`), and free USDC in the spot balance. */
+export async function fetchWithdrawable(env: HyperliquidEnv, user: Address): Promise<{ perps: number; spotUsdc: number }> {
+  const [ch, spotUsdc] = await Promise.all([
+    infoPost<{ withdrawable?: string }>(env, { type: "clearinghouseState", user }),
+    fetchSpotBalance(env, user, "USDC"),
+  ]);
+  return { perps: Math.max(0, Number(ch.withdrawable ?? 0)), spotUsdc };
+}
+
+const usdc2 = (x: number) => (Math.floor(x * 100 + 1e-9) / 100).toFixed(2);
+
+export interface WithdrawResult {
+  ok: boolean;
+  /** USDC requested out of Hyperliquid (Hyperliquid takes its $1 fee from it). */
+  amount?: number;
+  error?: string;
+}
+
+/**
+ * Withdraw up to `amount` USDC from the Hyperliquid account to the same
+ * address on Arbitrum. When the perps balance (the only withdrawable one
+ * outside unified mode) is short and USDC sits in spot, it is moved to perps
+ * first. Each step is one wallet signature; nothing is retried silently.
+ */
+export async function withdrawUsdcToArbitrum(p: {
+  user: Address;
+  env: HyperliquidEnv;
+  walletSign: WalletSign;
+  walletChainId: number;
+  amount: number;
+  onStep?: (step: "moving" | "withdrawing") => void;
+}): Promise<WithdrawResult> {
+  const isMainnet = !p.env.testnet;
+  const { perps, spotUsdc } = await fetchWithdrawable(p.env, p.user);
+  let available = perps;
+  if (available < p.amount && spotUsdc > 0) {
+    const move = Number(usdc2(Math.min(p.amount - available, spotUsdc)));
+    if (move > 0) {
+      p.onStep?.("moving");
+      const nonce = Date.now();
+      const { action, typedData } = usdClassTransferAction({ amount: usdc2(move), toPerp: true, nonce, isMainnet, signatureChainId: p.walletChainId });
+      const signature = splitSignature(await p.walletSign(typedData));
+      const out = parseExchangeResponse(await postExchange(p.env, { action, nonce, signature, vaultAddress: null }));
+      if (!out.ok) return { ok: false, error: `Couldn't move USDC from spot to perps: ${out.error}` };
+      available += move;
+    }
+  }
+  const amount = Number(usdc2(Math.min(p.amount, available)));
+  if (!(amount > HL_WITHDRAW_FEE_USD)) {
+    return { ok: false, error: `Only $${available.toFixed(2)} is withdrawable on Hyperliquid; a withdrawal must exceed the $${HL_WITHDRAW_FEE_USD} fee.` };
+  }
+  p.onStep?.("withdrawing");
+  const time = Date.now();
+  const { action, typedData } = withdrawAction({ destination: p.user, amount: usdc2(amount), time, isMainnet, signatureChainId: p.walletChainId });
+  const signature = splitSignature(await p.walletSign(typedData));
+  const out = parseExchangeResponse(await postExchange(p.env, { action, nonce: time, signature, vaultAddress: null }));
+  return out.ok ? { ok: true, amount } : { ok: false, error: out.error };
 }
 
 /** Hyperliquid refuses orders under $10 of notional. */
