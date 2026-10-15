@@ -307,7 +307,7 @@ function formatPortfolioContext(portfolio: PortfolioSnapshot | undefined): strin
 
   const hlMargin = hyperliquidMarginUsd(portfolio);
   if (hlMargin >= 1) {
-    lines.push(`HYPERLIQUID ACCOUNT: $${Math.round(hlMargin).toLocaleString()} of stablecoins already in the user's Hyperliquid account, usable as perp margin right now. A Long/Short on Hyperliquid needs NO Deposit leg up to that margin; add a Deposit only for margin beyond it.`);
+    lines.push(`HYPERLIQUID ACCOUNT: $${Math.round(hlMargin).toLocaleString()} of stablecoins already in the user's Hyperliquid account, usable as perp margin right now. A Long/Short on Hyperliquid needs NO Deposit leg up to that margin; add a Deposit only for margin beyond it. To use it anywhere else (lending, vaults, another chain), the FIRST leg is a withdrawal: side "Withdraw", protocol "Hyperliquid", asset "USDC", chain "Arbitrum", sizeUsd ≤ that amount — it lands as USDC on Arbitrum in ~5 min minus a $1 fee; Meridian adds any bridge after it. Never plan a leg elsewhere that spends this USDC without that withdrawal.`);
   }
 
   if (portfolio.assets && portfolio.assets.length > 0) {

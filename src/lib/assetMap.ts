@@ -198,6 +198,9 @@ export function resolveOrderForLeg(
   if (protocol === "hyperliquid" && side === "sell") {
     return { unsupported: "Sold on Hyperliquid's spot order book, with its own button." };
   }
+  if (protocol === "hyperliquid" && side === "withdraw") {
+    return { unsupported: "Withdrawn from the Hyperliquid account with its own wallet-signed button." };
+  }
 
   // --- Native ETH/gas transfer (executable, all chains) ---------------------
   // The recipient comes from the thesis itself (leg.to, parsed by tradePlan's

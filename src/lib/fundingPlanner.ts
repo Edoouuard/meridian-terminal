@@ -29,6 +29,9 @@ import { findToken } from "@/lib/assetMap";
 import { isRoutingSupportedChain } from "@/lib/mcp/routerAllowlist";
 import { UNISWAP_SWAP_ROUTER02_BY_CHAIN } from "@/lib/integrations/uniswap";
 import type { TradeLeg, TradePlan } from "@/lib/tradePlan";
+import { HL_WITHDRAW_FEE_USD } from "@/lib/integrations/hyperliquidExchange";
+
+const ARBITRUM_ID = 42161;
 
 /** A bridge has to pay for itself in extra yield within this many days. */
 export const BRIDGE_PAYBACK_DAYS = 90;
@@ -327,6 +330,13 @@ export async function fundPlan(plan: TradePlan, deps: FundingDeps): Promise<Trad
   }
 
   function creditOutput(leg: TradeLeg, chainId: number) {
+    if (/hyperliquid/i.test(leg.protocol) && leg.side.toLowerCase() === "withdraw") {
+      // A withdrawal from the Hyperliquid account lands as native USDC on Arbitrum, minus Hyperliquid's fee.
+      const usd = Math.max(0, (leg.sizeUsd ?? 0) - HL_WITHDRAW_FEE_USD);
+      add(ARBITRUM_ID, "USDC", usd);
+      produced.set(key(ARBITRUM_ID, "USDC"), (produced.get(key(ARBITRUM_ID, "USDC")) ?? 0) + usd);
+      return;
+    }
     const out = producedToken(leg, chainId);
     const usd = leg.sizeUsd ?? 0;
     if (!out || !(usd > 0)) return;

@@ -22,11 +22,14 @@ export function FundsArrivalGate({
   leg,
   chainId,
   prices,
+  from = "bridge",
   children,
 }: {
   leg: TradeLeg;
   chainId: number;
   prices?: PriceEntry[];
+  /** What delivers the funds: a bridge, or a withdrawal from Hyperliquid to Arbitrum. */
+  from?: "bridge" | "hyperliquid";
   children: ReactNode;
 }) {
   const { address } = useAccount();
@@ -52,9 +55,9 @@ export function FundsArrivalGate({
   const chainLabel = CHAIN_LABEL[chainId] ?? `chain ${chainId}`;
   return (
     <p className="text-muted" style={{ fontSize: 12, margin: "6px 0 0" }}>
-      Waiting for the bridge above to deliver {token.symbol} on {chainLabel}:{" "}
+      Waiting for {from === "hyperliquid" ? "the Hyperliquid withdrawal" : "the bridge"} above to deliver {token.symbol} on {chainLabel}:{" "}
       {balance !== undefined ? formatBaseUnits(balance, token.decimals) : "…"} / {formatBaseUnits(needed, token.decimals)} {token.symbol}.
-      This step unlocks on its own once the funds arrive (usually 1–3 min after the bridge confirms).
+      This step unlocks on its own once the funds arrive ({from === "hyperliquid" ? "usually 3–5 min after the withdrawal" : "usually 1–3 min after the bridge confirms"}).
     </p>
   );
 }

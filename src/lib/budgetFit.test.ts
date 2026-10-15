@@ -70,12 +70,42 @@ describe("validateAndFixStrategy — the free balance", () => {
   it("sizes an oversized plan to the wallet's free balance and says so", () => {
     const legs: LLMLeg[] = [{ side: "Supply", asset: "USDC", protocol: "Aave", chain: "Arbitrum", sizeUsd: 700 }];
     const out = validateAndFixStrategy({ name: "Yield", risk: "low", variantNote: "", summary: "", legs }, { assets });
-    expect(out.legs[0].sizeUsd).toBeCloseTo(168, 1);
-    expect(out.fundingNotes?.[0]).toMatch(/\$168 free balance/);
+    // $168 in the wallet + the $36 of USDC on Hyperliquid, withdrawn first (minus its $1 fee).
+    expect(out.legs[0]).toMatchObject({ side: "Withdraw", protocol: "Hyperliquid", sizeUsd: 36 });
+    expect(out.legs[1].sizeUsd).toBeCloseTo(203, 1);
+    expect(out.fundingNotes?.[0]).toMatch(/\$203 free balance/);
   });
 
   it("leaves plans alone without a wallet", () => {
     const legs: LLMLeg[] = [{ side: "Supply", asset: "USDC", protocol: "Aave", chain: "Arbitrum", sizeUsd: 10_000 }];
     expect(validateAndFixStrategy({ name: "Yield", risk: "low", variantNote: "", summary: "", legs }).legs[0].sizeUsd).toBe(10_000);
+  });
+});
+
+describe("validateAndFixStrategy — stables in the Hyperliquid account", () => {
+  const wallet = [
+    { symbol: "USDC", venue: "Wallet", chain: "Base", usd: 0.2 },
+    { symbol: "USDC", venue: "Hyperliquid perps", chain: "Hyperliquid L1", usd: 69 },
+  ];
+  const supply: LLMLeg = { side: "Supply", asset: "USDC", protocol: "Fluid", chain: "Base", sizeUsd: 69 };
+
+  it("withdraws them to Arbitrum first, and sizes the strategy to what arrives", () => {
+    const out = validateAndFixStrategy({ name: "Fluid USDC", risk: "low", variantNote: "", summary: "", legs: [supply] }, { assets: wallet });
+    expect(out.legs[0]).toMatchObject({ side: "Withdraw", asset: "USDC", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 69 });
+    // $0.20 in the wallet + $69 out of Hyperliquid minus its $1 fee.
+    expect(out.legs[1].sizeUsd).toBeCloseTo(68.2, 1);
+  });
+
+  it("leaves a perp strategy alone: the account's USDC is its margin", () => {
+    const short: LLMLeg = { side: "Short", asset: "ETH PERP", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 60, leverage: 1 };
+    const out = validateAndFixStrategy({ name: "Short", risk: "high", variantNote: "", summary: "", legs: [short] }, { assets: wallet });
+    expect(out.legs.some((l) => l.side === "Withdraw")).toBe(false);
+  });
+
+  it("clamps a planned withdrawal to what the account holds", () => {
+    const planned: LLMLeg = { side: "Withdraw", asset: "USDC", protocol: "Hyperliquid", chain: "Hyperliquid", sizeUsd: 500 };
+    const out = validateAndFixStrategy({ name: "Fluid USDC", risk: "low", variantNote: "", summary: "", legs: [planned, supply] }, { assets: wallet });
+    expect(out.legs[0]).toMatchObject({ chain: "Arbitrum", sizeUsd: 69 });
+    expect(out.legs.filter((l) => l.side === "Withdraw")).toHaveLength(1);
   });
 });

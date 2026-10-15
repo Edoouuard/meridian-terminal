@@ -10,7 +10,8 @@
 
 import { chainIdFromName } from "@/lib/chains";
 import { findToken } from "@/lib/assetMap";
-import { deployableUsd, fitLegsToBudget, hyperliquidMarginOnlyUsd } from "@/lib/budgetFit";
+import { deployableUsd, fitLegsToBudget, freshCapitalUsd, hyperliquidMarginOnlyUsd } from "@/lib/budgetFit";
+import { HL_WITHDRAW_FEE_USD } from "@/lib/integrations/hyperliquidExchange";
 import { UNISWAP_SWAP_ROUTER02_BY_CHAIN } from "@/lib/integrations/uniswap";
 
 export interface LLMLeg {
@@ -249,7 +250,35 @@ export function deliverUsableTokens(legs: LLMLeg[]): LLMLeg[] {
 
 export function validateAndFixStrategy(strategy: LLMStrategy, ctx?: WalletContext): LLMStrategy {
   const legs = (Array.isArray(strategy.legs) ? strategy.legs : []).filter((l) => l && typeof l.side === "string" && typeof l.asset === "string").map(cleanNumbers);
-  return fitToBudget(checkStructure({ ...strategy, legs }, ctx), ctx);
+  return fitToBudget(withdrawFromHyperliquid(checkStructure({ ...strategy, legs }, ctx), ctx), ctx);
+}
+
+const isHlWithdraw = (l: LLMLeg) => /^withdraw$/i.test(l.side.trim()) && /hyperliquid/i.test(l.protocol);
+
+/**
+ * Stablecoins in the Hyperliquid account can fund a strategy elsewhere only
+ * after a withdrawal to Arbitrum. When a strategy without perps needs more
+ * than the wallet holds and that account has the difference, a Withdraw leg
+ * comes first (clamped to what the account holds); the funding planner then
+ * adds the bridge from Arbitrum, gated on the withdrawal's arrival.
+ */
+export function withdrawFromHyperliquid(strategy: LLMStrategy, ctx?: WalletContext): LLMStrategy {
+  const held = hyperliquidMarginOnlyUsd(ctx?.assets);
+  const clamp = (l: LLMLeg): LLMLeg => ({ ...l, asset: "USDC", chain: "Arbitrum", sizeUsd: Math.floor(Math.min(l.sizeUsd ?? held, held) * 100) / 100 });
+  if (strategy.legs.some(isHlWithdraw)) return { ...strategy, legs: strategy.legs.map((l) => (isHlWithdraw(l) ? clamp(l) : l)) };
+  if (held <= HL_WITHDRAW_FEE_USD + MIN_BUDGET_USD || strategy.legs.some((l) => /^(long|short)$/i.test(l.side.trim()))) return strategy;
+  const missing = freshCapitalUsd(strategy.legs) - deployableUsd(ctx?.assets);
+  if (!(missing > 1)) return strategy;
+  const size = Math.floor(Math.min(held, missing + HL_WITHDRAW_FEE_USD) * 100) / 100;
+  const leg: LLMLeg = {
+    side: "Withdraw",
+    asset: "USDC",
+    protocol: "Hyperliquid",
+    chain: "Arbitrum",
+    sizeUsd: size,
+    note: `Takes $${size.toFixed(2)} of USDC out of your Hyperliquid account to your address on Arbitrum (Hyperliquid's $${HL_WITHDRAW_FEE_USD} fee, ~5 min); the next steps wait for it.`,
+  };
+  return { ...strategy, legs: [leg, ...strategy.legs] };
 }
 
 /** The model sometimes returns numbers as strings ("5000", "$5,000"): make them numbers, or drop them. */
@@ -270,11 +299,13 @@ const MIN_BUDGET_USD = 5;
 /** Scale the whole strategy down when it needs more fresh capital than the wallet can deploy (lib/budgetFit.ts). */
 function fitToBudget(strategy: LLMStrategy, ctx?: WalletContext): LLMStrategy {
   if (!ctx?.assets?.length) return strategy;
-  const budget = deployableUsd(ctx.assets);
+  // What a Withdraw leg brings out of the Hyperliquid account counts too (it is fresh capital the strategy then spends).
+  const withdrawn = strategy.legs.filter(isHlWithdraw).reduce((s, l) => s + Math.max(0, (l.sizeUsd ?? 0) - HL_WITHDRAW_FEE_USD), 0);
+  const budget = deployableUsd(ctx.assets) + withdrawn;
   if (budget < MIN_BUDGET_USD) return strategy;
   const { legs, scaled } = fitLegsToBudget(strategy.legs, budget, hyperliquidMarginOnlyUsd(ctx.assets));
   if (scaled === 1) return strategy;
-  const note = `Sized to your $${Math.floor(budget).toLocaleString("en-US")} free balance: every step is ${Math.round(scaled * 100)}% of what was first planned (staked, HLP, vault and Hyperliquid-account funds aren't counted).`;
+  const note = `Sized to your $${Math.floor(budget).toLocaleString("en-US")} free balance: every step is ${Math.round(scaled * 100)}% of what was first planned (staked, HLP and vault funds aren't counted; Hyperliquid-account USDC only through a withdrawal).`;
   return { ...strategy, legs, fundingNotes: [...(strategy.fundingNotes ?? []), note] };
 }
 
