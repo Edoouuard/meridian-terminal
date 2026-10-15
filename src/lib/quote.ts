@@ -85,12 +85,20 @@ export function resolvePriceFromList(
   if (direct !== null) return direct;
   // A wrapped native token redeems 1:1 for the native asset, so its price IS
   // the native price — the feeds only list the native symbol (ETH, not WETH).
-  const native = WRAPPED_NATIVE[target];
+  // Same for 1:1 bridged or rebasing tokens (UETH, stETH, USDT0).
+  const native = PRICE_ALIAS[target];
   return native ? find(native) : null;
 }
 
-/** Wrapped native token → the native symbol it redeems 1:1 for. */
-const WRAPPED_NATIVE: Record<string, string> = {
+/** Token → the symbol whose price it shares (wrapped natives, 1:1 bridged and rebasing tokens). */
+const PRICE_ALIAS: Record<string, string> = {
+  UETH: "ETH",
+  STETH: "ETH",
+  UBTC: "BTC",
+  USOL: "SOL",
+  USDT0: "USDT",
+  USDBC: "USDC",
+  "USDC.E": "USDC",
   WETH: "ETH",
   WBNB: "BNB",
   WAVAX: "AVAX",

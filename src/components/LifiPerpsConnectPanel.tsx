@@ -94,7 +94,7 @@ function LifiPositions({ provider }: { provider: LifiPerpsProviderId }) {
           {status === "submitting"
             ? "Closing…"
             : status === "confirmed" && result
-              ? `Close submitted: ${JSON.stringify(result.results)}`
+              ? "Close order submitted."
               : `Error: ${execError ?? "failed"}`}
           <button onClick={reset} style={{ marginLeft: 6, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 10 }}>
             clear

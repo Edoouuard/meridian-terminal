@@ -43,6 +43,9 @@ const BRIDGE_FEE_BUFFER = 0.01;
  */
 const BALANCE_MARGIN = 0.995;
 
+/** Native ETH left for gas when wrapping the rest: L1 gas costs more. */
+const gasReserveUsd = (chainId: number) => (chainId === 1 ? 20 : 3);
+
 /** Below this, a balance is dust: not worth a leg or a bridge. */
 const DUST_USD = 1;
 
@@ -110,6 +113,7 @@ export function producedToken(leg: TradeLeg, chainId: number): { symbol: string;
     return parts.length === 2 && parts[1].trim() ? { symbol: tracked(parts[1]), keep: SWAP_KEEP } : null;
   }
   if (side === "stake" && /lido/i.test(leg.protocol)) return { symbol: "STETH", keep: 1 };
+  if (side === "wrap") return { symbol: "WETH", keep: 1 };
   return null;
 }
 
@@ -163,6 +167,34 @@ export async function fundPlan(plan: TradePlan, deps: FundingDeps): Promise<Trad
         if (isBridge) creditBridge(leg, symbol, size);
         legs.push(leg);
         continue;
+      }
+
+      // WETH short but native ETH on this chain: wrap it first (WETH.deposit),
+      // keeping some ETH for gas. Aave, Uniswap and the rest spend WETH.
+      if (symbol === "WETH" && !isBridge) {
+        const spare = bal(chainId, "ETH") - gasReserveUsd(chainId);
+        const need = round2Down(size - have * BALANCE_MARGIN);
+        if (spare >= DUST_USD && need > 0) {
+          const wrapUsd = round2Down(Math.min(need, spare));
+          legs.push({
+            side: "Wrap",
+            asset: "ETH",
+            protocol: "WETH",
+            chain: chainLabel,
+            sizeUsd: wrapUsd,
+            note: `Added by Meridian: wraps your native ETH into WETH for the next step (1:1, reversible).`,
+          });
+          add(chainId, "ETH", -wrapUsd);
+          const funded = round2Down(Math.min(size, have * BALANCE_MARGIN + wrapUsd));
+          if (funded < size) leg.sizeUsd = funded;
+          add(chainId, "WETH", wrapUsd - funded);
+          legs.push(leg);
+          notes.push(
+            `Your ETH on ${chainLabel} is native: a $${wrapUsd} wrap into WETH was added first` +
+              (funded < size ? `, and the ${leg.side.toLowerCase()} is sized to $${funded}, keeping some ETH for gas.` : "."),
+          );
+          continue;
+        }
       }
 
       // Short on this chain: look for the same token on another verified routing chain.
@@ -339,5 +371,5 @@ export async function fundPlan(plan: TradePlan, deps: FundingDeps): Promise<Trad
     return best;
   }
 
-  return notes.length ? { ...plan, legs, fundingNotes: notes } : plan;
+  return notes.length ? { ...plan, legs, fundingNotes: [...(plan.fundingNotes ?? []), ...notes] } : plan;
 }

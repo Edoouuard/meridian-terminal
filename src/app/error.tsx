@@ -2,6 +2,7 @@
 
 import * as Sentry from "@sentry/nextjs";
 import { useEffect } from "react";
+import { FeedbackButton } from "@/components/FeedbackButton";
 
 /**
  * Next.js app-level error boundary (client component).
@@ -53,6 +54,7 @@ export default function ErrorPage({ error, reset }: ErrorPageProps) {
         <button type="button" className="btn btn-secondary" onClick={() => window.location.reload()}>
           Reload page
         </button>
+        <FeedbackButton className="btn btn-secondary" lastRequest={error.digest ? `Error page, reference ${error.digest}` : "Error page"} />
       </div>
     </div>
   );

@@ -10,6 +10,7 @@
 
 import { chainIdFromName } from "@/lib/chains";
 import { findToken } from "@/lib/assetMap";
+import { deployableUsd, fitLegsToBudget, hyperliquidMarginOnlyUsd } from "@/lib/budgetFit";
 import { UNISWAP_SWAP_ROUTER02_BY_CHAIN } from "@/lib/integrations/uniswap";
 
 export interface LLMLeg {
@@ -30,6 +31,8 @@ export interface LLMStrategy {
   variantNote: string;
   summary: string;
   legs: LLMLeg[];
+  /** What the validator changed to fit the wallet, shown with the plan. */
+  fundingNotes?: string[];
 }
 
 const NEUTRAL_KEYWORDS = /neutral|hedge|basis|cash\.and\.carry|funding.*harvest|no directional|market\.neutral/i;
@@ -245,6 +248,37 @@ export function deliverUsableTokens(legs: LLMLeg[]): LLMLeg[] {
 }
 
 export function validateAndFixStrategy(strategy: LLMStrategy, ctx?: WalletContext): LLMStrategy {
+  const legs = (Array.isArray(strategy.legs) ? strategy.legs : []).filter((l) => l && typeof l.side === "string" && typeof l.asset === "string").map(cleanNumbers);
+  return fitToBudget(checkStructure({ ...strategy, legs }, ctx), ctx);
+}
+
+/** The model sometimes returns numbers as strings ("5000", "$5,000"): make them numbers, or drop them. */
+function cleanNumbers(l: LLMLeg): LLMLeg {
+  const num = (v: unknown) => {
+    const n = typeof v === "string" ? Number(v.replace(/[$,\s]/g, "")) : v;
+    return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : undefined;
+  };
+  const protocol = typeof l.protocol === "string" ? l.protocol : "";
+  // Hyperliquid deposits only go from Arbitrum (Bridge2), whatever chain the model wrote ("Hyperliquid", none…).
+  const chain = /hyperliquid/i.test(protocol) && /^deposit$/i.test(l.side.trim()) ? "Arbitrum" : l.chain;
+  return { ...l, protocol, chain, sizeUsd: num(l.sizeUsd), leverage: num(l.leverage) };
+}
+
+/** Below this, the planner already says the wallet is too thin: nothing to scale to. */
+const MIN_BUDGET_USD = 5;
+
+/** Scale the whole strategy down when it needs more fresh capital than the wallet can deploy (lib/budgetFit.ts). */
+function fitToBudget(strategy: LLMStrategy, ctx?: WalletContext): LLMStrategy {
+  if (!ctx?.assets?.length) return strategy;
+  const budget = deployableUsd(ctx.assets);
+  if (budget < MIN_BUDGET_USD) return strategy;
+  const { legs, scaled } = fitLegsToBudget(strategy.legs, budget, hyperliquidMarginOnlyUsd(ctx.assets));
+  if (scaled === 1) return strategy;
+  const note = `Sized to your $${Math.floor(budget).toLocaleString("en-US")} free balance: every step is ${Math.round(scaled * 100)}% of what was first planned (staked, HLP, vault and Hyperliquid-account funds aren't counted).`;
+  return { ...strategy, legs, fundingNotes: [...(strategy.fundingNotes ?? []), note] };
+}
+
+function checkStructure(strategy: LLMStrategy, ctx?: WalletContext): LLMStrategy {
   const legs = fitHyperliquidDeposits(deliverUsableTokens(dropFundingMoves(routeSwapsWithoutDex(inferBridgeSource(strategy.legs ?? [], ctx)))), ctx);
   const nameAndSummary = `${strategy.name} ${strategy.summary}`;
   const claimsNeutral = NEUTRAL_KEYWORDS.test(nameAndSummary);

@@ -37,6 +37,8 @@ export function HyperliquidSpotSellButton({ leg }: { leg: TradeLeg }) {
   const token = leg.asset.split(/[\s→]/)[0].trim().toUpperCase();
   const evmToken = findToken(token, HYPEREVM_ID);
   const [moved, setMoved] = useState(false);
+  // HyperCore credits the next block; past two minutes, say so instead of waiting silently.
+  const [slow, setSlow] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const { status, result, error, sellSpot, reset } = useHyperliquid();
 
@@ -122,7 +124,23 @@ export function HyperliquidSpotSellButton({ leg }: { leg: TradeLeg }) {
 
   // Step 1: the tokens still sit on HyperEVM.
   if (plan.move > 0 && evmToken) {
-    if (moved) return <>{balances}<p style={muted}>Waiting for the {token} to reach your Hyperliquid spot balance (a few seconds)…</p></>;
+    if (moved) {
+      return (
+        <>
+          {balances}
+          <p style={muted}>
+            {slow
+              ? `The ${token} hasn't shown up in your Hyperliquid spot balance yet. Check the transfer on the HyperEVM explorer, or `
+              : `Waiting for the ${token} to reach your Hyperliquid spot balance (a few seconds)…`}
+            {slow && (
+              <button onClick={() => { setMoved(false); setSlow(false); void core.refetch(); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--color-accent-700)", fontSize: 12, padding: 0 }}>
+                check again
+              </button>
+            )}
+          </p>
+        </>
+      );
+    }
     const order: Order = {
       type: "transfer",
       protocol: "erc20",
@@ -137,7 +155,10 @@ export function HyperliquidSpotSellButton({ leg }: { leg: TradeLeg }) {
       <>
         {balances}
         <OrderRow label="Step 1 of 2" value={`Move ${plan.move} ${token} to Hyperliquid`} />
-        <ValidatedExecuteButton order={order} label={`Move ${plan.move} ${token} to Hyperliquid →`} onConfirmed={() => setMoved(true)} />
+        <ValidatedExecuteButton order={order} label={`Move ${plan.move} ${token} to Hyperliquid →`} onConfirmed={() => {
+            setMoved(true);
+            setTimeout(() => setSlow(true), 120_000);
+          }} />
       </>
     );
   }

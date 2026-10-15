@@ -1,6 +1,6 @@
 /**
- * Beta access gate. Active only when BETA_PASSWORD (or the legacy
- * NEXT_PUBLIC_BETA_PASSWORD) is set. The cookie holds a SHA-256 of the
+ * Beta access gate. Active only when BETA_PASSWORD is set (server-only: a
+ * NEXT_PUBLIC_ variable would be inlined into browser bundles). The cookie holds a SHA-256 of the
  * password, never the password itself; Web Crypto so it runs in the proxy.
  */
 
@@ -8,7 +8,7 @@ export const BETA_COOKIE = "meridian_beta";
 export const BETA_COOKIE_MAX_AGE = 60 * 60 * 24 * 30; // 30 days
 
 export function betaPassword(): string | null {
-  const pw = process.env.BETA_PASSWORD || process.env.NEXT_PUBLIC_BETA_PASSWORD;
+  const pw = process.env.BETA_PASSWORD;
   return pw && pw.trim() ? pw : null;
 }
 

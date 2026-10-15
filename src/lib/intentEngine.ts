@@ -28,6 +28,12 @@ export interface LLMLeg {
   chain?: string;
   /** Destination chain of a Bridge leg. */
   toChain?: string;
+  /** Token a Bridge leg spends when it differs from the one it delivers. */
+  fromAsset?: string;
+  /** Recipient of a Transfer leg (0x… or .eth). */
+  to?: string;
+  /** Exact token quantity the user gave ("0.5"). */
+  sizeToken?: string;
 }
 
 export interface LLMStrategy {
@@ -44,6 +50,8 @@ export interface LLMStrategy {
   fit?: string;
   /** Main risks, short items. */
   risks?: string[];
+  /** What the server changed to fit the wallet (resized to the free balance…). */
+  fundingNotes?: string[];
 }
 
 export interface ParseIntentResponse {
@@ -120,17 +128,26 @@ function primaryAsset(legs: TradeLeg[]): string {
     .trim();
 }
 
+/** A model number that may come back as a string ("5000"): a positive finite number, else undefined. */
+function positiveNumber(v: unknown): number | undefined {
+  const n = typeof v === "string" ? Number(v.replace(/[$,\s]/g, "")) : v;
+  return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 /** Convert an LLM strategy into a TradePlan compatible with ThreadCard. */
 function strategyToTradePlan(strategy: LLMStrategy): TradePlan & { riskTier: LLMStrategy["risk"] } {
   const legs: TradeLeg[] = strategy.legs.map((l) => ({
     side: l.side,
     asset: l.asset,
     protocol: l.protocol,
-    sizeUsd: l.sizeUsd,
-    leverage: l.leverage,
+    sizeUsd: positiveNumber(l.sizeUsd),
+    leverage: positiveNumber(l.leverage),
     note: l.note,
     chain: typeof l.chain === "string" && l.chain.trim() ? l.chain.trim() : undefined,
     toChain: typeof l.toChain === "string" && l.toChain.trim() ? l.toChain.trim() : undefined,
+    fromAsset: typeof l.fromAsset === "string" && l.fromAsset.trim() ? l.fromAsset.trim() : undefined,
+    to: typeof l.to === "string" && /^(0x[0-9a-fA-F]{40}|[\w-]+(\.[\w-]+)*\.eth)$/.test(l.to.trim()) ? l.to.trim() : undefined,
+    sizeToken: typeof l.sizeToken === "string" && /^\d+(\.\d+)?$/.test(l.sizeToken.trim()) ? l.sizeToken.trim() : undefined,
   }));
 
   const intent = inferIntent(legs);
@@ -156,6 +173,7 @@ function strategyToTradePlan(strategy: LLMStrategy): TradePlan & { riskTier: LLM
     risks: Array.isArray(strategy.risks)
       ? strategy.risks.map((r) => cleanText(r, 120)).filter((r): r is string => !!r).slice(0, 4)
       : undefined,
+    fundingNotes: strategy.fundingNotes?.length ? strategy.fundingNotes.slice(0, 4) : undefined,
   };
 }
 
@@ -205,6 +223,7 @@ export async function routeThesisAsync(rawText: string, portfolio?: PortfolioCon
   try {
     const res = await fetch("/api/parse-intent", {
       method: "POST",
+      signal: AbortSignal.timeout(60_000),
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ thesis: text, portfolio }),
     });
@@ -257,6 +276,7 @@ export function plannerFallbackNotice(err: unknown): string {
   const basic = "Below is a basic plan from local rules, without live rates.";
   if (status === 429) return `You're sending requests faster than the planner allows. Wait a minute, then ask again. ${basic}`;
   if (status === 401) return `Your beta session expired. Reload the page and enter the access password again. ${basic}`;
+  if ((err as { name?: string } | null)?.name === "TimeoutError") return `The AI planner took too long to answer. Ask again in a moment. ${basic}`;
   if (status === undefined && err instanceof TypeError) return `You seem to be offline. Check your connection and ask again. ${basic}`;
   return `The AI planner is unavailable right now. Ask again in a moment. ${basic}`;
 }

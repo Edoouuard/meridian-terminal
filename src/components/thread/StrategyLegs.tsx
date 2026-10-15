@@ -125,13 +125,18 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
         const isHlDeposit = /hyperliquid/i.test(leg.protocol || "") && (legSide === "deposit" || legSide === "supply" || legSide === "fund");
         // Selling UETH/UBTC on Hyperliquid spot: a move from HyperEVM, then a spot order — not a perp.
         const isHlSpotSell = /hyperliquid/i.test(leg.protocol || "") && legSide === "sell";
-        const isPerp = /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "") && !isHlDeposit && !isHlSpotSell;
+        // Only an actual position is a perp order: "Stake HYPE" or "Withdraw" on Hyperliquid must never become a short.
+        const isPerp = /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "") && /^(long|short|buy|open)$/.test(legSide) && !isHlSpotSell;
+        const isVenueOther = /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "") && !isPerp && !isHlDeposit && !isHlSpotSell;
         const isUniswap = /uniswap/i.test(leg.protocol || "");
-        const isPendle = /pendle/i.test(leg.protocol || "");
+        // PendleExecuteButton buys PT; selling or redeeming one is done in the Pendle app.
+        const isPendle = /pendle/i.test(leg.protocol || "") && !/^(withdraw|sell|redeem)$/.test(legSide);
+        const isPendleExit = /pendle/i.test(leg.protocol || "") && !isPendle;
+        const noSize = !(leg.sizeUsd && leg.sizeUsd > 0) && !leg.sizeToken && !isHlSpotSell;
         // These venues need live data (vault, route, on-chain quote, perp
         // signing) that only their dedicated button fetches — never hand their
         // shell order to the generic button.
-        const dedicated = isHlSpotSell || isPerp || isUniswap || isMorpho || isLidoWithdraw || isBridge || isLifiSwap || isPendle;
+        const dedicated = isVenueOther || isPendleExit || isHlSpotSell || isPerp || isUniswap || isMorpho || isLidoWithdraw || isBridge || isLifiSwap || isPendle;
         const liveVenue = dedicated || isLidoStake;
         const building = isUnsupported(resolved) && !liveVenue;
         // A leg funded by an earlier bridge into its chain waits for the funds.
@@ -145,8 +150,14 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
             venue={protocolLabel(leg.protocol)}
             reason={`Meridian executes on ${ACTIVE_CHAIN_IDS.map((id) => CHAIN_LABEL[id]).join(", ")} — not ${leg.chain ?? "this chain"}.`}
           />
+        ) : noSize ? (
+          <NotWired venue={protocolLabel(leg.protocol)} reason="This step came back without an amount. Ask again with the amount you want (e.g. “$500”) so nothing is guessed." />
         ) : dedicated || isUnsupported(resolved) ? (
-            isHlSpotSell ? (
+            isVenueOther ? (
+              <NotWired venue={protocolLabel(leg.protocol)} reason={`${leg.side} on ${protocolLabel(leg.protocol)} is done in its own app — Meridian places orders and deposits there.`} />
+            ) : isPendleExit ? (
+              <NotWired venue="Pendle" reason="Selling or redeeming a PT is done in the Pendle app (app.pendle.finance) for now." />
+            ) : isHlSpotSell ? (
               <HyperliquidSpotSellButton leg={leg} />
             ) : isPerp && !FEATURES.perps ? (
               <NotWired venue={leg.protocol} reason="Perps are paused during the beta while spot execution is validated end to end." />

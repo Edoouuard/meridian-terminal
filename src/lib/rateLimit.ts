@@ -58,6 +58,7 @@ export const API_RATE_LIMITS: Array<[prefix: string, rule: RateLimitRule]> = [
   ["/api/pendle", { limit: 30, windowMs: MINUTE }],
   ["/api/exec-log", { limit: 30, windowMs: MINUTE }], // execution journal (one call per outcome)
   ["/api/preview-action", { limit: 30, windowMs: MINUTE }],
+  ["/api/feedback", { limit: 5, windowMs: MINUTE }], // bug reports
 ];
 
 export const DEFAULT_API_RATE_LIMIT: RateLimitRule = { limit: 120, windowMs: MINUTE };
