@@ -6,7 +6,7 @@ import { useAccount, useSignTypedData } from "wagmi";
 import type { Address } from "viem";
 import type { TradeLeg } from "@/lib/tradePlan";
 import { HL_WITHDRAW_FEE_USD } from "@/lib/integrations/hyperliquidExchange";
-import { fetchWithdrawable, hyperliquidEnv, withdrawUsdcToArbitrum, type WalletSign } from "@/lib/integrations/hyperliquidTrade";
+import { fetchWithdrawable, hyperliquidEnv, withdrawUsdcToArbitrum, withdrawableUsd, type WalletSign } from "@/lib/integrations/hyperliquidTrade";
 import { useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { OrderRow } from "@/components/thread/shared";
@@ -50,10 +50,16 @@ export function HyperliquidWithdrawButton({ leg }: { leg: TradeLeg }) {
     );
   }
 
-  const held = balances.data.perps + balances.data.spotUsdc;
+  const held = withdrawableUsd(balances.data);
+  const unified = balances.data.unified;
   const amount = Math.floor(Math.min(leg.sizeUsd ?? held, held) * 100) / 100;
   const arrives = Math.max(0, amount - HL_WITHDRAW_FEE_USD);
-  const row = <OrderRow label="On Hyperliquid" value={`${fmt(balances.data.perps)} withdrawable${balances.data.spotUsdc > 0.01 ? ` · ${fmt(balances.data.spotUsdc)} in spot` : ""}`} />;
+  const row = (
+    <OrderRow
+      label="On Hyperliquid"
+      value={unified ? `${fmt(held)} USDC withdrawable (unified account)` : `${fmt(balances.data.perps)} withdrawable${balances.data.spotUsdc > 0.01 ? ` · ${fmt(balances.data.spotUsdc)} in spot` : ""}`}
+    />
+  );
 
   if (state.status === "moving" || state.status === "withdrawing") {
     return <>{row}<p style={muted}>{state.status === "moving" ? "Sign in your wallet: move USDC from spot to perps (no gas)…" : "Sign in your wallet: withdraw to Arbitrum (no gas)…"}</p></>;
@@ -99,7 +105,7 @@ export function HyperliquidWithdrawButton({ leg }: { leg: TradeLeg }) {
         title={`Withdraw from Hyperliquid ${envName}`}
         body={
           <div>
-            {fmt(amount)} USDC leaves your Hyperliquid account for your own address on Arbitrum ({address.slice(0, 6)}…{address.slice(-4)}). Hyperliquid takes a {fmt(HL_WITHDRAW_FEE_USD)} fee, so about {fmt(arrives)} arrives, usually within 5 minutes. You sign in your wallet (no gas){balances.data.perps < amount ? "; first a second signature moves USDC from spot to perps" : ""}.
+            {fmt(amount)} USDC leaves your Hyperliquid account for your own address on Arbitrum ({address.slice(0, 6)}…{address.slice(-4)}). Hyperliquid takes a {fmt(HL_WITHDRAW_FEE_USD)} fee, so about {fmt(arrives)} arrives, usually within 5 minutes. You sign in your wallet (no gas){!unified && balances.data.perps < amount ? "; first a second signature moves USDC from spot to perps" : ""}.
           </div>
         }
         confirmLabel="Withdraw"
