@@ -256,13 +256,26 @@ export async function spotMarketSell(env: HyperliquidEnv, agentKey: Hex, o: { us
 
 /* ─── Withdraw to Arbitrum ───────────────────────────────────────────── */
 
-/** USDC the account can withdraw now (perps `withdrawable`), and free USDC in the spot balance. */
-export async function fetchWithdrawable(env: HyperliquidEnv, user: Address): Promise<{ perps: number; spotUsdc: number }> {
-  const [ch, spotUsdc] = await Promise.all([
+/** Unified and portfolio-margin accounts hold one USDC balance for spot and perps. */
+export const isUnifiedAbstraction = (abstraction: unknown) => abstraction === "unifiedAccount" || abstraction === "portfolioMargin";
+
+/**
+ * USDC the account can withdraw now (perps `withdrawable`), free USDC in the
+ * spot balance, and whether the account is unified (spot and perps share one
+ * USDC balance: no spot → perps transfer exists, withdraw3 draws on it directly).
+ */
+export async function fetchWithdrawable(env: HyperliquidEnv, user: Address): Promise<{ perps: number; spotUsdc: number; unified: boolean }> {
+  const [ch, spotUsdc, abstraction] = await Promise.all([
     infoPost<{ withdrawable?: string }>(env, { type: "clearinghouseState", user }),
     fetchSpotBalance(env, user, "USDC"),
+    infoPost<unknown>(env, { type: "userAbstraction", user }).catch(() => null),
   ]);
-  return { perps: Math.max(0, Number(ch.withdrawable ?? 0)), spotUsdc };
+  return { perps: Math.max(0, Number(ch.withdrawable ?? 0)), spotUsdc, unified: isUnifiedAbstraction(abstraction) };
+}
+
+/** What a withdrawal can take right now: one shared balance in a unified account, perps (+ spot after a transfer) otherwise. */
+export function withdrawableUsd(b: { perps: number; spotUsdc: number; unified: boolean }): number {
+  return b.unified ? Math.max(b.perps, b.spotUsdc) : b.perps + b.spotUsdc;
 }
 
 const usdc2 = (x: number) => (Math.floor(x * 100 + 1e-9) / 100).toFixed(2);
@@ -289,9 +302,11 @@ export async function withdrawUsdcToArbitrum(p: {
   onStep?: (step: "moving" | "withdrawing") => void;
 }): Promise<WithdrawResult> {
   const isMainnet = !p.env.testnet;
-  const { perps, spotUsdc } = await fetchWithdrawable(p.env, p.user);
-  let available = perps;
-  if (available < p.amount && spotUsdc > 0) {
+  const balances = await fetchWithdrawable(p.env, p.user);
+  const { perps, spotUsdc } = balances;
+  // Unified account: spot and perps are one balance; withdraw3 takes from it, a class transfer is refused.
+  let available = balances.unified ? withdrawableUsd(balances) : perps;
+  if (!balances.unified && available < p.amount && spotUsdc > 0) {
     const move = Number(usdc2(Math.min(p.amount - available, spotUsdc)));
     if (move > 0) {
       p.onStep?.("moving");
@@ -299,8 +314,10 @@ export async function withdrawUsdcToArbitrum(p: {
       const { action, typedData } = usdClassTransferAction({ amount: usdc2(move), toPerp: true, nonce, isMainnet, signatureChainId: p.walletChainId });
       const signature = splitSignature(await p.walletSign(typedData));
       const out = parseExchangeResponse(await postExchange(p.env, { action, nonce, signature, vaultAddress: null }));
-      if (!out.ok) return { ok: false, error: `Couldn't move USDC from spot to perps: ${out.error}` };
-      available += move;
+      // Some accounts report the mode only through this refusal: treat it as unified and withdraw directly.
+      if (!out.ok && /unified/i.test(out.error ?? "")) available = Math.max(perps, spotUsdc);
+      else if (!out.ok) return { ok: false, error: `Couldn't move USDC from spot to perps: ${out.error}` };
+      else available += move;
     }
   }
   const amount = Number(usdc2(Math.min(p.amount, available)));
