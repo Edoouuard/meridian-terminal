@@ -263,7 +263,7 @@ function parseEthQuantity(text: string): string | undefined {
  * small incidental numbers like "3 months" or "2 signatures" are ignored.
  * Labels like "size", "notional" or "position of" are also honoured.
  */
-function parseAmount(text: string): number | undefined {
+export function parseAmount(text: string): number | undefined {
   const labelled = text.match(/(?:size|notional|position(?: of)?|puts?\s*down|worth)\s*(?:of\s*)?(\$?\s*[0-9][0-9,]*\.?[0-9]*)\s*([km])?\b/i);
   if (labelled) {
     let v = parseFloat(labelled[1].replace(/[$,\s]/g, ""));
@@ -517,7 +517,8 @@ export function parseThesis(rawText: string): TradePlan {
       break;
     }
     case "betaNeutral": {
-      const lev = leverage ?? 3;
+      // Neutral pairs default to 1x (planner sizing policy), so neither leg is near liquidation.
+      const lev = leverage ?? 1;
       // The long leg always farms Hyperliquid points; the short leg's venue is
       // whichever OTHER points-farmable perp venue the thesis names (Extended,
       // Ondo, Lighter, ...), defaulting to Extended when none is named. A

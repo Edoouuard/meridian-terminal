@@ -12,6 +12,9 @@
 import type { ThreadItem, ThreadType } from "@/lib/data";
 import type { TradePlan, TradeIntent, TradeLeg } from "@/lib/tradePlan";
 import { routeThesis } from "@/lib/routeThesis";
+import { parseAmount } from "@/lib/tradePlan";
+import { deployableUsd } from "@/lib/budgetFit";
+import { SIZING_POLICY } from "@/lib/planner/policy";
 import { cleanClarify, type PlannerClarify } from "@/lib/planner/clarify";
 
 /* ------------------------------------------------------------------ */
@@ -258,8 +261,8 @@ export async function routeThesisAsync(rawText: string, portfolio?: PortfolioCon
   try {
     const res = await fetch("/api/parse-intent", {
       method: "POST",
-      // Past the server budget (route maxDuration 150s): fall back to local rules.
-      signal: AbortSignal.timeout(145_000),
+      // Past the server budget (route maxDuration 190s): fall back to local rules.
+      signal: AbortSignal.timeout(185_000),
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ thesis: text, portfolio, clarified: opts.clarified === true, answeredQuestion: opts.answeredQuestion }),
     });
@@ -307,8 +310,45 @@ export async function routeThesisAsync(rawText: string, portfolio?: PortfolioCon
     };
   } catch (err) {
     console.warn("[intentEngine] LLM parsing failed, falling back to regex parser:", err);
-    return { ...routeThesis(text), notice: plannerFallbackNotice(err) };
+    return { ...fitFallbackToPortfolio(routeThesis(text), text, portfolio), notice: plannerFallbackNotice(err) };
   }
+}
+
+const isPerpLeg = (l: TradeLeg) => /^(long|short)$/i.test(l.side.trim());
+const venueOf = (l: TradeLeg) => (/extended/i.test(l.protocol ?? "") ? "Extended" : /hyperliquid/i.test(l.protocol ?? "") ? "Hyperliquid" : "Wallet");
+
+/**
+ * The local-rules plan uses default sizes ($20,000 for a neutral pair). When
+ * the user gave no amount and the portfolio is known, size it to what they
+ * hold instead: a cross-venue pair from the free margin on each venue (plus
+ * half the wallet each, which a deposit can bring), anything else scaled so
+ * the money it needs fits the capital, at the sizing policy's utilization.
+ * Exported for tests.
+ */
+export function fitFallbackToPortfolio(item: ThreadItem, text: string, portfolio?: PortfolioContext): ThreadItem {
+  if (!portfolio || parseAmount(text) !== undefined) return item;
+  const wallet = deployableUsd(portfolio.assets);
+  const hl = (portfolio.hyperliquid?.freeMarginUsd ?? 0) + wallet / 2;
+  const ext = (portfolio.extended?.connected ? (portfolio.extended.availableUsd ?? 0) : 0) + wallet / 2;
+  const capital = (portfolio.hyperliquid?.freeMarginUsd ?? 0) + (portfolio.extended?.connected ? (portfolio.extended.availableUsd ?? 0) : 0) + wallet;
+  const util = SIZING_POLICY.maxUtilization;
+  const fit = (plan: TradePlan): TradePlan => {
+    const perps = plan.legs.filter(isPerpLeg);
+    const venues = new Set(perps.map(venueOf));
+    let legs: TradeLeg[];
+    if (perps.length === 2 && venues.has("Hyperliquid") && venues.has("Extended")) {
+      // Equal notional on both legs, capped by the thinner venue.
+      const lev = Math.max(1, perps[0].leverage ?? 1);
+      const size = Math.floor(Math.min(hl, ext) * util * lev);
+      legs = plan.legs.map((l) => (isPerpLeg(l) ? { ...l, sizeUsd: size } : l));
+    } else {
+      const need = plan.legs.reduce((t, l) => t + (l.sizeUsd ?? 0) / (isPerpLeg(l) ? Math.max(1, l.leverage ?? 1) : 1), 0);
+      const factor = need > 0 ? Math.min(1, (capital * util) / need) : 1;
+      legs = plan.legs.map((l) => (l.sizeUsd ? { ...l, sizeUsd: Math.floor(l.sizeUsd * factor) } : l));
+    }
+    return { ...plan, legs, sizeUsd: Math.max(0, ...legs.map((l) => l.sizeUsd ?? 0)) };
+  };
+  return { ...item, plan: item.plan ? fit(item.plan) : item.plan, variants: item.variants?.map(fit) };
 }
 
 /**

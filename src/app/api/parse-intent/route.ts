@@ -11,6 +11,7 @@ import { policySection } from "@/lib/planner/policy";
 import { enforceConformance, namedVenues, type Objective } from "@/lib/planner/schema";
 import type { VenueBalances } from "@/lib/planner/economics";
 import type { MarketSnapshot } from "@/lib/planner/markets";
+import { completionText } from "@/lib/planner/completion";
 import { EXPLAIN_SYSTEM, explainPayload, mergeExplanations, type Explanation } from "@/lib/planner/explain";
 import { hyperliquidMarginUsd, validateAndFixStrategy } from "@/lib/strategyIntegrity";
 
@@ -303,7 +304,11 @@ async function fetchYieldContext(baseUrl: string, cookie: string | null): Promis
   }
 }
 
-/** One chat completion as JSON text; throws on a transport or HTTP error. */
+/**
+ * One chat completion as text; throws on a transport or HTTP error, on an
+ * error OpenRouter returns with HTTP 200, and on an empty answer (with the
+ * finish reason, e.g. "length" when the output budget ran out).
+ */
 async function complete(apiKey: string, model: string, messages: { role: string; content: string }[], maxTokens: number, timeoutMs: number): Promise<string> {
   const response = await fetch(OPENROUTER_URL, {
     method: "POST",
@@ -320,8 +325,29 @@ async function complete(apiKey: string, model: string, messages: { role: string;
     const errText = await response.text().catch(() => "");
     throw Object.assign(new Error(`OpenRouter error ${response.status}`), { status: response.status, detail: errText.slice(0, 500) });
   }
-  const completion = await response.json();
-  return completion.choices?.[0]?.message?.content ?? "";
+  const completion = await response.json().catch(() => null);
+  const apiError = (completion as { error?: { message?: unknown; code?: unknown } } | null)?.error;
+  if (apiError) {
+    throw Object.assign(new Error(`OpenRouter error: ${typeof apiError.message === "string" ? apiError.message.slice(0, 200) : "unknown"}`), { status: 502, detail: JSON.stringify(apiError).slice(0, 500) });
+  }
+  const text = completionText(completion);
+  if (!text.trim()) {
+    const choice = (completion as { choices?: { finish_reason?: unknown }[] } | null)?.choices?.[0];
+    throw Object.assign(new Error("Empty response from model"), { status: 502, detail: JSON.stringify({ model, finish: choice?.finish_reason ?? null, usage: (completion as { usage?: unknown } | null)?.usage ?? null }).slice(0, 500) });
+  }
+  return text;
+}
+
+/** complete(), retried once on the default model when the configured one fails for a reason other than a timeout. */
+async function completeWithFallback(apiKey: string, model: string, messages: { role: string; content: string }[], maxTokens: number, timeoutMs: number): Promise<{ text: string; model: string }> {
+  try {
+    return { text: await complete(apiKey, model, messages, maxTokens, timeoutMs), model };
+  } catch (err) {
+    const e = err as Error & { detail?: string };
+    if (model === DEFAULT_MODEL || e.name === "TimeoutError") throw err;
+    console.error(`[parse-intent] ${model} failed (${e.message}), retrying on ${DEFAULT_MODEL}`, e.detail ?? "");
+    return { text: await complete(apiKey, DEFAULT_MODEL, messages, maxTokens, Math.min(timeoutMs, 40_000)), model: DEFAULT_MODEL };
+  }
 }
 
 function extractJson(text: string): unknown {
@@ -431,9 +457,9 @@ interface PortfolioSnapshot {
 /**
  * Two model calls (propose, then explain) plus the live-data read. A strong
  * proposal model can take over a minute; Fluid compute allows up to 300s on
- * every plan, so the budgets below fit in 150s.
+ * every plan, so the budgets below (with one fallback-model retry) fit in 190s.
  */
-export const maxDuration = 150;
+export const maxDuration = 190;
 
 const MAX_THESIS_CHARS = 2000;
 /** Proposal pass; with the explain pass after it, the whole call stays under maxDuration. */
@@ -486,8 +512,9 @@ export async function POST(req: NextRequest) {
 
     // Pipeline step 1: the model reads the data and proposes structures (or one question).
     let text: string;
+    let usedModel = model;
     try {
-      text = await complete(
+      ({ text, model: usedModel } = await completeWithFallback(
         apiKey,
         model,
         [
@@ -496,14 +523,14 @@ export async function POST(req: NextRequest) {
         ],
         PROPOSE_MAX_TOKENS,
         PROPOSE_TIMEOUT_MS,
-      );
+      ));
     } catch (err) {
       const e = err as Error & { status?: number; detail?: string };
       console.error(`[parse-intent] propose failed:`, e.message, e.detail ?? "");
-      return NextResponse.json({ error: e.status ? `OpenRouter error ${e.status}` : e.message }, { status: 502 });
+      return NextResponse.json({ error: e.message }, { status: 502 });
     }
     if (!text) {
-      console.error("[parse-intent] empty response", { model });
+      console.error("[parse-intent] empty response", { model: usedModel });
       return NextResponse.json({ error: "Empty response from model" }, { status: 500 });
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -577,6 +604,7 @@ export async function POST(req: NextRequest) {
     let understanding: string = typeof parsed.understanding === "string" ? parsed.understanding : "";
     let explanations: Explanation[] | undefined;
     try {
+      // No model fallback here: a failed explanation falls back to the deterministic summaries.
       const explainText = await complete(
         apiKey,
         explainModel,
