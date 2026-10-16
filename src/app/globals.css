@@ -1470,3 +1470,10 @@ body {
 .hold-row__usd { flex: none; font-size: 13px; font-variant-numeric: lining-nums tabular-nums; }
 .hold-up { color: var(--risk-good, #27ae60); }
 .hold-down { color: var(--risk-bad, #c0392b); }
+
+/* ── News feed ─────────────────────────────────────────────────────────── */
+.news-item { padding: var(--space-2) 0; border-bottom: 1px solid var(--color-divider); display: flex; flex-direction: column; gap: 4px; }
+.news-item__meta { margin: 0; font-size: 10px; letter-spacing: 0.04em; text-transform: uppercase; }
+.news-item__title { font-size: 13px; line-height: 1.4; color: var(--color-text); text-decoration: none; }
+.news-item__title:hover, .news-item__title:focus-visible { text-decoration: underline; }
+.news-item__coins { display: flex; gap: 4px; flex-wrap: wrap; }
