@@ -4,7 +4,7 @@ import { enforceExplicitOrder, parseExplicitPerpOrder } from "@/lib/explicitOrde
 import { NextRequest, NextResponse } from "next/server";
 import { ACTIVE_CHAIN_IDS, CHAIN_LABEL } from "@/lib/onchain";
 import { routingChainNames } from "@/lib/mcp/routerAllowlist";
-import { hyperliquidMarginUsd, validateAndFixStrategy } from "@/lib/strategyIntegrity";
+import { dropBelowMinimum, hyperliquidMarginUsd, validateAndFixStrategy } from "@/lib/strategyIntegrity";
 
 /**
  * POST /api/parse-intent
@@ -94,7 +94,7 @@ When the user's portfolio is provided:
 ### Perpetual Futures
 - **Hyperliquid**: on-chain orderbook, up to 50x leverage. Check live funding rates in the data.
 - **Hyperliquid stock, index & commodity perps (HIP-3)**: Tesla, Nvidia, the S&P 500, gold, oil… are traded as perps with USDC margin, from the same Hyperliquid account as crypto perps. For a view on a stock, an index or a commodity ("short Tesla", "long gold", "hedge my portfolio with the S&P 500"), use side "Long" or "Short", protocol "Hyperliquid", chain "Arbitrum", and asset = the EXACT market name from the live "Stock, index & commodity perps" list followed by " PERP" (e.g. "xyz:TSLA PERP", "xyz:SP500 PERP", "xyz:GOLD PERP"). Never invent a market that isn't in that list; quote its live price and funding. Respect its max leverage. These markets trade around the clock but follow the underlying's price: say so in the risk note.
-- **Extended**: StarkEx L2, up to 20x leverage. Active points program.
+- **Extended**: StarkEx L2, up to 20x leverage. Active points program. Meridian signs Extended orders once the user has connected Extended AND has funds in that Extended account; deposits to Extended are made on extended.exchange (Meridian can't deposit there yet, so never plan a Deposit or Bridge to Extended). Put an Extended leg only when the portfolio lists an Extended account balance covering its margin; otherwise build the position on Hyperliquid and say once in variantNote that using Extended needs a deposit on extended.exchange first.
 - **Ondo**: via LI.FI relay.
 - **Lighter**: zk-rollup. Check live data for LLP vault APR if available.
 Choose the perp venue based on: the user's goal (points? liquidity? fees?), NOT a default preference.
@@ -129,6 +129,7 @@ Use these when user wants passive yield with protocol exposure.
 Users want more than "supply X on Y". When the goal is yield, income, a hedge or neutrality, at least ONE of the 3 strategies (usually the moderate or aggressive one) MUST be a composed, multi-leg strategy that combines protocols, built only from the executable venues and live rates below. Recipes:
 - **Beta-neutral ETH carry (spot only, executable now)**: Supply USDC on Aave → Borrow WETH on Aave → Swap "WETH → <LST>" on Uniswap → Supply <LST> on Aave. The WETH debt (short ETH) offsets the LST (long ETH), so the value barely moves with ETH; it earns the USDC rate plus staking minus the WETH borrow rate on the borrowed part. Use ONLY a chain and LST listed under "Beta-neutral ETH carry" in the live data, its exact sizes (borrow share of the USDC) and its exact net APY. If its row says NOT worth it now, don't propose it, or say so.
 - **LST + short perp (when perps are available, only if ETH funding in the live data is positive)**: all spot legs on Arbitrum. (1) Deposit USDC on Hyperliquid (chain "Arbitrum") — the margin, sizeUsd = N / L; (2) Swap "USDC → wstETH" (or weETH) on Uniswap, chain "Arbitrum" — size N; (3) Short "ETH PERP" on Hyperliquid, size N, leverage L (1-3). With capital C: N = C × L / (L + 1) (e.g. C $3,000 at 2x → $1,000 margin, $2,000 wstETH, $2,000 short). It earns the LST staking yield plus the funding rate on N, ETH-neutral. Never use Lido (Ethereum only) or a different chain for the long side of this recipe.
+- **Neutral on Hyperliquid with the money already there (when the portfolio shows a HYPERLIQUID ACCOUNT balance and the wallet holds less)**: two legs, nothing leaves the account. (1) Buy the spot asset on Hyperliquid: side "Buy", asset "UETH" (ETH) or "UBTC" (BTC), protocol "Hyperliquid", chain "Arbitrum", size N; (2) Short "ETH PERP" (or "BTC PERP") on Hyperliquid, size N, leverage L (1-3). With the account balance C: N = C × L / (L + 1) minus ~3% for fees (e.g. $66 at 1x → ~$31 UETH + ~$31 short). It earns the funding rate on N, ETH-neutral (UETH earns no staking yield). Every Hyperliquid order is at least $10. Prefer this over any recipe that needs wallet funds the user doesn't have.
 - **Fixed + variable barbell**: part in a Pendle PT (fixed rate locked to expiry), part in an instant-exit vault (Fluid, Spark Savings, Morpho) for liquidity.
 - **Restaking stack**: Stake ETH on Lido → Restake the stETH on EigenLayer (Ethereum).
 - **Diversified stable basket**: split stables across 2-3 executable venues/chains from the live list to spread protocol risk.
@@ -295,25 +296,30 @@ function formatPortfolioContext(portfolio: PortfolioSnapshot | undefined): strin
   if (!portfolio) return "";
   // Recomputed from the holdings when they're sent: only wallet tokens and free Hyperliquid spot can fund a strategy.
   const freeBalance = Math.round(portfolio.assets?.length ? deployableUsd(portfolio.assets) : (portfolio.freeBalanceUsd ?? 0));
+  const hlMargin = hyperliquidMarginUsd(portfolio);
+  // Money in the Hyperliquid account funds Hyperliquid positions (perps and the spot side of a neutral one) directly.
+  const capital = freeBalance + Math.round(hlMargin);
   const lines: string[] = ["## USER'S CURRENT PORTFOLIO (live, read from wallet)"];
   lines.push(`Total net value: $${Math.round(portfolio.netUsd).toLocaleString()}`);
   lines.push(`FREE BALANCE (idle tokens in wallet, available to deploy): $${freeBalance.toLocaleString()}`);
+  if (hlMargin >= 1) {
+    lines.push(`CAPITAL FOR HYPERLIQUID POSITIONS: $${capital.toLocaleString()} (wallet + the Hyperliquid account). Size Hyperliquid strategies from this, not from the wallet alone.`);
+  }
 
-  // Gas budget guidance based on free balance
-  if (freeBalance < 50) {
+  // Gas budget guidance based on what can be deployed
+  if (capital < 50) {
     lines.push(`⚠️ VERY LOW CAPITAL — only suggest minimal strategies on L2 chains (Base, Arbitrum, Polygon). Ethereum L1 gas would consume most of the balance.`);
-  } else if (freeBalance < 100) {
+  } else if (capital < 100) {
     lines.push(`⚠️ LOW CAPITAL — prefer L2 chains (Base, Arbitrum). Ethereum L1 gas ($5-15/tx) would be 5-15% of deployable capital.`);
-  } else if (freeBalance < 500) {
+  } else if (capital < 500) {
     lines.push(`💡 MODERATE CAPITAL — prefer L2 chains. Ethereum L1 is acceptable only for simple 1-2 tx strategies.`);
   }
   if (portfolio.netDeltaEthTotal !== null && portfolio.netDeltaEthTotal !== undefined) {
     lines.push(`Net ETH delta (spot + perps): ${portfolio.netDeltaEthTotal.toFixed(4)} ETH`);
   }
 
-  const hlMargin = hyperliquidMarginUsd(portfolio);
   if (hlMargin >= 1) {
-    lines.push(`HYPERLIQUID ACCOUNT: $${Math.round(hlMargin).toLocaleString()} of stablecoins already in the user's Hyperliquid account, usable as perp margin right now. A Long/Short on Hyperliquid needs NO Deposit leg up to that margin; add a Deposit only for margin beyond it. To use it anywhere else (lending, vaults, another chain), the FIRST leg is a withdrawal: side "Withdraw", protocol "Hyperliquid", asset "USDC", chain "Arbitrum", sizeUsd ≤ that amount — it lands as USDC on Arbitrum in ~5 min minus a $1 fee; Meridian adds any bridge after it. Never plan a leg elsewhere that spends this USDC without that withdrawal.`);
+    lines.push(`HYPERLIQUID ACCOUNT: $${Math.round(hlMargin).toLocaleString()} of stablecoins already in the user's Hyperliquid account, usable right now as perp margin and to buy UETH/UBTC on Hyperliquid spot (the long side of a neutral position there, see the recipe). A Long/Short on Hyperliquid needs NO Deposit leg up to that margin; add a Deposit only for margin beyond it. To use it anywhere else (lending, vaults, another chain), the FIRST leg is a withdrawal: side "Withdraw", protocol "Hyperliquid", asset "USDC", chain "Arbitrum", sizeUsd ≤ that amount — it lands as USDC on Arbitrum in ~5 min minus a $1 fee; Meridian adds any bridge after it. Never plan a leg elsewhere that spends this USDC without that withdrawal.`);
   }
 
   if (portfolio.assets && portfolio.assets.length > 0) {
@@ -456,8 +462,12 @@ export async function POST(req: NextRequest) {
     // incoherent (e.g. labeled "neutral" but only have one directional leg).
     const wallet = { assets: (portfolio as PortfolioSnapshot | undefined)?.assets };
     // An explicit order ("short ETH 2x, SL 20%") is strategy 1, whatever the model proposed.
-    parsed.strategies = enforceExplicitOrder(parsed.strategies, FEATURES.perps ? parseExplicitPerpOrder(thesis) : null, wallet.assets);
-    parsed.strategies = parsed.strategies.map((st: Parameters<typeof validateAndFixStrategy>[0]) => validateAndFixStrategy(st, wallet));
+    const explicit = FEATURES.perps ? parseExplicitPerpOrder(thesis) : null;
+    parsed.strategies = enforceExplicitOrder(parsed.strategies, explicit, wallet.assets);
+    parsed.strategies = dropBelowMinimum(
+      parsed.strategies.map((st: Parameters<typeof validateAndFixStrategy>[0]) => validateAndFixStrategy(st, wallet)),
+      explicit !== null,
+    );
 
     return NextResponse.json(parsed);
   } catch (err: unknown) {

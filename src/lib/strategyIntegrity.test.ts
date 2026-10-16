@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { dropFundingMoves, inferBridgeSource, validateAndFixStrategy, type LLMLeg } from "@/lib/strategyIntegrity";
+import { belowMinimum, dropBelowMinimum, dropFundingMoves, inferBridgeSource, validateAndFixStrategy, type LLMLeg } from "@/lib/strategyIntegrity";
 
 const strat = (name: string, legs: LLMLeg[]) => ({ name, risk: "moderate", variantNote: "", summary: "Earns the spread, beta-neutral.", legs });
 
@@ -42,8 +42,10 @@ describe("strategyIntegrity — neutral strategies", () => {
         { side: "Short", asset: "ETH PERP", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 3000, leverage: 3 },
       ]),
     );
-    expect(out.legs[0]).toMatchObject({ side: "Swap", asset: "USDC → wstETH", chain: "Arbitrum", sizeUsd: 3000 });
-    expect(out.legs[1]).toMatchObject({ side: "Supply", protocol: "Morpho", sizeUsd: 1000 });
+    // The spot buy sits right before the short, after the steps that bring its USDC.
+    expect(out.legs[0]).toMatchObject({ side: "Supply", protocol: "Morpho", sizeUsd: 1000 });
+    expect(out.legs[2]).toMatchObject({ side: "Swap", asset: "USDC → wstETH", chain: "Arbitrum", sizeUsd: 3000 });
+    expect(out.legs[3]).toMatchObject({ side: "Short" });
     expect(out.legs.reduce((s, l) => s + (l.side === "Short" ? 0 : (l.sizeUsd ?? 0)), 0)).toBe(5000);
   });
 
@@ -173,5 +175,60 @@ describe("strategyIntegrity — the user's wallet", () => {
       legs: [{ side: "Bridge", asset: "BNB", protocol: "deBridge", chain: "BNB Chain", toChain: "Arbitrum", sizeUsd: 10 }, deposit(10), short(10)],
     });
     expect(out.legs[0]).toMatchObject({ side: "Bridge", fromAsset: "BNB", asset: "USDC", toChain: "Arbitrum" });
+  });
+});
+
+describe("strategyIntegrity — neutral with the money on Hyperliquid (owner's test, 2026-10-16)", () => {
+  // $1 of POL in the wallet, $66 of USDC in the Hyperliquid account.
+  const wallet = {
+    assets: [
+      { symbol: "POL", venue: "Wallet", chain: "Polygon", usd: 1 },
+      { symbol: "USDC", venue: "Hyperliquid perps", chain: "Hyperliquid L1", usd: 66 },
+    ],
+  };
+  const s = (legs: LLMLeg[]) => ({ name: "Hyperliquid ETH Neutral", risk: "low", variantNote: "", summary: "Beta-neutral ETH.", legs });
+
+  it("buys the long side on Hyperliquid spot with the account's USDC, not on Uniswap with wallet funds", () => {
+    const out = validateAndFixStrategy(s([{ side: "Short", asset: "ETH PERP", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 66, leverage: 1 }]), wallet);
+    expect(out.legs.map((l) => `${l.side} ${l.asset} ${l.protocol}`)).toEqual(["Buy UETH Hyperliquid", "Short ETH PERP Hyperliquid"]);
+    const [buy, short] = out.legs;
+    expect(buy.sizeUsd).toBe(short.sizeUsd);
+    // N spot + N margin (with fees) fits in the $66.
+    expect(buy.sizeUsd! * (1 + 1.03)).toBeLessThanOrEqual(66);
+    expect(buy.sizeUsd).toBeGreaterThanOrEqual(30);
+    expect(belowMinimum(out)).toBeNull();
+  });
+
+  it("fits a planned UETH buy + short that overspends the account", () => {
+    const out = validateAndFixStrategy(
+      s([
+        { side: "Buy", asset: "UETH", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 66 },
+        { side: "Short", asset: "ETH PERP", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 66, leverage: 1 },
+      ]),
+      wallet,
+    );
+    const [buy, short] = out.legs;
+    expect(buy.sizeUsd).toBe(short.sizeUsd);
+    expect(buy.sizeUsd! + short.sizeUsd!).toBeLessThanOrEqual(67);
+    expect(buy.sizeUsd).toBeGreaterThan(30);
+  });
+
+  it("drops the $1 strategies Hyperliquid can't execute", () => {
+    const tiny = s([
+      { side: "Bridge", asset: "POL", protocol: "deBridge", chain: "Polygon", toChain: "Arbitrum", sizeUsd: 1 },
+      { side: "Short", asset: "ETH PERP", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 1, leverage: 1 },
+    ]);
+    const good = s([
+      { side: "Buy", asset: "UETH", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 31 },
+      { side: "Short", asset: "ETH PERP", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 31, leverage: 1 },
+    ]);
+    expect(belowMinimum(tiny)).toMatch(/Hyperliquid's minimum order is \$10|under the \$5/);
+    expect(dropBelowMinimum([tiny, good])).toEqual([good]);
+    // Nothing executable: keep them, saying why.
+    const kept = dropBelowMinimum([tiny]);
+    expect(kept).toHaveLength(1);
+    expect(kept[0].fundingNotes?.[0]).toMatch(/^Too small to execute/);
+    // An explicit order stays first, annotated.
+    expect(dropBelowMinimum([tiny, good], true).map((x) => x.legs.length)).toEqual([2, 2]);
   });
 });

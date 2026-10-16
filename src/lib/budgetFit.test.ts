@@ -109,3 +109,16 @@ describe("validateAndFixStrategy — stables in the Hyperliquid account", () => 
     expect(out.legs.filter((l) => l.side === "Withdraw")).toHaveLength(1);
   });
 });
+
+describe("Hyperliquid spot buys", () => {
+  it("are paid from the Hyperliquid account, with the short's margin", async () => {
+    const { isHlSpotBuyLeg } = await import("@/lib/budgetFit");
+    const buy = { side: "Buy", asset: "UETH", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 31 };
+    const short = { side: "Short", asset: "ETH PERP", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 31, leverage: 1 };
+    expect(isHlSpotBuyLeg(buy)).toBe(true);
+    expect(isHlSpotBuyLeg(short)).toBe(false);
+    expect(isHlSpotBuyLeg({ ...buy, asset: "ETH PERP" })).toBe(false);
+    expect(freshCapitalUsd([buy, short], 66)).toBe(0);
+    expect(freshCapitalUsd([buy, short], 40)).toBeCloseTo(22, 6);
+  });
+});

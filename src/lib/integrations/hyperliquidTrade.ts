@@ -431,6 +431,33 @@ export async function spotMarketSell(env: HyperliquidEnv, agentKey: Hex, o: { us
   return { ...out, mid, size };
 }
 
+/**
+ * Spot buy size for `usd` of a token at `mid`, capped by the free spot USDC
+ * (with the slippage bound reserved, so the IOC can't ask for more USDC than
+ * the account has). Rounded down to the token's size step.
+ */
+export function planSpotBuy(p: { usd: number; mid: number; spotUsdc: number; szDecimals: number }): { size: number; usd: number } {
+  const spendable = Math.min(p.usd, p.spotUsdc / (1 + MARKET_SLIPPAGE));
+  const size = roundSize(Math.max(0, spendable) / p.mid, p.szDecimals, true);
+  return { size, usd: size * p.mid };
+}
+
+/** Buy a spot token (UETH, UBTC…) with USDC from the Hyperliquid spot balance at market (IOC through the mid). */
+export async function spotMarketBuy(env: HyperliquidEnv, agentKey: Hex, o: { user: Address; base: string; usd: number }): Promise<MarketOrderResult> {
+  const market = await fetchSpotMarket(env, o.base);
+  if (!market) return { ok: false, error: `No ${o.base}/USDC spot market on Hyperliquid.` };
+  const mid = await fetchMid(env, market.coin);
+  if (!mid) return { ok: false, error: `No live price for ${o.base} on Hyperliquid.` };
+  const spotUsdc = await fetchSpotBalance(env, o.user, "USDC");
+  const plan = planSpotBuy({ usd: o.usd, mid, spotUsdc, szDecimals: market.szDecimals });
+  if (plan.usd < HL_MIN_ORDER_USD) {
+    return { ok: false, error: `Only $${spotUsdc.toFixed(2)} USDC free in your Hyperliquid spot balance; Hyperliquid's minimum order is $${HL_MIN_ORDER_USD}.`, mid };
+  }
+  const px = roundPrice(mid * (1 + MARKET_SLIPPAGE), market.szDecimals, true);
+  const out = await sendL1(env, agentKey, orderAction([orderWire({ asset: market.asset, isBuy: true, px, sz: plan.size, tif: "Ioc" })]));
+  return { ...out, mid, size: plan.size };
+}
+
 /* ─── Perp context, margin and protection ────────────────────────────── */
 
 export interface PerpContext extends PerpMarket {
@@ -545,10 +572,10 @@ export async function placeProtection(
   return error ? { ok: false, error } : { ok: true };
 }
 
-/** Move USDC from the spot balance to perps margin (one wallet signature; not for unified accounts). */
-export async function moveSpotUsdcToPerps(p: { env: HyperliquidEnv; walletSign: WalletSign; walletChainId: number; amount: number }): Promise<{ ok: boolean; error?: string }> {
+/** Move USDC from the spot balance to perps margin, or back with `toSpot` (one wallet signature; not for unified accounts). */
+export async function moveSpotUsdcToPerps(p: { env: HyperliquidEnv; walletSign: WalletSign; walletChainId: number; amount: number; toSpot?: boolean }): Promise<{ ok: boolean; error?: string }> {
   const nonce = Date.now();
-  const { action, typedData } = usdClassTransferAction({ amount: usdc2(p.amount), toPerp: true, nonce, isMainnet: !p.env.testnet, signatureChainId: p.walletChainId });
+  const { action, typedData } = usdClassTransferAction({ amount: usdc2(p.amount), toPerp: !p.toSpot, nonce, isMainnet: !p.env.testnet, signatureChainId: p.walletChainId });
   const signature = splitSignature(await p.walletSign(typedData));
   const out = parseExchangeResponse(await postExchange(p.env, { action, nonce, signature, vaultAddress: null }));
   return out.ok ? { ok: true } : { ok: false, error: out.error };

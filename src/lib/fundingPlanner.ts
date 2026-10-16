@@ -89,6 +89,8 @@ const round2Down = (x: number) => Math.floor(x * 100) / 100;
 export function spentSymbol(leg: TradeLeg, chainId: number): string | null {
   const side = leg.side.toLowerCase();
   if (!SPENDING_SIDES.has(side)) return null;
+  // Buying UETH/UBTC on Hyperliquid spot is paid with the Hyperliquid account's USDC, not a wallet token.
+  if (/hyperliquid/i.test(leg.protocol) && side === "buy") return null;
   const raw = (side === "swap" ? leg.asset.split("→")[0] : side === "bridge" ? (leg.fromAsset ?? leg.asset) : leg.asset)
     .trim()
     .replace(/\s*(PERP|PT)$/i, "");
