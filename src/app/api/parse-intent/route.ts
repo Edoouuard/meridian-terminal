@@ -503,6 +503,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: e.status ? `OpenRouter error ${e.status}` : e.message }, { status: 502 });
     }
     if (!text) {
+      console.error("[parse-intent] empty response", { model });
       return NextResponse.json({ error: "Empty response from model" }, { status: 500 });
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -528,6 +529,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ decision: "clarify", understanding: typeof parsed.understanding === "string" ? parsed.understanding : "", clarify, strategies: [] });
     }
     if (parsed.strategies.length === 0 && !explicit) {
+      // Diagnostics only: the shape the model returned, never the user's text.
+      console.error("[parse-intent] no strategies", {
+        model,
+        keys: Object.keys(parsed),
+        decision: parsed.decision,
+        clarifyRejected: parsed.clarify ? (clarify ? "same question as the one answered" : "malformed (needs a question and 2-4 options)") : undefined,
+        sample: text.slice(0, 300),
+      });
       return NextResponse.json({ error: "No strategies in response" }, { status: 500 });
     }
 
@@ -559,6 +568,7 @@ export async function POST(req: NextRequest) {
     });
     if (conformance.notes.length) console.info("[parse-intent] conformance:", conformance.notes.join(" | "));
     if (conformance.strategies.length === 0) {
+      console.error("[parse-intent] no plan left after checks", { model, proposed: strategies.length, notes: conformance.notes });
       return NextResponse.json({ error: "No plan met the request's constraints" }, { status: 500 });
     }
 
@@ -595,7 +605,7 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    console.error("[parse-intent] error:", message);
+    console.error("[parse-intent] error:", message, err instanceof Error ? err.stack?.split("\n").slice(0, 4).join(" | ") : "");
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
