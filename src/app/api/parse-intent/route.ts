@@ -1,5 +1,6 @@
 import { deployableUsd, isLockedVenue } from "@/lib/budgetFit";
 import { FEATURES } from "@/lib/features";
+import { enforceExplicitOrder, parseExplicitPerpOrder } from "@/lib/explicitOrder";
 import { NextRequest, NextResponse } from "next/server";
 import { ACTIVE_CHAIN_IDS, CHAIN_LABEL } from "@/lib/onchain";
 import { routingChainNames } from "@/lib/mcp/routerAllowlist";
@@ -47,6 +48,10 @@ You MUST:
 You MUST NOT:
 - Use approximate rates like "~5%" or "~3-4%". Use the exact number from the live data.
 - Assume any rate is stable. Mention in variantNote that rates are variable and current as of now.
+
+## EXPLICIT ORDERS COME FIRST (CRITICAL)
+
+When the user gives an order — a side and a market, optionally leverage, a stop-loss, a take-profit or a size ("short ETH 2x SL 20%", "long BTC 3x", "short Tesla") — strategy 1 IS that order, exactly: a "Deposit" USDC on Hyperliquid (chain "Arbitrum", the margin = size / leverage) then the "Short"/"Long" leg with that leverage and, on the perp leg, "stopLossPct" / "takeProfitPct" as numbers (20 for "SL 20%"). Size it from the free balance (most of it as margin when no size is given). A small balance is NEVER a reason to replace the order with something else: Hyperliquid accepts positions from $10. Strategies 2 and 3 are variants of the same view (another leverage, a limit entry noted in the summary, a hedged version), never an unrelated yield strategy.
 
 ## Your Process (MANDATORY)
 
@@ -223,7 +228,7 @@ Before returning your JSON, verify each strategy against this checklist:
 ## Leg Format (STRICT)
 
 side: exactly one of: "Supply", "Borrow", "Repay", "Withdraw", "Long", "Short", "Swap", "Stake", "Bridge", "Transfer", "Restake", "Buy", "Deposit", "Sell" (Deposit only for the Hyperliquid deposit; Sell only for selling UETH/UBTC/USOL on Hyperliquid spot)
-asset: token symbol. Perps: "ETH PERP". Swaps: "USDC → ETH". Staking: output token "stETH".
+asset: token symbol. Perps: "ETH PERP" (optional "stopLossPct" / "takeProfitPct" numbers on the perp leg). Swaps: "USDC → ETH". Staking: output token "stETH".
 protocol: exactly one of: "Aave", "Compound", "Spark", "Lido", "Hyperliquid", "Extended", "Ondo", "Lighter", "Uniswap", "Morpho", "Pendle", "EigenLayer", "Fluid", "Sky", "Spark Savings", "Ethena", "Yearn", "Wallet", "deBridge" (same-chain swaps use "Uniswap"; LI.FI same-chain swaps are not executable)
 sizeUsd: integer USD value.
 leverage: only for Long/Short legs. Integer.
@@ -450,6 +455,8 @@ export async function POST(req: NextRequest) {
     // Post-LLM structural validation: catch strategies that are logically
     // incoherent (e.g. labeled "neutral" but only have one directional leg).
     const wallet = { assets: (portfolio as PortfolioSnapshot | undefined)?.assets };
+    // An explicit order ("short ETH 2x, SL 20%") is strategy 1, whatever the model proposed.
+    parsed.strategies = enforceExplicitOrder(parsed.strategies, FEATURES.perps ? parseExplicitPerpOrder(thesis) : null, wallet.assets);
     parsed.strategies = parsed.strategies.map((st: Parameters<typeof validateAndFixStrategy>[0]) => validateAndFixStrategy(st, wallet));
 
     return NextResponse.json(parsed);

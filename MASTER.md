@@ -391,6 +391,7 @@ Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenis�
 
 | Date | Fait | Preuve |
 |---|---|---|
+| 2026-10-16 | Bug : « short ETH levier 2, SL 20% » donnait du lending. Un ordre explicite (côté, marché, levier, SL/TP, taille) devient la stratégie 1, garanti côté serveur ; SL/TP pré-remplis sur le bouton perp | tests `explicitOrder` |
 | 2026-10-16 | Perps HIP-3 (actions, indices, matières premières) : résolution des marchés, identifiants d'actif, levier isolé, abstraction de dex, liste live dans le planner, positions et ordres dans le panneau | tests `hyperliquidExchange` (vecteurs SDK), `hyperliquidTrade` (HIP-3) |
 | 2026-10-16 | Ordres limite Hyperliquid (GTC / post-only), annulation et déplacement des ordres ouverts, stop-loss / take-profit visibles dans le panneau | tests `hyperliquidExchange` (vecteurs SDK cancel, batchModify), `hyperliquidTrade` |
 | 2026-10-15 | Perps Hyperliquid : marge et funding avant signature, attente du dépôt, transfert spot → perps, stop-loss / take-profit (ordres trigger) après le fill, fermeture depuis l'étape ; retrait Hyperliquid pour comptes unifiés (PR #38) | tests `hyperliquidExchange` (vecteur SDK trigger), `hyperliquidTrade`, `hedgesSpot` |

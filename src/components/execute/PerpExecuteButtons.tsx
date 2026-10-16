@@ -60,8 +60,9 @@ export function PerpExecuteButton({ leg, hedged = false }: { leg: TradeLeg; hedg
   const [orderType, setOrderType] = useState<"market" | "limit">("market");
   const [limitPx, setLimitPx] = useState("");
   const [postOnly, setPostOnly] = useState(false);
-  const [slOn, setSlOn] = useState(!hedged);
-  const [tpOn, setTpOn] = useState(false);
+  // The stop-loss / take-profit the user asked for in the order win over the defaults.
+  const [slOn, setSlOn] = useState(leg.stopLossPct ? true : !hedged);
+  const [tpOn, setTpOn] = useState(!!leg.takeProfitPct);
   const [moving, setMoving] = useState<string | null>(null);
 
   const symbol = (leg.asset || "").replace(/[-\s]?PERP$/i, "").trim().toUpperCase();
@@ -84,8 +85,8 @@ export function PerpExecuteButton({ leg, hedged = false }: { leg: TradeLeg; hedg
     // Poll while the margin isn't there yet (a deposit is landing) or a position just changed.
     refetchInterval: (q) => ((q.state.data?.freeMargin ?? 0) < needed || status === "confirmed" ? 5000 : false),
   });
-  const [slPct, setSlPct] = useState(() => defaultStopLossPct(leg.leverage ?? 1));
-  const [tpPct, setTpPct] = useState(() => 2 * defaultStopLossPct(leg.leverage ?? 1));
+  const [slPct, setSlPct] = useState(() => leg.stopLossPct ?? defaultStopLossPct(leg.leverage ?? 1));
+  const [tpPct, setTpPct] = useState(() => leg.takeProfitPct ?? 2 * defaultStopLossPct(leg.leverage ?? 1));
 
   const recordedRef = useRef<string | null>(null);
   useEffect(() => {

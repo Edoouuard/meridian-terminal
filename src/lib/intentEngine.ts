@@ -34,6 +34,9 @@ export interface LLMLeg {
   to?: string;
   /** Exact token quantity the user gave ("0.5"). */
   sizeToken?: string;
+  /** Perp legs: stop-loss / take-profit in % of price from the entry. */
+  stopLossPct?: number;
+  takeProfitPct?: number;
 }
 
 export interface LLMStrategy {
@@ -148,6 +151,8 @@ function strategyToTradePlan(strategy: LLMStrategy): TradePlan & { riskTier: LLM
     fromAsset: typeof l.fromAsset === "string" && l.fromAsset.trim() ? l.fromAsset.trim() : undefined,
     to: typeof l.to === "string" && /^(0x[0-9a-fA-F]{40}|[\w-]+(\.[\w-]+)*\.eth)$/.test(l.to.trim()) ? l.to.trim() : undefined,
     sizeToken: typeof l.sizeToken === "string" && /^\d+(\.\d+)?$/.test(l.sizeToken.trim()) ? l.sizeToken.trim() : undefined,
+    stopLossPct: positiveNumber(l.stopLossPct),
+    takeProfitPct: positiveNumber(l.takeProfitPct),
   }));
 
   const intent = inferIntent(legs);
