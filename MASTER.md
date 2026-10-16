@@ -393,6 +393,7 @@ Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenis�
 
 | Date | Fait | Preuve |
 |---|---|---|
+| 2026-10-16 | Bug (test réel du propriétaire) : short ETH bloqué « needs ~$68.34 » avec 66 $ de marge déposée — l'ordre s'ajuste à la marge quand seul le tampon de frais manque, les plans déposent ce tampon ; l'étape dépôt ne se re-bloque plus une fois les fonds arrivés | tests `fitNotionalToMargin`, `strategyIntegrity` |
 | 2026-10-16 | Restaking liquide exécutable : Kelp rsETH / wrsETH, Renzo ezETH, ether.fi weETH par swap Uniswap sur Base et Arbitrum | `e2e/restaking.fork.test.ts` (Arbitrum), cotations live (Base), tests `protocols` |
 | 2026-10-16 | Bug : « short ETH levier 2, SL 20% » donnait du lending. Un ordre explicite (côté, marché, levier, SL/TP, taille) devient la stratégie 1, garanti côté serveur ; SL/TP pré-remplis sur le bouton perp | tests `explicitOrder` |
 | 2026-10-16 | Perps HIP-3 (actions, indices, matières premières) : résolution des marchés, identifiants d'actif, levier isolé, abstraction de dex, liste live dans le planner, positions et ordres dans le panneau | tests `hyperliquidExchange` (vecteurs SDK), `hyperliquidTrade` (HIP-3) |

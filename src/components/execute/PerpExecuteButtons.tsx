@@ -20,6 +20,7 @@ import { recordExecution } from "@/lib/history";
 import { NotWired, OrderRow } from "@/components/thread/shared";
 import {
   HL_MIN_ORDER_USD,
+  fitNotionalToMargin,
   fetchPerpAccount,
   fetchPerpContext,
   fundingAprForSide,
@@ -66,7 +67,7 @@ export function PerpExecuteButton({ leg, hedged = false }: { leg: TradeLeg; hedg
   const [moving, setMoving] = useState<string | null>(null);
 
   const symbol = (leg.asset || "").replace(/[-\s]?PERP$/i, "").trim().toUpperCase();
-  const sizeUsd = leg.sizeUsd && leg.sizeUsd > 0 ? leg.sizeUsd : 0;
+  const askedUsd = leg.sizeUsd && leg.sizeUsd > 0 ? leg.sizeUsd : 0;
   const side = (leg.side || "").toLowerCase();
   const isBuy = side.startsWith("long") || side === "buy";
 
@@ -77,14 +78,18 @@ export function PerpExecuteButton({ leg, hedged = false }: { leg: TradeLeg; hedg
     staleTime: 30_000,
   });
   const leverage = Math.min(Math.max(1, Math.round(leg.leverage ?? 1)), ctx.data?.maxLeverage ?? 50);
-  const needed = marginNeededUsd(sizeUsd, leverage);
+  const askedMargin = marginNeededUsd(askedUsd, leverage);
   const acct = useQuery({
     queryKey: ["hl-perp-acct", envName, address, symbol],
     queryFn: () => fetchPerpAccount(env, address as Address, symbol),
     enabled: !!address && !!symbol,
     // Poll while the margin isn't there yet (a deposit is landing) or a position just changed.
-    refetchInterval: (q) => ((q.state.data?.freeMargin ?? 0) < needed || status === "confirmed" ? 5000 : false),
+    refetchInterval: (q) => ((q.state.data?.freeMargin ?? 0) < askedMargin || status === "confirmed" ? 5000 : false),
   });
+  // A margin a few cents short of the asked size (fees buffer, rounding) opens the most it allows.
+  const fitted = acct.data ? fitNotionalToMargin(askedUsd, leverage, acct.data.freeMargin) : askedUsd;
+  const sizeUsd = fitted ?? askedUsd;
+  const needed = marginNeededUsd(sizeUsd, leverage);
   const [slPct, setSlPct] = useState(() => leg.stopLossPct ?? defaultStopLossPct(leg.leverage ?? 1));
   const [tpPct, setTpPct] = useState(() => leg.takeProfitPct ?? 2 * defaultStopLossPct(leg.leverage ?? 1));
 
@@ -112,7 +117,7 @@ export function PerpExecuteButton({ leg, hedged = false }: { leg: TradeLeg; hedg
     </button>
   );
 
-  if (!sizeUsd) return <NotWired venue="Hyperliquid" reason="This position came back without a size. Ask again with the amount you want." />;
+  if (!askedUsd) return <NotWired venue="Hyperliquid" reason="This position came back without a size. Ask again with the amount you want." />;
   if (!isConnected || !address || !chainId) return <p style={muted}>Connect a wallet to trade {symbol} on Hyperliquid.</p>;
   if (ctx.isLoading) return <p style={muted}>Reading the {symbol} market on Hyperliquid…</p>;
   const m = ctx.data;
@@ -141,6 +146,7 @@ export function PerpExecuteButton({ leg, hedged = false }: { leg: TradeLeg; hedg
         valueColor={!acct.isLoading && shortBy > 0 ? "var(--risk-bad, #c0392b)" : undefined}
       />
       {position !== 0 && <OrderRow label="Open now" value={`${position > 0 ? "Long" : "Short"} ${Math.abs(position)} ${m.coin}`} />}
+      {sizeUsd < askedUsd && <OrderRow label="Size" value={`${fmtUsd(sizeUsd)} — fitted to your margin (plan: ${fmtUsd(askedUsd)})`} />}
     </>
   );
 

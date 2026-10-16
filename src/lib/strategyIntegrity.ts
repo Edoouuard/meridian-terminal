@@ -229,7 +229,7 @@ export function fitHyperliquidDeposits(legs: LLMLeg[], ctx?: WalletContext): LLM
   if (!(have > 0)) return legs;
   const needed = legs
     .filter((l) => /^(long|short)$/i.test(l.side.trim()) && /hyperliquid/i.test(l.protocol))
-    .reduce((s, l) => s + (l.sizeUsd ?? 0) / Math.max(1, l.leverage ?? 1), 0);
+    .reduce((s, l) => s + ((l.sizeUsd ?? 0) * 1.03) / Math.max(1, l.leverage ?? 1), 0);
   const isDeposit = (l: LLMLeg) => /^deposit$/i.test(l.side.trim()) && /hyperliquid/i.test(l.protocol);
   if (!legs.some(isDeposit)) return legs;
   const missing = Math.ceil(needed - have);

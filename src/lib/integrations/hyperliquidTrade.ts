@@ -493,6 +493,19 @@ export function marginNeededUsd(sizeUsd: number, leverage: number | undefined): 
   return (sizeUsd / Math.max(1, leverage ?? 1)) * 1.02;
 }
 
+/**
+ * The notional an order can open with `freeMargin`: the asked size when the
+ * margin covers it (buffer included), else the most the margin allows when the
+ * shortfall is only the buffer or rounding (≤ 5% or $3) — the deposit landed,
+ * a few cents of fees shouldn't block it. Undefined: genuinely short of margin.
+ */
+export function fitNotionalToMargin(sizeUsd: number, leverage: number | undefined, freeMargin: number): number | undefined {
+  const needed = marginNeededUsd(sizeUsd, leverage);
+  if (freeMargin >= needed) return sizeUsd;
+  if (needed - freeMargin > Math.max(3, needed * 0.05)) return undefined;
+  return Math.floor(((freeMargin * Math.max(1, leverage ?? 1)) / 1.02) * 100) / 100;
+}
+
 /** Stop-loss and take-profit prices `pct`% away from the entry, on the losing / winning side. */
 export function protectionPrices(entry: number, isLong: boolean, p: { stopLossPct?: number; takeProfitPct?: number }): { sl?: number; tp?: number } {
   const away = (pct: number, up: boolean) => entry * (1 + ((up ? 1 : -1) * pct) / 100);

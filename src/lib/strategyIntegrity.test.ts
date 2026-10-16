@@ -160,7 +160,8 @@ describe("strategyIntegrity — the user's wallet", () => {
     const hl = (usd: number) => ({ assets: [{ symbol: "USDC", venue: "Hyperliquid perps", chain: "Hyperliquid L1", usd }] });
     expect(validateAndFixStrategy({ name: "ETH short", risk: "aggressive", variantNote: "", summary: "", legs: [deposit(24), short(24)] }, hl(30)).legs.map((l) => l.side)).toEqual(["Short"]);
     const topUp = validateAndFixStrategy({ name: "ETH short", risk: "aggressive", variantNote: "", summary: "", legs: [deposit(50), short(50)] }, hl(30)).legs;
-    expect(topUp[0]).toMatchObject({ side: "Deposit", sizeUsd: 20 });
+    // $50 of margin + 3% for the order's fees buffer, minus the $30 already there.
+    expect(topUp[0]).toMatchObject({ side: "Deposit", sizeUsd: 22 });
   });
 
   it("delivers USDC when a bridge would bring a token the destination doesn't track (BNB to Arbitrum)", () => {
