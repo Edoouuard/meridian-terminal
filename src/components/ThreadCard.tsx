@@ -101,28 +101,63 @@ const FIGURE_KIND: Record<"observed" | "calculated" | "assumption", string> = {
 
 const usd = (n: number) => `${n < 0 ? "−" : ""}$${Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: Math.abs(n) < 100 ? 2 : 0 })}`;
 
-/** The plan's economics, one meaning per line (lib/planner/schema.ts). */
+/** The plan's economics, one meaning per line (lib/planner/economics.ts); "—" where a figure is unknown. */
 function EconomicsBlock({ e }: { e: NonNullable<TradePlan["economics"]> }) {
-  const rows: [string, string][] = [["Capital committed", usd(e.capitalCommittedUsd)]];
-  if (e.notionalPerLegUsd !== undefined) rows.push(["Position per leg", usd(e.notionalPerLegUsd)]);
-  if (e.volumeUsd !== undefined) rows.push(["Volume per open + close", usd(e.volumeUsd)]);
-  if (e.annualizedGrossCarryUsd !== undefined) rows.push(["Carry per year at today's rates", usd(e.annualizedGrossCarryUsd)]);
-  if (e.entryExitCostUsd !== undefined) rows.push(["Fees to enter and exit", usd(e.entryExitCostUsd)]);
-  rows.push(["Holding period", `${e.holdingDays} days`]);
-  if (e.annualizedReturnOnCapitalPct !== undefined) rows.push(["Net return on capital (projection, per year)", `${e.annualizedReturnOnCapitalPct.toFixed(2)}%`]);
+  const v = (n: number | null | undefined) => (n === null || n === undefined ? "—" : usd(n));
+  const rows: [string, string][] = [
+    ["Capital committed (counted once)", v(e.capitalCommittedUsd)],
+  ];
+  if (e.capitalAvailableUsd !== undefined) rows.push(["Already on the venues", v(e.capitalAvailableUsd)]);
+  if (e.capitalToAddUsd !== undefined) rows.push(["Still to bring", v(e.capitalToAddUsd)]);
+  if (e.transferFeesUsd !== undefined) rows.push(["Transfer fees", e.transferFeesUsd === null ? "depends on the route" : usd(e.transferFeesUsd)]);
+  if (e.volumeUsd !== undefined) rows.push(["Volume per open + close", v(e.volumeUsd)]);
+  if (e.annualizedGrossCarryUsd !== undefined) rows.push(["Carry per year at today's rates", v(e.annualizedGrossCarryUsd)]);
+  if (e.entryExitCostUsd !== undefined) rows.push(["Fees to enter and exit", v(e.entryExitCostUsd)]);
+  rows.push(["Holding period (assumption)", `${e.holdingDays} days`]);
+  rows.push([
+    "Net return on capital (projection, per year)",
+    e.annualizedReturnOnCapitalPct === null ? `— (${e.returnUnavailableReason ?? "unknown"})` : `${e.annualizedReturnOnCapitalPct.toFixed(2)}%`,
+  ]);
   return (
     <div className="sdetail__block" style={{ marginBottom: "var(--space-3)" }}>
-      <h6>Economics</h6>
+      <h6>Economics{e.dataStatus === "stale" ? " · indicative (market data older than policy allows)" : ""}</h6>
       <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
         <tbody>
-          {rows.map(([k, v]) => (
+          {rows.map(([k, val]) => (
             <tr key={k}>
               <td className="text-muted" style={{ padding: "2px 0" }}>{k}</td>
-              <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{v}</td>
+              <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{val}</td>
             </tr>
           ))}
         </tbody>
       </table>
+      {e.legs && e.legs.length > 0 && (
+        <table style={{ width: "100%", fontSize: 11, borderCollapse: "collapse", marginTop: 6 }}>
+          <thead>
+            <tr className="text-muted">
+              <th style={{ textAlign: "left", fontWeight: 400 }}>Leg</th>
+              <th style={{ textAlign: "right", fontWeight: 400 }}>Qty</th>
+              <th style={{ textAlign: "right", fontWeight: 400 }}>Notional</th>
+              <th style={{ textAlign: "right", fontWeight: 400 }}>Carry/yr</th>
+            </tr>
+          </thead>
+          <tbody>
+            {e.legs.map((l) => (
+              <tr key={l.legIndex}>
+                <td>
+                  {l.side} {l.market} · {l.venue}
+                </td>
+                <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{l.baseQuantity ?? "—"}</td>
+                <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{v(l.notionalUsd)}</td>
+                <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                  {v(l.annualizedCarryUsd)} ({l.legCarryAnnualPct >= 0 ? "+" : ""}
+                  {l.legCarryAnnualPct.toFixed(2)}%)
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }
@@ -230,8 +265,10 @@ function StrategyDetail({ plan, isRecommended, single }: { plan: TradePlan; isRe
         <h6>{plan.legs.length > 1 ? `How it runs · ${plan.legs.length} steps` : "How it runs"}</h6>
         {plan.pair && (
           <p className="text-muted" style={{ fontSize: 12, margin: "0 0 var(--space-2)" }}>
-            Steps {plan.pair.legs[0] + 1} and {plan.pair.legs[1] + 1} form one neutral position, sized to the same quantity of the asset. It is neutral
-            only once both are filled: if the second fails, close the first (Risk → Perp positions) or retry it right away.
+            Steps {plan.pair.legs[0] + 1} and {plan.pair.legs[1] + 1} form one neutral position at the same quantity of the asset; it is neutral only once
+            both are filled.
+            {plan.execution &&
+              ` Send step ${plan.execution.sequence[0] + 1} first, then step ${plan.execution.sequence[1] + 1} (sized on what the first filled). ${plan.execution.orderType}. If the second hasn't filled within ${plan.execution.maxUnhedgedSeconds}s, the position is exposed: retry it or close the first (each needs your signature).`}
           </p>
         )}
         <StrategyLegs plan={plan} />

@@ -6,7 +6,7 @@
 
 import { HL_MIN_ORDER_USD } from "@/lib/integrations/hyperliquidTrade";
 import { HL_WITHDRAW_FEE_USD } from "@/lib/integrations/hyperliquidExchange";
-import { TAKER_FEE } from "@/lib/perpVenues";
+import { HL_SPOT_TAKER_FEE, TAKER_FEE } from "@/lib/perpVenues";
 
 export interface Capability {
   venue: string;
@@ -29,7 +29,7 @@ export const CAPABILITIES: Capability[] = [
     venue: "Hyperliquid",
     operation: "Spot buy / sell UETH, UBTC, USOL",
     requires: "USDC in the Hyperliquid account (buy) or the token (sell)",
-    constraints: `Minimum $${HL_MIN_ORDER_USD} per order. On a non-unified account, USDC moves between perps and spot with one signature.`,
+    constraints: `Minimum $${HL_MIN_ORDER_USD} per order. Taker fee ${pct(HL_SPOT_TAKER_FEE)} (base tier). On a non-unified account, USDC moves between perps and spot with one signature.`,
   },
   {
     venue: "Hyperliquid",

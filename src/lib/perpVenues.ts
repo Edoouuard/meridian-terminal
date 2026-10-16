@@ -10,6 +10,9 @@
 /** Taker fee per side (Hyperliquid base tier; Extended `DEFAULT_TAKER_FEE`), as a fraction of notional. */
 export const TAKER_FEE = { Hyperliquid: 0.00045, Extended: 0.0005 } as const;
 
+/** Hyperliquid spot taker fee (base tier), as a fraction of notional. */
+export const HL_SPOT_TAKER_FEE = 0.0007;
+
 const HOURS_PER_YEAR = 24 * 365;
 
 export interface ExtendedMarketRow {
@@ -22,6 +25,9 @@ export interface ExtendedMarketRow {
   fundingHourly: number;
   maxLeverage: number;
   dayVolumeUsd: number;
+  /** Quantity step and minimum quantity, in the base asset. */
+  sizeStep: number;
+  minQty: number;
 }
 
 /**
@@ -49,7 +55,7 @@ interface RawExtendedMarket {
   active?: boolean;
   status?: string;
   marketStats?: { markPrice?: string; fundingRate?: string; dailyVolume?: string };
-  tradingConfig?: { maxLeverage?: string };
+  tradingConfig?: { maxLeverage?: string; minOrderSizeChange?: string; minOrderSize?: string };
 }
 
 export function parseExtendedMarketRows(raw: RawExtendedMarket[] | undefined): ExtendedMarketRow[] {
@@ -67,6 +73,8 @@ export function parseExtendedMarketRows(raw: RawExtendedMarket[] | undefined): E
       fundingHourly: n(m.marketStats?.fundingRate),
       maxLeverage: n(m.tradingConfig?.maxLeverage) || 1,
       dayVolumeUsd: n(m.marketStats?.dailyVolume),
+      sizeStep: n(m.tradingConfig?.minOrderSizeChange),
+      minQty: n(m.tradingConfig?.minOrderSize),
     }))
     .sort((a, b) => b.dayVolumeUsd - a.dayVolumeUsd);
 }

@@ -38,6 +38,10 @@ export interface LLMStrategy {
   legs: LLMLeg[];
   /** What the validator changed to fit the wallet, shown with the plan. */
   fundingNotes?: string[];
+  apy?: number;
+  exit?: string;
+  fit?: string;
+  risks?: string[];
 }
 
 const NEUTRAL_KEYWORDS = /neutral|hedge|basis|cash\.and\.carry|funding.*harvest|no directional|market\.neutral/i;

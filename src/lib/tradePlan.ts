@@ -102,10 +102,12 @@ export interface TradePlan {
   figures?: Figure[];
   /** Two legs that must both fill for the position to be neutral. */
   pair?: { legs: [number, number]; sizing: "equal_base_quantity" };
+  /** How the pair is sent (execution policy). */
+  execution?: PairExecution;
 }
 
 import type { PlannerClarify } from "@/lib/planner/clarify";
-import type { Economics, Figure } from "@/lib/planner/schema";
+import type { Economics, Figure, PairExecution } from "@/lib/planner/schema";
 
 /** Augment ThreadItem with an optional parsed plan (keeps data.ts untouched). */
 declare module "@/lib/data" {

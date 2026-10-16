@@ -63,6 +63,7 @@ export interface LLMStrategy {
   economics?: TradePlan["economics"];
   figures?: TradePlan["figures"];
   pair?: TradePlan["pair"];
+  execution?: TradePlan["execution"];
 }
 
 export interface ParseIntentResponse {
@@ -198,11 +199,12 @@ function strategyToTradePlan(strategy: LLMStrategy): TradePlan & { riskTier: LLM
     changes: cleanList(strategy.changes),
     status: strategy.status === "blocked" || strategy.status === "executable" ? strategy.status : undefined,
     blockers: cleanList(strategy.blockers),
-    economics: strategy.economics && typeof strategy.economics.capitalCommittedUsd === "number" ? strategy.economics : undefined,
+    economics: strategy.economics && typeof strategy.economics.holdingDays === "number" ? strategy.economics : undefined,
     figures: Array.isArray(strategy.figures)
       ? strategy.figures.filter((f) => f && typeof f.label === "string" && typeof f.value === "string" && ["observed", "calculated", "assumption"].includes(f.kind)).slice(0, 10)
       : undefined,
     pair: strategy.pair,
+    execution: strategy.execution,
   };
 }
 

@@ -1,4 +1,5 @@
-import { crossVenueFunding, crossVenueSummary, extendedSummary, parseExtendedMarketRows, type ExtendedMarketRow } from "@/lib/perpVenues";
+import { crossVenueFunding, crossVenueSummary, extendedSummary, marketBase, parseExtendedMarketRows, type ExtendedMarketRow } from "@/lib/perpVenues";
+import { extendedQuote, hlQuote, type MarketQuote, type MarketSnapshot } from "@/lib/planner/markets";
 import { EXTENDED_HOSTS } from "@/lib/integrations/extendedProxy";
 import { NextResponse } from "next/server";
 import { parseOpportunities, type Opportunity } from "@/lib/protocols/opportunities";
@@ -65,6 +66,10 @@ interface FundingRow {
   coin: string;
   hourlyRate: number;
   annualizedPct: number;
+  markUsd: number;
+  szDecimals: number;
+  maxLeverage: number;
+  dayVolumeUsd: number;
 }
 
 interface VaultYield {
@@ -261,6 +266,10 @@ async function fetchFundingRates(): Promise<FundingRow[]> {
         coin: name,
         hourlyRate: funding,
         annualizedPct: funding * 24 * 365 * 100,
+        markUsd: Number(ctxs[i]?.markPx ?? 0),
+        szDecimals: Number(universe[i]?.szDecimals ?? 0),
+        maxLeverage: Number(universe[i]?.maxLeverage ?? 1),
+        dayVolumeUsd: Number(ctxs[i]?.dayNtlVlm ?? 0),
       });
     }
     // Return ALL coins sorted by absolute annualized rate
@@ -535,6 +544,8 @@ function carryRows(perChain: { chainId: number; reserves: AaveReserve[] }[], poo
 interface Hip3Market {
   coin: string;
   mark: number;
+  fundingHourly: number;
+  szDecimals: number;
   fundingAnnualizedPct: number;
   maxLeverage: number;
   dayVolumeUsd: number;
@@ -560,7 +571,7 @@ async function fetchHip3Markets(): Promise<Hip3Market[]> {
       dexes.map(async (dex) => {
         try {
           const [meta, ctxs] = (await post({ type: "metaAndAssetCtxs", dex })) as [
-            { collateralToken?: number; universe?: { name: string; maxLeverage: number; onlyIsolated?: boolean; isDelisted?: boolean }[] },
+            { collateralToken?: number; universe?: { name: string; maxLeverage: number; szDecimals?: number; onlyIsolated?: boolean; isDelisted?: boolean }[] },
             { markPx?: string; funding?: string; dayNtlVlm?: string }[],
           ];
           if ((meta.collateralToken ?? 0) !== 0) return [];
@@ -571,6 +582,8 @@ async function fetchHip3Markets(): Promise<Hip3Market[]> {
               {
                 coin: u.name,
                 mark,
+                fundingHourly: Number(ctxs[i]?.funding ?? 0),
+                szDecimals: u.szDecimals ?? 0,
                 fundingAnnualizedPct: Number(ctxs[i]?.funding ?? 0) * 24 * 365 * 100,
                 maxLeverage: u.maxLeverage,
                 dayVolumeUsd: Number(ctxs[i]?.dayNtlVlm ?? 0),
@@ -621,11 +634,43 @@ async function fetchExtendedMarkets(): Promise<ExtendedMarketRow[]> {
   }
 }
 
+/* ---------- Hyperliquid spot (UETH, UBTC, USOL) ---------- */
+
+async function fetchHlSpotQuotes(): Promise<MarketQuote[]> {
+  try {
+    const res = await fetch(HYPERLIQUID_INFO, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "spotMetaAndAssetCtxs" }),
+      signal: AbortSignal.timeout(TIMEOUT),
+      cache: "no-store",
+    });
+    if (!res.ok) return [];
+    const [meta, ctxs] = (await res.json()) as [
+      { tokens: { name: string; index: number; szDecimals: number }[]; universe: { name: string; tokens: [number, number]; index: number }[] },
+      { coin?: string; markPx?: string; dayNtlVlm?: string }[],
+    ];
+    const usdc = meta.tokens.find((t) => t.name === "USDC")?.index;
+    const out: MarketQuote[] = [];
+    for (const [token, base] of [["UETH", "ETH"], ["UBTC", "BTC"], ["USOL", "SOL"]] as const) {
+      const t = meta.tokens.find((x) => x.name === token);
+      const pair = t && meta.universe.find((u) => u.tokens[0] === t.index && u.tokens[1] === usdc);
+      const ctx = pair && ctxs.find((c) => c.coin === pair.name);
+      const mark = Number(ctx?.markPx ?? 0);
+      if (!t || !pair || !(mark > 0)) continue;
+      out.push(hlQuote({ kind: "spot", market: token, base, markUsd: mark, fundingHourly: 0, szDecimals: t.szDecimals, maxLeverage: 1, dayVolumeUsd: Number(ctx?.dayNtlVlm ?? 0) }));
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
 /* ---------- Handler ---------- */
 
 export async function GET() {
   // Fetch ALL sources in parallel — each is independently null-safe
-  const [defiLlama, funding, hlp, lighterVaults, philidor, aaveReserves, haikuYields, pendleMarkets, morphoVaults, hip3, extended] = await Promise.all([
+  const [defiLlama, funding, hlp, lighterVaults, philidor, aaveReserves, haikuYields, pendleMarkets, morphoVaults, hip3, extended, hlSpot] = await Promise.all([
     fetchDefiLlama(),
     fetchFundingRates(),
     fetchHlpVault(),
@@ -637,6 +682,7 @@ export async function GET() {
     fetchMorphoExecutableVaults(),
     fetchHip3Markets(),
     fetchExtendedMarkets(),
+    fetchHlSpotQuotes(),
   ]);
 
   const vaults: VaultYield[] = [
@@ -703,5 +749,20 @@ export async function GET() {
     ) +
     (aaveMcp ? `\n${aaveMcp}` : "");
 
-  return NextResponse.json(ctx);
+  // Structured quotes for the server checks of the planner (lib/planner/markets.ts).
+  const markets: MarketSnapshot = {
+    fetchedAt: ctx.fetchedAt,
+    quotes: [
+      ...funding
+        .filter((f) => f.markUsd > 0)
+        .map((f) => hlQuote({ market: f.coin, base: marketBase(f.coin), markUsd: f.markUsd, fundingHourly: f.hourlyRate, szDecimals: f.szDecimals, maxLeverage: f.maxLeverage, dayVolumeUsd: f.dayVolumeUsd })),
+      ...hip3.map((m) => hlQuote({ market: m.coin, base: marketBase(m.coin), markUsd: m.mark, fundingHourly: m.fundingHourly, szDecimals: m.szDecimals, maxLeverage: m.maxLeverage, dayVolumeUsd: m.dayVolumeUsd })),
+      ...hlSpot,
+      ...extended
+        .filter((m) => m.sizeStep > 0)
+        .map((m) => extendedQuote({ market: m.name, base: m.base, markUsd: m.mark, fundingHourly: m.fundingHourly, sizeStep: m.sizeStep, minQty: m.minQty, maxLeverage: m.maxLeverage, dayVolumeUsd: m.dayVolumeUsd })),
+    ],
+  };
+
+  return NextResponse.json({ ...ctx, markets });
 }

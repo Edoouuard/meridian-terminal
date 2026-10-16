@@ -9,7 +9,10 @@ import { cleanClarify } from "@/lib/planner/clarify";
 import { capabilitiesSection } from "@/lib/planner/capabilities";
 import { policySection } from "@/lib/planner/policy";
 import { enforceConformance, namedVenues, type Objective } from "@/lib/planner/schema";
-import { dropBelowMinimum, hyperliquidMarginUsd, validateAndFixStrategy } from "@/lib/strategyIntegrity";
+import type { VenueBalances } from "@/lib/planner/economics";
+import type { MarketSnapshot } from "@/lib/planner/markets";
+import { EXPLAIN_SYSTEM, explainPayload, mergeExplanations, type Explanation } from "@/lib/planner/explain";
+import { hyperliquidMarginUsd, validateAndFixStrategy } from "@/lib/strategyIntegrity";
 
 const OBJECTIVES = new Set(["explicit_order", "farming", "neutral_carry", "yield", "hedge", "directional", "move"]);
 
@@ -254,11 +257,9 @@ Build (1 to 3 plans):
       "risks": ["Short risk 1", "Short risk 2"],
       "variantNote": "The single most important caveat",
       "summary": "What it does, the figures that justify it now, the yearly result in dollars as a projection.",
-      "economics": { "capitalCommittedUsd": 66, "notionalPerLegUsd": 31, "volumeUsd": 124, "annualizedGrossCarryUsd": 3.4, "entryExitCostUsd": 0.12, "holdingDays": 30 },
+      "economics": null,
       "figures": [
-        { "label": "ETH funding (Hyperliquid)", "value": "+11.0%/yr", "kind": "observed", "source": "Perp Funding Rates: ETH" },
-        { "label": "Notional per leg", "value": "$31", "kind": "calculated", "source": "66 × 1/(1+1) × (1 − 3% buffer), rounded" },
-        { "label": "Holding period", "value": "30 days", "kind": "assumption", "source": "sizing policy default (carry)" }
+        { "label": "ETH funding (Hyperliquid)", "value": "+11.0%/yr", "kind": "observed", "source": "Perp Funding Rates: ETH" }
       ],
       "legs": [
         { "side": "Buy", "asset": "UETH", "protocol": "Hyperliquid", "chain": "Arbitrum", "sizeUsd": 31, "note": "…" }
@@ -270,15 +271,16 @@ Build (1 to 3 plans):
 Field rules:
 - "kind": "requested" when every hard constraint is met, else "alternative" with every change in "changes" ("venue: Extended → Hyperliquid"). The server re-checks this against the request and reclassifies a plan that breaks a constraint.
 - "status": "blocked" when something prevents execution now, with each reason in "blockers"; the server also blocks Extended legs from the Extended account state.
-- "economics": fill it for any plan with a carry, a yield or fees worth stating (doctrine section 4). Don't fill "annualizedReturnOnCapitalPct": the server computes it.
-- "figures": the key numbers, each "observed", "calculated" or "assumption" with its source or formula.
+- "economics": leave it null for plans on Hyperliquid / Extended: the server sizes and prices them leg by leg from the market data. For spot DeFi plans, give { "capitalCommittedUsd", "annualizedGrossCarryUsd", "entryExitCostUsd", "holdingDays" } from the data; null where unknown. Never "annualizedReturnOnCapitalPct": the server computes it.
+- "sizeUsd": the USD size you intend per leg; the server converts it to a base quantity valid on the market (both markets for a pair). Unknown free amount → null (the plan is blocked).
+- "figures": the key observed numbers with their source. The server replaces them for venue plans.
 - "apy": blended expected APY in percent from the live data, for yield plans only; omit it for directional trades and pairs (use "economics").
 - "exit": how and how fast the user gets their money back: "Instant", "~1-5 days (Lido withdrawal queue)", "Locked until 26 Mar 2027 (or sell PT at market)".
 - "risks": 2 to 4 short items, specific to the plan. No generic filler.
 - Don't set "recommended": the server recommends the best executable requested plan.`;
 
-/** Fetch live yield context from our own aggregator route (server-side internal call). */
-async function fetchYieldContext(baseUrl: string, cookie: string | null): Promise<string> {
+/** Fetch live yield context from our own aggregator route (server-side internal call): the text for the model, the quotes for the checks. */
+async function fetchYieldContext(baseUrl: string, cookie: string | null): Promise<{ summary: string; markets?: MarketSnapshot }> {
   try {
     const res = await fetch(`${baseUrl}/api/yield-context`, {
       signal: AbortSignal.timeout(10000),
@@ -288,13 +290,42 @@ async function fetchYieldContext(baseUrl: string, cookie: string | null): Promis
     });
     if (!res.ok) {
       console.error("[parse-intent] yield-context failed:", res.status);
-      return "";
+      return { summary: "" };
     }
     const data = await res.json();
-    return data.summary ?? "";
+    const markets = data.markets && Array.isArray(data.markets.quotes) && data.markets.quotes.length > 0 ? (data.markets as MarketSnapshot) : undefined;
+    return { summary: data.summary ?? "", markets };
   } catch {
-    return "";
+    return { summary: "" };
   }
+}
+
+/** One chat completion as JSON text; throws on a transport or HTTP error. */
+async function complete(apiKey: string, model: string, messages: { role: string; content: string }[], maxTokens: number, timeoutMs: number): Promise<string> {
+  const response = await fetch(OPENROUTER_URL, {
+    method: "POST",
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "https://meridian-terminal.vercel.app",
+      "X-Title": "Meridian Terminal",
+    },
+    body: JSON.stringify({ model, max_tokens: maxTokens, temperature: 0.3, messages }),
+  });
+  if (!response.ok) {
+    const errText = await response.text().catch(() => "");
+    throw Object.assign(new Error(`OpenRouter error ${response.status}`), { status: response.status, detail: errText.slice(0, 500) });
+  }
+  const completion = await response.json();
+  return completion.choices?.[0]?.message?.content ?? "";
+}
+
+function extractJson(text: string): unknown {
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  const raw = fenced ? fenced[1] : text;
+  const m = raw.match(/\{[\s\S]*\}/);
+  return m ? JSON.parse(m[0]) : null;
 }
 
 /** What the planner may do on Extended, from the user's Extended account state. */
@@ -398,8 +429,10 @@ interface PortfolioSnapshot {
 export const maxDuration = 60;
 
 const MAX_THESIS_CHARS = 2000;
-/** Past this the tester has waited too long: fail and let the client fall back to local rules. */
-const PLANNER_TIMEOUT_MS = 50_000;
+/** Proposal pass; with the explain pass after it, the whole call stays under maxDuration. */
+const PROPOSE_TIMEOUT_MS = 34_000;
+/** Explain pass: past this the deterministic summaries are used. */
+const EXPLAIN_TIMEOUT_MS = 15_000;
 
 export async function POST(req: NextRequest) {
   try {
@@ -431,7 +464,7 @@ export async function POST(req: NextRequest) {
     // Build the user message with live yield data + portfolio injected
     const sections: string[] = [];
     if (portfolioContext) sections.push(portfolioContext);
-    if (yieldContext) sections.push(yieldContext);
+    if (yieldContext.summary) sections.push(yieldContext.summary);
     else sections.push("## LIVE DATA UNAVAILABLE\nThe live rates could not be loaded for this request. Do not quote any APY or rate: omit \"apy\", and say in each summary that rates will be shown live before signing.");
     sections.push(`User thesis: ${thesis.trim()}`);
     if (clarified) {
@@ -441,55 +474,38 @@ export async function POST(req: NextRequest) {
     }
     const userMessage = sections.join("\n\n---\n\n");
 
-    const response = await fetch(OPENROUTER_URL, {
-      method: "POST",
-      signal: AbortSignal.timeout(PLANNER_TIMEOUT_MS),
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://meridian-terminal.vercel.app",
-        "X-Title": "Meridian Terminal",
-      },
-      body: JSON.stringify({
+    // Pipeline step 1: the model reads the data and proposes structures (or one question).
+    let text: string;
+    try {
+      text = await complete(
+        apiKey,
         model,
-        max_tokens: 4096,
-        temperature: 0.4,
-        messages: [
-          {
-            role: "system",
-            content: [strategistDoctrine(), capabilitiesSection(), policySection(), FEATURES.perps ? SYSTEM_PROMPT : SYSTEM_PROMPT + PERPS_DISABLED_NOTE].join("\n\n---\n\n"),
-          },
+        [
+          { role: "system", content: [strategistDoctrine(), capabilitiesSection(), policySection(), FEATURES.perps ? SYSTEM_PROMPT : SYSTEM_PROMPT + PERPS_DISABLED_NOTE].join("\n\n---\n\n") },
           { role: "user", content: userMessage },
         ],
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text().catch(() => "");
-      console.error(`[parse-intent] OpenRouter ${response.status}:`, errText.slice(0, 500));
-      return NextResponse.json(
-        { error: `OpenRouter error ${response.status}` },
-        { status: 502 },
+        4096,
+        PROPOSE_TIMEOUT_MS,
       );
+    } catch (err) {
+      const e = err as Error & { status?: number; detail?: string };
+      console.error(`[parse-intent] propose failed:`, e.message, e.detail ?? "");
+      return NextResponse.json({ error: e.status ? `OpenRouter error ${e.status}` : e.message }, { status: 502 });
     }
-
-    const completion = await response.json();
-    const text: string = completion.choices?.[0]?.message?.content ?? "";
-
     if (!text) {
       return NextResponse.json({ error: "Empty response from model" }, { status: 500 });
     }
-
-    // Extract JSON — handle bare JSON or wrapped in code fences
-    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-    const raw = fenced ? fenced[1] : text;
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let parsed: any;
+    try {
+      parsed = extractJson(text);
+    } catch {
+      parsed = null;
+    }
+    if (!parsed || typeof parsed !== "object") {
       console.error("[parse-intent] no JSON in response:", text.slice(0, 500));
       return NextResponse.json({ error: "Failed to parse model response" }, { status: 500 });
     }
-
-    const parsed = JSON.parse(jsonMatch[0]);
     // An explicit order ("short ETH 2x, SL 20%") is strategy 1, whatever the model proposed.
     const explicit = FEATURES.perps ? parseExplicitPerpOrder(thesis) : null;
     if (!Array.isArray(parsed.strategies)) parsed.strategies = [];
@@ -511,22 +527,60 @@ export async function POST(req: NextRequest) {
     const snapshot = portfolio as PortfolioSnapshot | undefined;
     const wallet = { assets: snapshot?.assets };
     let strategies = enforceExplicitOrder(parsed.strategies, explicit, wallet.assets, snapshot?.extended?.availableUsd);
-    strategies = dropBelowMinimum(
-      strategies.map((st: Parameters<typeof validateAndFixStrategy>[0]) => validateAndFixStrategy(st, wallet)),
-      explicit !== null,
-    );
+    strategies = strategies.map((st: Parameters<typeof validateAndFixStrategy>[0]) => validateAndFixStrategy(st, wallet));
     const objective = OBJECTIVES.has(parsed.objective) ? (parsed.objective as Objective) : explicit ? "explicit_order" : undefined;
-    const conformance = enforceConformance(strategies, objective, { order: explicit, namedVenues: namedVenues(thesis), extended: snapshot?.extended });
+
+    // Steps 2-3: the server validates (capabilities, sizing, economics from
+    // the market quotes and the balances) and ranks. A balance the client
+    // didn't read is unknown (null), never zero.
+    const ext = snapshot?.extended;
+    const balances: VenueBalances = {
+      hyperliquidFreeUsd: snapshot?.hyperliquid ? snapshot.hyperliquid.freeMarginUsd : null,
+      extendedFreeUsd: ext?.connected ? (ext.availableUsd ?? null) : 0,
+      walletDeployableUsd: snapshot?.assets?.length ? deployableUsd(snapshot.assets) : 0,
+    };
+    const conformance = enforceConformance(strategies, objective, {
+      order: explicit,
+      namedVenues: namedVenues(thesis),
+      extended: ext,
+      markets: yieldContext.markets,
+      balances,
+      now: Date.now(),
+    });
     if (conformance.notes.length) console.info("[parse-intent] conformance:", conformance.notes.join(" | "));
     if (conformance.strategies.length === 0) {
       return NextResponse.json({ error: "No plan met the request's constraints" }, { status: 500 });
     }
 
+    // Step 4: the model explains the validated plans without changing them.
+    // Text with a number the plan doesn't contain is replaced by a template.
+    let understanding: string = typeof parsed.understanding === "string" ? parsed.understanding : "";
+    let explanations: Explanation[] | undefined;
+    try {
+      const explainText = await complete(
+        apiKey,
+        model,
+        [
+          { role: "system", content: EXPLAIN_SYSTEM },
+          { role: "user", content: JSON.stringify(explainPayload(thesis.trim(), understanding, conformance.strategies, conformance.recommended)) },
+        ],
+        2048,
+        EXPLAIN_TIMEOUT_MS,
+      );
+      const x = extractJson(explainText) as { understanding?: unknown; plans?: unknown } | null;
+      if (x && Array.isArray(x.plans)) explanations = x.plans as Explanation[];
+      if (x && typeof x.understanding === "string" && x.understanding.trim()) understanding = x.understanding.trim();
+    } catch (err) {
+      console.error("[parse-intent] explain failed, using templates:", err instanceof Error ? err.message : err);
+    }
+    const merged = mergeExplanations(conformance.strategies, explanations, thesis);
+    if (merged.rejected.length) console.info("[parse-intent] explanations replaced by templates (ungrounded numbers):", merged.rejected.join(", "));
+
     return NextResponse.json({
       decision: "build",
       objective,
-      understanding: parsed.understanding,
-      strategies: conformance.strategies,
+      understanding,
+      strategies: merged.plans,
       recommended: conformance.recommended,
     });
   } catch (err: unknown) {
