@@ -27,7 +27,9 @@ const OBJECTIVES = new Set(["explicit_order", "farming", "neutral_carry", "yield
  *
  * OpenRouter lets us pick the best model per cost/quality tradeoff:
  *   - Default: google/gemini-2.5-flash (fast, cheap, good at structured JSON)
- *   - Can be overridden via OPENROUTER_MODEL env var
+ *   - Can be overridden via OPENROUTER_MODEL env var (the proposal pass)
+ *   - OPENROUTER_EXPLAIN_MODEL sets the explain pass (defaults to OPENROUTER_MODEL):
+ *     a strong model can propose while a fast one writes the text
  */
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
@@ -453,6 +455,7 @@ export async function POST(req: NextRequest) {
     }
 
     const model = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
+    const explainModel = process.env.OPENROUTER_EXPLAIN_MODEL || model;
 
     // Fetch live yield data in parallel with nothing else — it's the only async dep
     const proto = req.headers.get("x-forwarded-proto") ?? "https";
@@ -559,7 +562,7 @@ export async function POST(req: NextRequest) {
     try {
       const explainText = await complete(
         apiKey,
-        model,
+        explainModel,
         [
           { role: "system", content: EXPLAIN_SYSTEM },
           { role: "user", content: JSON.stringify(explainPayload(thesis.trim(), understanding, conformance.strategies, conformance.recommended)) },
