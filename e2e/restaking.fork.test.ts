@@ -7,7 +7,7 @@
  * Needs anvil forks at ANVIL_URL (Base) and ANVIL_ARB_URL (Arbitrum); skipped without them.
  */
 import { describe, expect, it } from "vitest";
-import { createPublicClient, createWalletClient, http, parseEther, type Address, type Chain } from "viem";
+import { createPublicClient, createTestClient, createWalletClient, http, keccak256, parseEther, toHex, type Address, type Chain } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arbitrum, base } from "viem/chains";
 import { ERC20_ABI } from "@/lib/onchain";
@@ -16,8 +16,9 @@ import { QUOTER_V2_QUOTE_READ_ABI, QUOTE_FEE_TIERS, UNISWAP_QUOTER_V2_BY_CHAIN, 
 import type { Order } from "@/lib/execution";
 import { executePreparedOrder, prepareOrder, type OrderRunnerClient, type OrderRunnerDeps, type WriteAsync } from "@/lib/orderRunner";
 
-// anvil's default account #3 (local test key, no real funds): its own nonces, apart from the other fork tests.
-const account = privateKeyToAccount("0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6");
+// A fresh key with no history on any chain (anvil's default accounts carry real activity, even delegated
+// code, on live L2s that a fork replays), funded on the fork itself. Never holds real funds.
+const account = privateKeyToAccount(keccak256(toHex("meridian:e2e:restaking")));
 const WETH_DEPOSIT_ABI = [{ type: "function", name: "deposit", stateMutability: "payable", inputs: [], outputs: [] }] as const;
 
 function withoutChainId(args: Record<string, unknown>): Record<string, unknown> {
@@ -30,6 +31,8 @@ function kit(url: string, chain: Chain) {
   const transport = http(url);
   const publicClient = createPublicClient({ chain, transport });
   const walletClient = createWalletClient({ chain, transport, account });
+  const testClient = createTestClient({ chain, mode: "anvil", transport });
+  let funded = false;
   const deps = (): OrderRunnerDeps => ({
     address: account.address,
     connectedChainId: chain.id,
@@ -45,6 +48,10 @@ function kit(url: string, chain: Chain) {
     const out = findToken(symbol, chain.id);
     expect(out, `${symbol} isn't tracked on ${chain.name}`).toBeTruthy();
     const amount = parseEther("0.1");
+    if (!funded) {
+      await testClient.setBalance({ address: account.address, value: parseEther("10") });
+      funded = true;
+    }
     const hash = await walletClient.writeContract({ address: weth.address as Address, abi: WETH_DEPOSIT_ABI, functionName: "deposit", value: amount });
     await publicClient.waitForTransactionReceipt({ hash });
 
