@@ -35,12 +35,12 @@ export function isPerpRequest(text: string): boolean {
   return /\b(long|short|levier|leverage|lev|\d+\s*x|x\s*\d+|neutral|neutre|perps?|hyperliquid|extended|funding|volume|farm\w*)\b/i.test(text);
 }
 
-const looksFrench = (text: string) => /\b(en|le|la|les|du|des|et|sur|entre|mon|ma|mes|levier|neutre|avec|pour)\b/i.test(text);
+export const looksFrench = (text: string) => /\b(en|le|la|les|du|des|et|sur|entre|mon|ma|mes|levier|neutre|avec|pour)\b/i.test(text);
 
 export interface SizeQuestionInput {
   thesis: string;
-  /** The user just answered a question: never ask again, size with the policy instead. */
-  clarified: boolean;
+  /** The question the user just answered: this one is never asked twice (their answer stands, or the policy's share). */
+  answeredQuestion?: string;
   hyperliquidFreeUsd?: number | null;
   extendedFreeUsd?: number | null;
 }
@@ -51,7 +51,8 @@ export interface SizeQuestionInput {
  * dollars or as a share), isn't a perp trade, or no venue balance is known.
  */
 export function sizeQuestion(i: SizeQuestionInput): { understanding: string; clarify: PlannerClarify } | null {
-  if (i.clarified || !isPerpRequest(i.thesis)) return null;
+  if (i.answeredQuestion && /capital/i.test(i.answeredQuestion)) return null;
+  if (!isPerpRequest(i.thesis)) return null;
   if (parseAmount(i.thesis) !== undefined || capitalShare(i.thesis) !== undefined) return null;
   const known = [
     typeof i.hyperliquidFreeUsd === "number" ? { venue: "Hyperliquid", usd: i.hyperliquidFreeUsd } : null,

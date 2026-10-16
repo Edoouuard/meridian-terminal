@@ -18,7 +18,7 @@ describe("capital share", () => {
 });
 
 describe("size question", () => {
-  const base = { clarified: false, hyperliquidFreeUsd: 21.79, extendedFreeUsd: 21 };
+  const base = { hyperliquidFreeUsd: 21.79, extendedFreeUsd: 21 };
   it("asks how much capital to use for a perp request with no size, in the user's language", () => {
     const q = sizeQuestion({ ...base, thesis: "beta neutral en SPCX leverage 10" });
     expect(q?.clarify.question).toMatch(/capital disponible/);
@@ -30,9 +30,10 @@ describe("size question", () => {
   it("doesn't ask when the size is given, after an answer, or for a non-perp request", () => {
     expect(sizeQuestion({ ...base, thesis: "long ETH 5x with $50" })).toBeNull();
     expect(sizeQuestion({ ...base, thesis: "beta neutral SPCX — 25% of my available capital" })).toBeNull();
-    expect(sizeQuestion({ ...base, thesis: "beta neutral SPCX", clarified: true })).toBeNull();
+    expect(sizeQuestion({ ...base, thesis: "beta neutral SPCX", answeredQuestion: "How much of your available capital should this use?" })).toBeNull();
+    expect(sizeQuestion({ ...base, thesis: "beta neutral SPCX entre HL et Extended — SPCX", answeredQuestion: "Sur quel actif ouvrir la position neutre ?" })).not.toBeNull();
     expect(sizeQuestion({ ...base, thesis: "best stablecoin yield on Base" })).toBeNull();
-    expect(sizeQuestion({ clarified: false, thesis: "long ETH 3x", hyperliquidFreeUsd: null, extendedFreeUsd: null })).toBeNull();
+    expect(sizeQuestion({ thesis: "long ETH 3x", hyperliquidFreeUsd: null, extendedFreeUsd: null })).toBeNull();
   });
 });
 
