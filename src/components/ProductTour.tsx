@@ -2,31 +2,65 @@
 
 import { useCallback, useEffect, useLayoutEffect, useState } from "react";
 import { useAccount } from "wagmi";
+import { FEATURES } from "@/lib/features";
+import { askMeridian } from "@/lib/askBus";
 
-export const TOUR_DONE_KEY = "meridian:tourDone";
+/** Bumped when the tour gains steps, so testers who finished the old one see the new one once. */
+export const TOUR_DONE_KEY = "meridian:tourDone:v2";
 const START_EVENT = "meridian:start-tour";
+/** The page opens this side tab when a step points inside it (detail: tab id). */
+export const TOUR_OPEN_TAB_EVENT = "meridian:tour-open-tab";
+
+export interface TourPrompt {
+  label: string;
+  prompt: string;
+  /** Needs perps enabled. */
+  perps?: boolean;
+}
 
 interface TourStep {
   /** data-tour anchor; none = a centred card. */
   target?: string;
   title: string;
   body: string;
+  /** Side tab to open before highlighting the target. */
+  tab?: "risk" | "strategies" | "venues" | "activity";
+  /** Prompts the user can send straight from the card. */
+  prompts?: TourPrompt[];
+  /** Only shown when perps are enabled. */
+  perps?: boolean;
 }
 
-export const TOUR_STEPS: TourStep[] = [
+/** Prompts that work end to end today, one per use case. */
+export const TOUR_PROMPTS: TourPrompt[] = [
+  { label: "Earn on stablecoins", prompt: "Best yield for my USDC, no lock-up" },
+  { label: "Stake ETH", prompt: "Stake my ETH with the best liquid staking rate" },
+  { label: "Fixed rate", prompt: "Lock a fixed rate on my USDC with Pendle" },
+  { label: "Trade a perp", prompt: "Short ETH 2x on Hyperliquid, stop-loss 20%", perps: true },
+  { label: "Stocks on Extended", prompt: "Short AMD on Extended", perps: true },
+  { label: "Neutral across venues", prompt: "Beta-neutral ETH between Extended and Hyperliquid to farm volume", perps: true },
+  { label: "Hedge", prompt: "Hedge my ETH exposure without selling it", perps: true },
+];
+
+const ALL_STEPS: TourStep[] = [
   {
     title: "Welcome to Meridian",
-    body: "Your wallet is connected. In under a minute, here is how to go from an idea to a position that earns — every step signed by you, nothing moves without your approval.",
+    body: "Your wallet is connected. In under a minute, here is how to go from an idea to a position — every step signed by you, nothing moves without your approval.",
   },
   {
     target: "portfolio",
     title: "Your portfolio, live",
-    body: "Balances across 8 chains, your lending, staking and Hyperliquid account, valued at live prices. It refreshes on its own after each transaction.",
+    body: "Balances across 8 chains, your lending, staking, Hyperliquid and Extended accounts, valued at live prices. It refreshes on its own after each transaction.",
   },
   {
     target: "composer",
     title: "Ask in plain words",
-    body: "“Best yield for my 5,000 USDC”, “stake my ETH”, “lock a fixed rate”. Meridian reads live rates and proposes a few strategies, sized to what your wallet really holds.",
+    body: "Meridian reads live rates, funding and your balances, then proposes plans sized to what you really hold. If your request is ambiguous it asks one question. A plan it can't run yet says what blocks it; anything that changes your request is labelled as an alternative.",
+  },
+  {
+    title: "Try a use case",
+    body: "Pick one to send it now, or type your own. Numbers are computed from live market data, and you review every order before signing.",
+    prompts: TOUR_PROMPTS,
   },
   {
     target: "markets",
@@ -34,9 +68,16 @@ export const TOUR_STEPS: TourStep[] = [
     body: "Yields by asset, chain overview and alpha. Every row has an “Ask Meridian” button that turns it into a strategy.",
   },
   {
+    target: "extended",
+    tab: "venues",
+    perps: true,
+    title: "Trade on Extended",
+    body: "Stocks, indices and crypto perps on Extended. Connect with three wallet signatures (no keys to paste), deposit USDC on extended.exchange, then ask Meridian: it compares funding with Hyperliquid and builds pairs across both venues.",
+  },
+  {
     target: "tabs",
-    title: "Risk, strategies, history",
-    body: "Check your risk, follow every strategy you put to work (rate today vs entry, earnings so far) and find every transaction in History.",
+    title: "Risk, strategies, tools, history",
+    body: "Perp positions on Hyperliquid and Extended with PnL, funding and liquidation distance; every strategy you put to work (a pair with one leg filled is flagged); bridges and venue connections in Tools; every transaction in History.",
   },
   {
     target: "status",
@@ -44,6 +85,13 @@ export const TOUR_STEPS: TourStep[] = [
     body: "Each transaction shows its steps and the usual wait for its chain. Replay this tour any time with the “Tour” button.",
   },
 ];
+
+/** The tour for this build: perps steps and prompts only when perps are enabled. */
+export function tourSteps(perps: boolean): TourStep[] {
+  return ALL_STEPS.filter((s) => perps || !s.perps).map((s) => (s.prompts ? { ...s, prompts: s.prompts.filter((p) => perps || !p.perps) } : s));
+}
+
+export const TOUR_STEPS = tourSteps(FEATURES.perps);
 
 export function startTour(): void {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(START_EVENT));
@@ -110,18 +158,29 @@ export function ProductTour() {
   // Track the highlighted element (scroll into view, follow resizes and scrolls).
   useLayoutEffect(() => {
     if (!step) return;
-    const el = step.target ? (document.querySelector(`[data-tour="${step.target}"]`) as HTMLElement | null) : null;
-    const visible = el && el.getClientRects().length > 0;
-    if (visible) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    if (step.tab) window.dispatchEvent(new CustomEvent(TOUR_OPEN_TAB_EVENT, { detail: step.tab }));
+    // Re-query on each measure: a step that opens a side tab renders its target a moment later.
+    const find = () => {
+      const el = step.target ? (document.querySelector(`[data-tour="${step.target}"]`) as HTMLElement | null) : null;
+      return el && el.getClientRects().length > 0 ? el : null;
+    };
+    let scrolled = false;
     const measure = () => {
+      const el = find();
+      if (el && !scrolled) {
+        el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        scrolled = true;
+      }
       setViewport({ width: window.innerWidth, height: window.innerHeight });
-      setRect(visible ? el.getBoundingClientRect() : null);
+      setRect(el ? el.getBoundingClientRect() : null);
     };
     measure();
+    const t0 = setTimeout(measure, 50);
     const t = setTimeout(measure, 350);
     window.addEventListener("resize", measure);
     window.addEventListener("scroll", measure, true);
     return () => {
+      clearTimeout(t0);
       clearTimeout(t);
       window.removeEventListener("resize", measure);
       window.removeEventListener("scroll", measure, true);
@@ -133,6 +192,13 @@ export function ProductTour() {
     setIndex(null);
   }, []);
   const next = useCallback(() => setIndex((i) => (i === null ? null : i + 1 < TOUR_STEPS.length ? i + 1 : (markDone(), null))), []);
+  const send = useCallback(
+    (prompt: string) => {
+      close();
+      askMeridian(prompt);
+    },
+    [close],
+  );
   const back = useCallback(() => setIndex((i) => (i === null || i === 0 ? i : i - 1)), []);
 
   useEffect(() => {
@@ -147,7 +213,7 @@ export function ProductTour() {
   }, [index, close, next, back]);
 
   if (!step || index === null) return null;
-  const cardSize = { width: Math.min(340, viewport.width - 24), height: 190 };
+  const cardSize = { width: Math.min(step.prompts ? 400 : 340, viewport.width - 24), height: step.prompts ? 340 : 190 };
   const pos = placeTooltip(rect, viewport, cardSize);
   const pad = 6;
   const last = index === TOUR_STEPS.length - 1;
@@ -170,6 +236,16 @@ export function ProductTour() {
         </div>
         <h4 className="tour__title">{step.title}</h4>
         <p className="tour__body">{step.body}</p>
+        {step.prompts && (
+          <div className="tour__prompts">
+            {step.prompts.map((p) => (
+              <button key={p.prompt} type="button" className="tour__prompt" onClick={() => send(p.prompt)}>
+                <span className="tour__prompt-label">{p.label}</span>
+                <span className="tour__prompt-text">“{p.prompt}”</span>
+              </button>
+            ))}
+          </div>
+        )}
         <div className="tour__actions">
           {!last && (
             <button type="button" className="tour__skip" onClick={close}>

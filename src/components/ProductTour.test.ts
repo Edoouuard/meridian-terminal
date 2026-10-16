@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TOUR_STEPS, placeTooltip } from "@/components/ProductTour";
+import { TOUR_PROMPTS, TOUR_STEPS, placeTooltip, tourSteps } from "@/components/ProductTour";
 
 const vp = { width: 1440, height: 900 };
 const card = { width: 340, height: 190 };
@@ -8,6 +8,23 @@ describe("product tour", () => {
   it("opens with a welcome and ends on the replay hint", () => {
     expect(TOUR_STEPS[0].target).toBeUndefined();
     expect(TOUR_STEPS.at(-1)?.body).toMatch(/Tour/);
+  });
+
+  it("with perps: shows Extended (opening the Tools tab) and every use-case prompt", () => {
+    const steps = tourSteps(true);
+    const ext = steps.find((s) => s.target === "extended");
+    expect(ext?.tab).toBe("venues");
+    expect(ext?.body).toMatch(/three wallet signatures/);
+    expect(steps.find((s) => s.prompts)?.prompts).toEqual(TOUR_PROMPTS);
+    expect(TOUR_PROMPTS.map((p) => p.prompt)).toContain("Short AMD on Extended");
+  });
+
+  it("without perps: no Extended step and only spot prompts", () => {
+    const steps = tourSteps(false);
+    expect(steps.some((s) => s.target === "extended")).toBe(false);
+    const prompts = steps.find((s) => s.prompts)?.prompts ?? [];
+    expect(prompts.length).toBeGreaterThan(0);
+    expect(prompts.every((p) => !p.perps)).toBe(true);
   });
 
   it("places the card below the target when it fits, else above, always inside the viewport", () => {

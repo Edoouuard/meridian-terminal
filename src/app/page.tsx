@@ -12,7 +12,7 @@ import { HistoryPanel } from "@/components/HistoryPanel";
 import { StrategiesPanel } from "@/components/StrategiesPanel";
 import { PortfolioDayChange, PortfolioHoldings } from "@/components/PortfolioHoldings";
 import { Celebration } from "@/components/Celebration";
-import { ProductTour, startTour } from "@/components/ProductTour";
+import { ProductTour, startTour, TOUR_OPEN_TAB_EVENT } from "@/components/ProductTour";
 import { OPEN_STRATEGIES_EVENT, useTrackedStrategies } from "@/lib/strategyTracker";
 import { HyperliquidPanel } from "@/components/HyperliquidPanel";
 import { ExtendedConnectPanel } from "@/components/ExtendedConnectPanel";
@@ -142,6 +142,15 @@ export default function TerminalApp() {
     };
     window.addEventListener(OPEN_STRATEGIES_EVENT, open);
     return () => window.removeEventListener(OPEN_STRATEGIES_EVENT, open);
+  }, []);
+  // A tour step pointing inside a side tab opens it first.
+  useEffect(() => {
+    const open = (e: Event) => {
+      const tab = (e as CustomEvent<unknown>).detail;
+      if (tab === "risk" || tab === "strategies" || tab === "venues" || tab === "activity") setLeftTab(tab);
+    };
+    window.addEventListener(TOUR_OPEN_TAB_EVENT, open);
+    return () => window.removeEventListener(TOUR_OPEN_TAB_EVENT, open);
   }, []);
 
   const { isConnected, address, chain } = useAccount();
@@ -407,7 +416,9 @@ export default function TerminalApp() {
               {FEATURES.perps && (
                 <>
                   <HyperliquidPanel />
-                  <ExtendedConnectPanel />
+                  <div data-tour="extended">
+                    <ExtendedConnectPanel />
+                  </div>
                   <LifiPerpsConnectPanel provider="ondo" />
                   <LifiPerpsConnectPanel provider="lighter" />
                 </>
