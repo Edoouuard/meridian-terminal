@@ -273,3 +273,13 @@ describe("fitNotionalToMargin", () => {
     expect(fitNotionalToMargin(134, 2, 50)).toBeUndefined();
   });
 });
+
+describe("planSpotBuy", () => {
+  it("sizes the buy, keeping the IOC slippage reserve inside the spot USDC", async () => {
+    const { planSpotBuy } = await import("@/lib/integrations/hyperliquidTrade");
+    expect(planSpotBuy({ usd: 31, mid: 2460, spotUsdc: 66, szDecimals: 4 })).toEqual({ size: 0.0126, usd: 0.0126 * 2460 });
+    // Only $20 free: at most 20 / 1.05 is spent.
+    const capped = planSpotBuy({ usd: 31, mid: 2460, spotUsdc: 20, szDecimals: 4 });
+    expect(capped.usd * 1.05).toBeLessThanOrEqual(20);
+  });
+});

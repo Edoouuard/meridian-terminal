@@ -10,7 +10,8 @@
 
 import { chainIdFromName } from "@/lib/chains";
 import { findToken } from "@/lib/assetMap";
-import { deployableUsd, fitLegsToBudget, freshCapitalUsd, hyperliquidMarginOnlyUsd } from "@/lib/budgetFit";
+import { deployableUsd, fitLegsToBudget, freshCapitalUsd, hyperliquidMarginOnlyUsd, isHlSpotBuyLeg } from "@/lib/budgetFit";
+import { HL_MIN_ORDER_USD } from "@/lib/integrations/hyperliquidTrade";
 import { HL_WITHDRAW_FEE_USD } from "@/lib/integrations/hyperliquidExchange";
 import { UNISWAP_SWAP_ROUTER02_BY_CHAIN } from "@/lib/integrations/uniswap";
 
@@ -305,10 +306,17 @@ function fitToBudget(strategy: LLMStrategy, ctx?: WalletContext): LLMStrategy {
   // What a Withdraw leg brings out of the Hyperliquid account counts too (it is fresh capital the strategy then spends).
   const withdrawn = strategy.legs.filter(isHlWithdraw).reduce((s, l) => s + Math.max(0, (l.sizeUsd ?? 0) - HL_WITHDRAW_FEE_USD), 0);
   const budget = deployableUsd(ctx.assets) + withdrawn;
-  if (budget < MIN_BUDGET_USD) return strategy;
-  const { legs, scaled } = fitLegsToBudget(strategy.legs, budget, hyperliquidMarginOnlyUsd(ctx.assets));
+  const hlMargin = hyperliquidMarginOnlyUsd(ctx.assets);
+  // An empty wallet leaves nothing to scale to, unless every step runs on the Hyperliquid account's own USDC.
+  const hlOnly = strategy.legs.every((l) => /hyperliquid/i.test(l.protocol) && (/^(long|short)$/i.test(l.side.trim()) || isHlSpotBuyLeg(l)));
+  if (budget < MIN_BUDGET_USD && !(hlOnly && hlMargin >= MIN_BUDGET_USD)) return strategy;
+  const { legs, scaled } = fitLegsToBudget(strategy.legs, hlOnly ? Math.max(0, budget) : budget, hlMargin);
   if (scaled === 1) return strategy;
-  const note = `Sized to your $${Math.floor(budget).toLocaleString("en-US")} free balance: every step is ${Math.round(scaled * 100)}% of what was first planned (staked, HLP and vault funds aren't counted; Hyperliquid-account USDC only through a withdrawal).`;
+  const usesHl = strategy.legs.some((l) => /hyperliquid/i.test(l.protocol) && !isHlWithdraw(l));
+  const what = usesHl && hlMargin >= 1
+    ? `your $${Math.floor(budget).toLocaleString("en-US")} wallet balance plus the $${Math.floor(hlMargin).toLocaleString("en-US")} in your Hyperliquid account`
+    : `your $${Math.floor(budget).toLocaleString("en-US")} free balance`;
+  const note = `Sized to ${what}: every step is ${Math.round(scaled * 100)}% of what was first planned (staked, HLP and vault funds aren't counted).`;
   return { ...strategy, legs, fundingNotes: [...(strategy.fundingNotes ?? []), note] };
 }
 
@@ -358,6 +366,8 @@ function checkStructure(strategy: LLMStrategy, ctx?: WalletContext): LLMStrategy
   // the plan doesn't grow past the budget; it runs on the perp's chain, and an
   // ETH long is held as wstETH so it earns staking yield.
   if (hasShort && !hasMatchingLong && !borrowHedged) {
+    const onHl = hyperliquidNeutral(strategy, legs, shortLegs, ctx);
+    if (onHl) return onHl;
     let rest = legs.slice();
     const addedLegs: LLMLeg[] = [];
     for (const asset of shortAssets) {
@@ -383,7 +393,10 @@ function checkStructure(strategy: LLMStrategy, ctx?: WalletContext): LLMStrategy
         note: `Spot long ${asset} (held as ${token}) to offset the short perp — required for neutrality.`,
       });
     }
-    const fixedLegs = fitPerpHedgeToBudget([...addedLegs, ...rest], legs).map(fixSpotLeverage);
+    // The spot buy goes right before the first short: after the steps that bring the USDC it spends.
+    const at = rest.findIndex(isShortExposure);
+    const ordered = at < 0 ? [...addedLegs, ...rest] : [...rest.slice(0, at), ...addedLegs, ...rest.slice(at)];
+    const fixedLegs = fitPerpHedgeToBudget(ordered, legs).map(fixSpotLeverage);
     const assetList = [...shortAssets].join(", ");
     return {
       ...strategy,
@@ -405,6 +418,51 @@ function checkStructure(strategy: LLMStrategy, ctx?: WalletContext): LLMStrategy
   }
 
   return { ...strategy, legs: legs.map(fixSpotLeverage) };
+}
+
+/** Hyperliquid spot token holding the long side of a shorted asset, when there is one. */
+const HL_SPOT_FOR: Record<string, string> = { ETH: "UETH", BTC: "UBTC", SOL: "USOL" };
+
+/**
+ * A Hyperliquid short whose money is already in the Hyperliquid account: the
+ * long side is bought on Hyperliquid spot (UETH for ETH) with that USDC, so
+ * nothing leaves the account and no wallet funds are needed. The notional is
+ * what the account carries at the short's leverage: N spot + N / L margin
+ * (with fees and the IOC slippage reserve) — at most the short planned.
+ * Null when the shorts aren't on Hyperliquid, the wallet (or a stablecoin leg)
+ * is the planned source of funds, or the asset has no Hyperliquid spot token.
+ */
+function hyperliquidNeutral(strategy: LLMStrategy, legs: LLMLeg[], shortLegs: LLMLeg[], ctx?: WalletContext): LLMStrategy | null {
+  if (shortLegs.length !== 1 || shortLegs[0].side.toLowerCase() !== "short" || !/hyperliquid/i.test(shortLegs[0].protocol)) return null;
+  const short = shortLegs[0];
+  const asset = exposureAsset(legUnderlying(short));
+  const token = HL_SPOT_FOR[asset];
+  const margin = hyperliquidMarginUsd(ctx);
+  const isStableSupply = (l: LLMLeg) => l.side.toLowerCase() === "supply" && STABLECOINS.has(legUnderlying(l).toLowerCase());
+  if (!token || margin < 2 * HL_MIN_ORDER_USD || legs.some(isStableSupply) || deployableUsd(ctx?.assets) > margin) return null;
+  const lev = Math.max(1, short.leverage ?? 1);
+  const deposits = legs.filter((l) => /^deposit$/i.test(l.side.trim()) && /hyperliquid/i.test(l.protocol)).reduce((s, l) => s + (l.sizeUsd ?? 0), 0);
+  const capital = margin + deposits;
+  const fit = Math.floor((capital / (1 + 1.03 / lev)) * 0.98);
+  const notional = Math.min(short.sizeUsd ?? fit, fit);
+  const buy: LLMLeg = {
+    side: "Buy",
+    asset: token,
+    protocol: "Hyperliquid",
+    chain: "Arbitrum",
+    sizeUsd: notional,
+    note: `Spot long ${asset} bought on Hyperliquid (${token}) with the USDC already in your Hyperliquid account; it offsets the short.`,
+  };
+  const out: LLMLeg[] = [];
+  for (const l of legs) {
+    if (l === short) out.push(buy, { ...l, sizeUsd: notional });
+    else out.push(l);
+  }
+  return {
+    ...strategy,
+    legs: out.map(fixSpotLeverage),
+    summary: `${strategy.summary} Meridian added the spot ${asset} long on Hyperliquid (${token}), paid from the USDC already in your Hyperliquid account.`,
+  };
 }
 
 /**
@@ -446,25 +504,17 @@ function balanceNeutralSizes(legs: LLMLeg[]): LLMLeg[] {
   const shorts = legs.filter((l) => SHORT_SIDES.has(l.side.toLowerCase()));
   if (shorts.length === 0) return legs;
 
-  // Group by underlying asset and balance each pair independently.
-  const shortAssets = new Set(shorts.map(legUnderlying));
+  // Group by exposure (wstETH and UETH are ETH) and balance each pair independently.
+  const exposure = (l: LLMLeg) => exposureAsset(legUnderlying(l));
+  const shortAssets = new Set(shorts.map(exposure));
 
   return legs.map((l) => {
     const side = l.side.toLowerCase();
-    const underlying = legUnderlying(l);
+    const asset = exposure(l);
+    if (!shortAssets.has(asset)) return l;
 
-    // Only balance legs whose underlying matches a shorted asset.
-    if (!shortAssets.has(underlying) && !(
-      /^(ST|WST|CB|R)ETH$/i.test(underlying) && shortAssets.has("ETH")
-    )) return l;
-
-    const effectiveAsset = /^(ST|WST|CB|R)ETH$/i.test(underlying) ? "ETH" : underlying;
-    const assetShorts = shorts.filter((s) => legUnderlying(s) === effectiveAsset);
-    const assetLongs = legs.filter((ll) => {
-      if (!isRealLongExposure(ll)) return false;
-      const u = legUnderlying(ll);
-      return u === effectiveAsset || (/^(ST|WST|CB|R)ETH$/i.test(u) && effectiveAsset === "ETH");
-    });
+    const assetShorts = shorts.filter((s) => exposure(s) === asset);
+    const assetLongs = legs.filter((ll) => isRealLongExposure(ll) && exposure(ll) === asset);
     if (assetShorts.length === 0 || assetLongs.length === 0) return l;
 
     const totalShort = assetShorts.reduce((s, ll) => s + (ll.sizeUsd ?? 10000), 0);
@@ -481,4 +531,32 @@ function balanceNeutralSizes(legs: LLMLeg[]): LLMLeg[] {
     }
     return l;
   });
+}
+
+/** Why a strategy can't run at its size, or null when every step clears its venue's minimum. */
+export function belowMinimum(strategy: LLMStrategy): string | null {
+  for (const l of strategy.legs) {
+    const size = l.sizeUsd ?? 0;
+    if (!(size > 0)) continue;
+    const hlOrder = /hyperliquid/i.test(l.protocol) && (/^(long|short)$/i.test(l.side.trim()) || isHlSpotBuyLeg(l));
+    if (hlOrder && size < HL_MIN_ORDER_USD) return `${l.side} ${l.asset} is $${size.toFixed(2)}; Hyperliquid's minimum order is $${HL_MIN_ORDER_USD}.`;
+    if (size < MIN_BUDGET_USD) return `${l.side} ${l.asset} is $${size.toFixed(2)}, under the $${MIN_BUDGET_USD} worth a transaction.`;
+  }
+  return null;
+}
+
+/**
+ * Drop strategies a step of which is under its minimum (Hyperliquid's $10
+ * order, $5 elsewhere): they can't be executed as shown. An explicit order
+ * (`keepFirst`) and, when none is left, every strategy stays, saying what is
+ * too small, rather than vanishing.
+ */
+export function dropBelowMinimum(strategies: LLMStrategy[], keepFirst = false): LLMStrategy[] {
+  const note = (s: LLMStrategy): LLMStrategy => {
+    const why = belowMinimum(s);
+    return why ? { ...s, fundingNotes: [...(s.fundingNotes ?? []), `Too small to execute: ${why}`] } : s;
+  };
+  const ok = strategies.filter((s, i) => (keepFirst && i === 0) || belowMinimum(s) === null);
+  if (ok.length === 0) return strategies.map(note);
+  return ok.map(note);
 }

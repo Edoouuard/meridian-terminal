@@ -50,6 +50,18 @@ export function isLockedVenue(venue: string): boolean {
 }
 
 const HL_MARGIN = "HL:MARGIN";
+
+/** Hyperliquid spot tokens a neutral position buys with the account's USDC. */
+const HL_SPOT_TOKEN = /\b(UETH|UBTC|USOL)\b/i;
+
+/**
+ * Buying UETH / UBTC / USOL on Hyperliquid spot: paid with the USDC already
+ * in the Hyperliquid account (the long side of a neutral position there),
+ * not with wallet funds and not a perp order.
+ */
+export function isHlSpotBuyLeg(leg: { side: string; protocol?: string; asset: string }): boolean {
+  return /hyperliquid/i.test(leg.protocol ?? "") && /^(buy|swap)$/i.test(leg.side.trim()) && HL_SPOT_TOKEN.test(leg.asset) && !/perp/i.test(leg.asset);
+}
 const HL_MIN_DEPOSIT_USD = 5;
 
 /** Fresh wallet capital a strategy needs, in USD, given the margin already on Hyperliquid. */
@@ -71,6 +83,10 @@ export function freshCapitalUsd(legs: TradeLeg[], hlMarginUsd = 0): number {
     const chainId = chainIdFromName(leg.chain) ?? 0;
     if (side === "long" || side === "short") {
       fresh += take(HL_MARGIN, size / Math.max(1, leg.leverage ?? 1));
+      continue;
+    }
+    if (isHlSpotBuyLeg(leg)) {
+      fresh += take(HL_MARGIN, size);
       continue;
     }
     const spent = spentSymbol(leg, chainId);
@@ -100,13 +116,25 @@ export function fitLegsToBudget<L extends TradeLeg>(legs: L[], budgetUsd: number
   const isHlWithdraw = (l: L) => /^withdraw$/i.test(l.side.trim()) && /hyperliquid/i.test(l.protocol);
   const fresh = freshCapitalUsd(legs.filter((l) => !isHlWithdraw(l)), hlMarginUsd);
   if (!(fresh > 0) || fresh <= budgetUsd * 1.0001) return { legs, scaled: 1 };
-  const k = Math.max(0, budgetUsd) / fresh;
-  const scale = (l: L): L => {
+  const scaleBy = (k: number) => (l: L): L => {
     if (!(l.sizeUsd && l.sizeUsd > 0) || isHlWithdraw(l)) return l;
     const size = Math.floor(l.sizeUsd * k * 100) / 100;
     // Hyperliquid doesn't credit deposits under $5: keep the minimum rather than plan a lost deposit.
     const isHlDeposit = /^deposit$/i.test(l.side.trim()) && /hyperliquid/i.test(l.protocol);
     return { ...l, sizeUsd: isHlDeposit ? Math.max(HL_MIN_DEPOSIT_USD, size) : size };
   };
+  // Fresh capital isn't proportional to the scale when Hyperliquid margin pays part
+  // of it (that part is fixed): find the largest scale that fits, by bisection.
+  const fits = (k: number) => freshCapitalUsd(legs.map(scaleBy(k)).filter((l) => !isHlWithdraw(l)), hlMarginUsd) <= budgetUsd * 1.0001;
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 30; i++) {
+    const mid = (lo + hi) / 2;
+    if (fits(mid)) lo = mid;
+    else hi = mid;
+  }
+  // 4 decimals: the plain proportional case lands on budget / fresh exactly.
+  const k = Math.floor(lo * 1e4) / 1e4;
+  const scale = scaleBy(k);
   return { legs: legs.map(scale), scaled: k };
 }

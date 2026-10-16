@@ -8,6 +8,7 @@ import {
   modifyPerpLimit,
   perpLimitOrder,
   perpMarketOrder,
+  spotMarketBuy,
   spotMarketSell,
   withAgent,
   type MarketOrderResult,
@@ -61,6 +62,8 @@ export interface UseHyperliquidResult extends HlState {
   modifyOrder: (p: { coin: string; oid: number; isBuy: boolean; size: number; px: number; reduceOnly?: boolean; testnet?: boolean }) => Promise<void>;
   /** Sell a spot token (UETH, UBTC, HYPE…) for USDC on Hyperliquid spot; at most what the account holds. */
   sellSpot: (p: { token: string; amount?: number; testnet?: boolean }) => Promise<void>;
+  /** Buy a spot token (UETH, UBTC…) with USDC from the Hyperliquid spot balance. */
+  buySpot: (p: { token: string; usd: number; testnet?: boolean }) => Promise<void>;
   reset: () => void;
 }
 
@@ -151,6 +154,11 @@ export function useHyperliquid(): UseHyperliquidResult {
     [run, address],
   );
 
+  const buySpot = useCallback<UseHyperliquidResult["buySpot"]>(
+    (p) => run(p.testnet, (env, key) => spotMarketBuy(env, key, { user: address!, base: p.token, usd: p.usd })),
+    [run, address],
+  );
+
   const placeLimit = useCallback<UseHyperliquidResult["placeLimit"]>(
     (p) =>
       run(
@@ -173,7 +181,7 @@ export function useHyperliquid(): UseHyperliquidResult {
 
   const reset = useCallback(() => setState({ status: "idle" }), []);
 
-  return { ...state, execute, placeLimit, cancelOrder, modifyOrder, sellSpot, reset };
+  return { ...state, execute, placeLimit, cancelOrder, modifyOrder, sellSpot, buySpot, reset };
 }
 
 /** One line for a filled order: "0.0198 @ $2,431.20". */
