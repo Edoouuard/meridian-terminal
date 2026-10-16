@@ -258,7 +258,8 @@ export async function routeThesisAsync(rawText: string, portfolio?: PortfolioCon
   try {
     const res = await fetch("/api/parse-intent", {
       method: "POST",
-      signal: AbortSignal.timeout(60_000),
+      // Past the server budget (route maxDuration 150s): fall back to local rules.
+      signal: AbortSignal.timeout(145_000),
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ thesis: text, portfolio, clarified: opts.clarified === true, answeredQuestion: opts.answeredQuestion }),
     });

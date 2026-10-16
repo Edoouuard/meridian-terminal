@@ -20,6 +20,13 @@ async function relay(req: NextRequest, ctx: { params: Promise<{ network: string;
   try {
     const res = await fetch(url, { method: req.method, headers: forwardableExtendedHeaders(req.headers), body, cache: "no-store" });
     const text = await res.text();
+    // 451 = Extended refuses this server's location for legal reasons (geo-restriction), with an empty body.
+    if (res.status === 451) {
+      return NextResponse.json(
+        { status: "ERROR", error: { message: "Extended refuses connections from Meridian's server location (HTTP 451, legal restriction). Extended can't be used from Meridian for now." } },
+        { status: 451 },
+      );
+    }
     return new NextResponse(text, { status: res.status, headers: { "content-type": res.headers.get("content-type") ?? "application/json" } });
   } catch (err) {
     return NextResponse.json(
