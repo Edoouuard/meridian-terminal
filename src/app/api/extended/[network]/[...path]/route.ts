@@ -12,9 +12,11 @@ import { extendedUpstreamUrl, forwardableExtendedHeaders } from "@/lib/integrati
 export const dynamic = "force-dynamic";
 /**
  * Run next to Extended's servers (AWS Tokyo, per its API docs). Extended
- * geoblocks some countries by the caller's IP (HTTP 451); the project's
- * default region (Paris) is one of them. The owner confirmed Meridian's
- * users may use Extended.
+ * geoblocks some countries by the caller's IP (HTTP 451), Paris (cdg1)
+ * included. Per-function regions need a Vercel Pro plan: on Hobby the
+ * project's function region applies (Settings → Functions), so that setting
+ * must not be a geoblocked country. The owner confirmed Meridian's users may
+ * use Extended.
  */
 export const preferredRegion = "hnd1";
 
