@@ -7,7 +7,9 @@ import { normalizeNews, type NewsItem } from "@/lib/news";
  * under the free plan's 200). Always answers 200 with { items, status } so
  * the panel can say "not configured" or "unavailable" instead of failing.
  */
-export const revalidate = 900;
+// Dynamic: a build-time prerender would freeze "not configured" or an outage for the whole cache window.
+// The upstream call itself is cached by fetch (next.revalidate below).
+export const dynamic = "force-dynamic";
 
 const NEWSDATA_URL = "https://newsdata.io/api/1/crypto";
 
