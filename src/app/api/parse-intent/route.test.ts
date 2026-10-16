@@ -51,18 +51,19 @@ const post = async (body: Record<string, unknown>) => {
 };
 
 describe("POST /api/parse-intent — the owner's SPCX conversation", () => {
-  it("1. 'beta neutral en SPCX leverage 10': asks the share of capital first, in French, without calling the model", async () => {
+  it("1. 'beta neutral en SPCX leverage 10': asks the share of capital first, in English, without calling the model", async () => {
     const { data } = await post({ thesis: "beta neutral en SPCX leverage 10" });
     expect(data.decision).toBe("clarify");
-    expect(data.clarify.question).toMatch(/capital disponible/);
+    expect(data.clarify.question).toBe("How much of your available capital should this use?");
+    expect(JSON.stringify(data)).not.toMatch(/capital disponible|Quelle part/);
     expect(modelCalls).toEqual([]);
   });
 
   it("2. answered 100%: two legs, long Hyperliquid / short Extended, 10x, sized on the free margin, executable — no model proposal", async () => {
     const { status, data } = await post({
-      thesis: "beta neutral en SPCX leverage 10 — 100 % de mon capital disponible",
+      thesis: "beta neutral en SPCX leverage 10 — 100% of my available capital",
       clarified: true,
-      answeredQuestion: "Quelle part de ton capital disponible veux-tu engager ?",
+      answeredQuestion: "How much of your available capital should this use?",
     });
     expect(status).toBe(200);
     const s = data.strategies[0];
@@ -92,7 +93,7 @@ describe("POST /api/parse-intent — the owner's SPCX conversation", () => {
 
   it("4. 'beta neutral entre Hyperliquid et Extended' (no asset): asks which one, among assets both list", async () => {
     const { data } = await post({ thesis: "beta neutral entre Hyperliquid et Extended" });
-    expect(data.clarify.question).toMatch(/quel actif/);
+    expect(data.clarify.question).toBe("Which asset should the neutral position use?");
     expect(data.clarify.options[0]).toMatch(/^SPCX/);
   });
 });

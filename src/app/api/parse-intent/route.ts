@@ -12,7 +12,7 @@ import { enforceConformance, namedVenues, type Objective } from "@/lib/planner/s
 import type { VenueBalances } from "@/lib/planner/economics";
 import type { MarketSnapshot } from "@/lib/planner/markets";
 import { completionText } from "@/lib/planner/completion";
-import { capitalShare, looksFrench, sizeQuestion } from "@/lib/planner/sizing";
+import { capitalShare, sizeQuestion } from "@/lib/planner/sizing";
 import { buildPairStrategy, mentionedBases, pairAssetQuestion, parsePairRequest } from "@/lib/planner/pair";
 import { cleanHistory, conversationSection, effectiveRequest } from "@/lib/planner/conversation";
 import { marketBase } from "@/lib/perpVenues";
@@ -242,7 +242,7 @@ Clarify (one question, strategies empty):
   "decision": "clarify",
   "objective": "farming",
   "understanding": "The goal with its hard constraints, and what is missing.",
-  "clarify": { "question": "Short question in the user's language", "why": "What in the data makes it necessary", "options": ["Answer that keeps the request", "Other complete answer"] },
+  "clarify": { "question": "Short question, in English", "why": "What in the data makes it necessary", "options": ["Answer that keeps the request", "Other complete answer"] },
   "strategies": []
 }
 
@@ -510,14 +510,13 @@ export async function POST(req: NextRequest) {
     const history = cleanHistory(rawHistory);
     const request = effectiveRequest(thesis.trim(), history, yieldContext.markets);
     const answered = typeof answeredQuestion === "string" ? answeredQuestion : undefined;
-    const french = looksFrench(request);
 
     // Questions the server asks itself, before any plan: which asset for a two-venue neutral position, then how much capital.
     const pairReq = FEATURES.perps ? parsePairRequest(request, yieldContext.markets, { extendedConnected: !!snapshot?.extended?.connected && snapshot.extended.network !== "testnet" }) : null;
     if (pairReq && !pairReq.base) {
-      const q = pairAssetQuestion(yieldContext.markets, french);
+      const q = pairAssetQuestion(yieldContext.markets);
       if (q && answered !== q.question) {
-        return NextResponse.json({ decision: "clarify", understanding: french ? "Position neutre entre Hyperliquid et Extended : il manque l'actif." : "A neutral position between Hyperliquid and Extended: the asset is missing.", clarify: q, strategies: [] });
+        return NextResponse.json({ decision: "clarify", understanding: "A neutral position between Hyperliquid and Extended: the asset is missing.", clarify: q, strategies: [] });
       }
     }
     const asked = snapshot && FEATURES.perps
@@ -559,9 +558,7 @@ export async function POST(req: NextRequest) {
       text = JSON.stringify({
         decision: "build",
         objective: goal,
-        understanding: french
-          ? `Position neutre sur ${pairReq!.base} : long sur une venue, short de la même quantité sur l'autre, entre Hyperliquid et Extended.`
-          : `Neutral position on ${pairReq!.base}: long on one venue, short the same quantity on the other, between Hyperliquid and Extended.`,
+        understanding: `Neutral position on ${pairReq!.base}: long on one venue, short the same quantity on the other, between Hyperliquid and Extended.`,
         strategies: [serverPair],
       });
     } else try {

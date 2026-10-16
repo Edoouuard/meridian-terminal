@@ -118,7 +118,7 @@ export function buildPairStrategy(req: Required<Pick<PairRequest, "base">> & Pai
 }
 
 /** Before building a two-venue neutral position with no asset: which one, among those both venues list (widest funding spread first). */
-export function pairAssetQuestion(markets: MarketSnapshot | undefined, french: boolean): PlannerClarify | null {
+export function pairAssetQuestion(markets: MarketSnapshot | undefined): PlannerClarify | null {
   if (!markets) return null;
   const ranked = sharedBases(markets)
     .map((b) => {
@@ -130,7 +130,5 @@ export function pairAssetQuestion(markets: MarketSnapshot | undefined, french: b
     .sort((a, c) => c.spread - a.spread)
     .slice(0, 4);
   if (ranked.length < 2) return null;
-  return french
-    ? { question: "Sur quel actif ouvrir la position neutre ?", why: "Classés par écart de funding entre Hyperliquid et Extended aujourd'hui (listés sur les deux).", options: ranked.map((x) => `${x.b} (écart ${x.spread.toFixed(1)}%/an)`) }
-    : { question: "Which asset should the neutral position use?", why: "Ranked by today's funding gap between Hyperliquid and Extended (listed on both).", options: ranked.map((x) => `${x.b} (gap ${x.spread.toFixed(1)}%/yr)`) };
+  return { question: "Which asset should the neutral position use?", why: "Ranked by today's funding gap between Hyperliquid and Extended (listed on both).", options: ranked.map((x) => `${x.b} (gap ${x.spread.toFixed(1)}%/yr)`) };
 }

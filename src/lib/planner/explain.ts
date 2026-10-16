@@ -14,7 +14,7 @@ Rules:
 - A "requested" plan answers the user's request; an "alternative" changes it: say what it changes, and that choosing it is the user's call.
 - A "blocked" plan: say what blocks it and what unblocks it. Never present it as ready.
 - Projections at today's rates are not promises; say "at today's rates".
-- Write in the user's language.
+- Write in English only, whatever language the user writes in.
 Return ONLY JSON: {"understanding": "...", "plans": [{"index": 0, "summary": "2-3 sentences", "fit": "one line", "risks": ["2 to 4 short items"], "variantNote": "the main caveat"}]}`;
 
 /** What the explainer sees: the validated plans, without anything it could be tempted to alter silently. */

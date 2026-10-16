@@ -49,7 +49,7 @@ describe("the owner's SPCX conversation (2026-10-16)", () => {
   it("builds the first request itself (no venue named, Extended connected) and asks the capital share first", () => {
     expect(parsePairRequest(first, markets, { extendedConnected: true })).toEqual({ base: "SPCX", leverage: 10 });
     expect(parsePairRequest(first, markets, { extendedConnected: false })).toBeNull();
-    expect(sizeQuestion({ thesis: first, hyperliquidFreeUsd: 21.79, extendedFreeUsd: 21.35 })?.clarify.question).toMatch(/capital disponible/);
+    expect(sizeQuestion({ thesis: first, hyperliquidFreeUsd: 21.79, extendedFreeUsd: 21.35 })?.clarify.question).toMatch(/available capital/);
   });
 
   it("two legs: long SPCX on Hyperliquid (lower funding), short on Extended (higher), 10x, ~$197 each at 100%", () => {
@@ -82,8 +82,8 @@ describe("the owner's SPCX conversation (2026-10-16)", () => {
   it("asks which asset when a two-venue neutral request names none, among assets listed on both", () => {
     const req = parsePairRequest("beta neutral entre Hyperliquid et Extended", markets);
     expect(req).toEqual({ base: undefined, leverage: undefined });
-    const q = pairAssetQuestion(markets, true)!;
-    expect(q.question).toMatch(/quel actif/);
+    const q = pairAssetQuestion(markets)!;
+    expect(q.question).toMatch(/Which asset/);
     expect(q.options.map((o) => o.split(" ")[0])).toEqual(["SPCX", "ETH"]);
   });
 });
