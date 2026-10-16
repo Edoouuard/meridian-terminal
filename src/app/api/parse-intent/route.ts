@@ -82,7 +82,7 @@ When the user's portfolio is provided:
 ### Perpetual Futures
 - **Hyperliquid**: on-chain orderbook, up to 50x leverage. Check live funding rates in the data.
 - **Hyperliquid stock, index & commodity perps (HIP-3)**: Tesla, Nvidia, the S&P 500, gold, oil… are traded as perps with USDC margin, from the same Hyperliquid account as crypto perps. For a view on a stock, an index or a commodity ("short Tesla", "long gold", "hedge my portfolio with the S&P 500"), use side "Long" or "Short", protocol "Hyperliquid", chain "Arbitrum", and asset = the EXACT market name from the live "Stock, index & commodity perps" list followed by " PERP" (e.g. "xyz:TSLA PERP", "xyz:SP500 PERP", "xyz:GOLD PERP"). Never invent a market that isn't in that list; quote its live price and funding. Respect its max leverage. These markets trade around the clock but follow the underlying's price: say so in the risk note.
-- **Extended**: StarkEx L2, up to 20x leverage. Active points program. Meridian signs Extended orders once the user has connected Extended AND has funds in that Extended account; deposits to Extended are made on extended.exchange (Meridian can't deposit there yet, so never plan a Deposit or Bridge to Extended). Put an Extended leg only when the portfolio lists an Extended account balance covering its margin; otherwise build the position on Hyperliquid and say once in variantNote that using Extended needs a deposit on extended.exchange first.
+- **Extended**: StarkEx L2, up to 20x leverage. Active points program. Meridian signs Extended orders once the user has connected Extended AND has funds in that Extended account; deposits to Extended are made on extended.exchange (Meridian can't deposit there yet, so never plan a Deposit or Bridge to Extended). When the user asks for Extended, the plan uses Extended even if the account is not connected or not funded: the server marks it blocked with what unblocks it (a deposit on extended.exchange). A Hyperliquid version is only an alternative, never the requested plan.
 - **Ondo**: via LI.FI relay.
 - **Lighter**: zk-rollup. Check live data for LLP vault APR if available.
 Choose the perp venue based on: the user's goal (points? liquidity? fees?), NOT a default preference.
@@ -279,6 +279,7 @@ Field rules:
 - "apy": blended expected APY in percent from the live data, for yield plans only; omit it for directional trades and pairs (use "economics").
 - "exit": how and how fast the user gets their money back: "Instant", "~1-5 days (Lido withdrawal queue)", "Locked until 26 Mar 2027 (or sell PT at market)".
 - "risks": 2 to 4 short items, specific to the plan. No generic filler.
+- Keep every text field to one short sentence: a second pass writes the final text from the validated plans. Your answer must fit in about 1,500 tokens.
 - Don't set "recommended": the server recommends the best executable requested plan.`;
 
 /** Fetch live yield context from our own aggregator route (server-side internal call): the text for the model, the quotes for the checks. */
@@ -427,14 +428,20 @@ interface PortfolioSnapshot {
   hyperliquid?: { unified: boolean; collateralUsd: number; marginUsedUsd: number; freeMarginUsd: number; spotUsdcUsd: number } | null;
 }
 
-/** The planner call can take ~30s; give the function room past the default limit. */
-export const maxDuration = 60;
+/**
+ * Two model calls (propose, then explain) plus the live-data read. A strong
+ * proposal model can take over a minute; Fluid compute allows up to 300s on
+ * every plan, so the budgets below fit in 150s.
+ */
+export const maxDuration = 150;
 
 const MAX_THESIS_CHARS = 2000;
 /** Proposal pass; with the explain pass after it, the whole call stays under maxDuration. */
-const PROPOSE_TIMEOUT_MS = 34_000;
+const PROPOSE_TIMEOUT_MS = 100_000;
+/** The proposal is structure only (the server computes figures, the explain pass writes the text): ~1-3 plans fit easily. */
+const PROPOSE_MAX_TOKENS = 2048;
 /** Explain pass: past this the deterministic summaries are used. */
-const EXPLAIN_TIMEOUT_MS = 15_000;
+const EXPLAIN_TIMEOUT_MS = 25_000;
 
 export async function POST(req: NextRequest) {
   try {
@@ -487,7 +494,7 @@ export async function POST(req: NextRequest) {
           { role: "system", content: [strategistDoctrine(), capabilitiesSection(), policySection(), FEATURES.perps ? SYSTEM_PROMPT : SYSTEM_PROMPT + PERPS_DISABLED_NOTE].join("\n\n---\n\n") },
           { role: "user", content: userMessage },
         ],
-        4096,
+        PROPOSE_MAX_TOKENS,
         PROPOSE_TIMEOUT_MS,
       );
     } catch (err) {
