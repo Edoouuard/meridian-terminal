@@ -4,7 +4,9 @@ import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Network as ExtendedNetwork } from "@blackcube/extended-sdk";
 import { ExtendedKeyError, connectExtendedAccount, disconnectExtendedAccount, useExtendedAccount } from "@/hooks/useExtendedAccount";
-import { fetchExtendedPositions } from "@/lib/integrations/extended-live";
+import { useAccount, useWalletClient } from "wagmi";
+import { fetchExtendedBalance, fetchExtendedPositions } from "@/lib/integrations/extended-live";
+import { onboardExtended } from "@/lib/integrations/extendedOnboarding";
 import { useExtendedPerp } from "@/hooks/useExtendedPerp";
 import { useLivePrices } from "@/hooks/useLivePrices";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -112,31 +114,96 @@ function ExtendedPositions() {
   );
 }
 
+/** Equity and free margin of the connected Extended account (`/user/balance`; 404 until the first deposit). */
+function ExtendedBalance() {
+  const signer = useExtendedAccount();
+  const { data } = useQuery({
+    queryKey: ["extended-balance", signer?.apiKey, signer?.network],
+    queryFn: () => fetchExtendedBalance(signer!),
+    enabled: !!signer,
+    refetchInterval: 30_000,
+  });
+  if (!signer || data === undefined) return null;
+  if (data === null) {
+    return (
+      <p style={{ fontSize: 11, margin: "6px 0 0" }} className="text-muted">
+        No funds yet. Deposit on{" "}
+        <a href="https://app.extended.exchange" target="_blank" rel="noreferrer">
+          extended.exchange
+        </a>{" "}
+        with this same wallet: it opens this same account.
+      </p>
+    );
+  }
+  return (
+    <p style={{ fontSize: 11, margin: "6px 0 0", fontVariantNumeric: "tabular-nums" }}>
+      Equity {fmtUsd(data.equity)} · free {fmtUsd(data.availableForTrade)}
+      {data.unrealisedPnl !== 0 && (
+        <span style={{ color: data.unrealisedPnl >= 0 ? "var(--risk-good)" : "var(--risk-serious)" }}>
+          {" "}
+          · {data.unrealisedPnl >= 0 ? "+" : ""}
+          {fmtUsd(data.unrealisedPnl)} open
+        </span>
+      )}
+    </p>
+  );
+}
+
+const STEP_LABELS = ["Sign 1/3: create your Extended trading key", "Sign 2/3: open the account", "Sign 3/3: issue an API key"];
+
 /**
- * Extended (ex-X10) account panel. Extended is a StarkEx venue: there is no
- * "connect your wallet and go" flow like Hyperliquid, because order signing
- * needs a Stark-curve keypair a browser wallet cannot produce. So this panel
- * asks for the three things Extended's own dashboard already hands the user
- * for API/bot access (API key, Stark private key, vault id) instead of
- * pretending a wallet connection is enough.
+ * Extended (ex-X10) account panel. Connecting = three wallet signatures (see
+ * lib/integrations/extendedOnboarding.ts): the trading key is derived from the
+ * first, so the account is the one extended.exchange opens for the same wallet.
+ * Pasting API keys from Extended's dashboard stays available for accounts
+ * opened another way.
  */
 export function ExtendedConnectPanel() {
   const signer = useExtendedAccount();
-  const [open, setOpen] = useState(false);
+  const { address } = useAccount();
+  const { data: walletClient } = useWalletClient();
+  const [network, setNetwork] = useState<ExtendedNetwork>("mainnet");
+  const [step, setStep] = useState<number | null>(null);
+  const [manual, setManual] = useState(false);
   const [apiKey, setApiKey] = useState("");
   const [l2PrivateKey, setL2PrivateKey] = useState("");
   const [vaultId, setVaultId] = useState("");
-  const [network, setNetwork] = useState<ExtendedNetwork>("testnet");
   const [error, setError] = useState<string | null>(null);
 
-  const connect = () => {
+  const connectWithWallet = async () => {
+    if (!address || !walletClient) return;
+    setError(null);
+    let signs = 0;
+    const next = () => setStep(Math.min(signs++, 2));
+    try {
+      next();
+      const out = await onboardExtended({
+        wallet: address,
+        network,
+        signTypedData: async (d) => {
+          const sig = await walletClient.signTypedData({ account: address, ...d } as Parameters<typeof walletClient.signTypedData>[0]);
+          next();
+          return sig;
+        },
+        signMessage: (message) => walletClient.signMessage({ account: address, message }),
+      });
+      connectExtendedAccount({ apiKey: out.apiKey, l2PrivateKey: out.l2PrivateKey, vaultId: out.vaultId, network });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(/rejected|denied/i.test(msg) ? "Signature declined, nothing was created." : msg);
+    } finally {
+      setStep(null);
+    }
+  };
+
+  const connectManual = () => {
     setError(null);
     try {
       connectExtendedAccount({ apiKey, l2PrivateKey, vaultId, network });
       setApiKey("");
       setL2PrivateKey("");
       setVaultId("");
-      setOpen(false);
+      setManual(false);
     } catch (err) {
       setError(err instanceof ExtendedKeyError ? err.message : err instanceof Error ? err.message : String(err));
     }
@@ -147,80 +214,82 @@ export function ExtendedConnectPanel() {
       <div className="hr" style={{ margin: "var(--space-3) 0" }} />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
         <h6 style={{ color: "var(--color-accent)", margin: 0 }}>Extended</h6>
-        {signer ? (
+        {signer && (
           <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
             <span className="text-muted" style={{ fontSize: 10 }}>
               {signer.network}
             </span>
-            <button
-              className="btn btn-secondary"
-              style={{ fontSize: 10, padding: "2px 8px" }}
-              onClick={() => disconnectExtendedAccount()}
-            >
+            <button className="btn btn-secondary" style={{ fontSize: 10, padding: "2px 8px" }} onClick={() => disconnectExtendedAccount()}>
               disconnect
             </button>
           </div>
-        ) : (
-          <button className="btn btn-secondary" style={{ fontSize: 10, padding: "2px 8px" }} onClick={() => setOpen((v) => !v)}>
-            {open ? "cancel" : "connect"}
-          </button>
         )}
       </div>
 
       {signer && (
-        <p style={{ fontSize: 11, margin: "6px 0 0" }} className="text-muted">
-          Connected · vault {signer.vaultId} · {signer.network}. Beta-neutral shorts and directional perps routed to
-          Extended will sign and submit live.
-        </p>
+        <>
+          <p style={{ fontSize: 11, margin: "6px 0 0" }} className="text-muted">
+            Connected · account {signer.vaultId} · {signer.network}. Perp legs routed to Extended sign and submit live.
+          </p>
+          <ExtendedBalance />
+        </>
       )}
 
-      {!signer && !open && (
-        <p style={{ fontSize: 11, margin: "6px 0 0" }} className="text-muted">
-          Not connected. Extended perp legs stay in preview until you connect an Extended account.
-        </p>
-      )}
-
-      {!signer && open && (
+      {!signer && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: "var(--space-2)" }}>
           <p style={{ fontSize: 11, margin: 0 }} className="text-muted">
-            From extended.exchange → API management: paste your API key, Stark private key, and vault (position) id.
-            These stay only in this browser — Meridian has no server that sees them. The Stark key can also authorize
-            withdrawals on Extended&apos;s side, so only paste one you&apos;re comfortable automating.
+            Perps on Starknet, settled in USDC. Connecting opens your Extended account with three signatures (no transaction,
+            no gas) and accepts Extended&apos;s{" "}
+            <a href="https://docs.extended.exchange/extended-resources/terms-and-conditions" target="_blank" rel="noreferrer">
+              terms
+            </a>
+            . The trading key stays in this browser.
           </p>
-          <input
-            className="input"
-            style={{ fontSize: 12 }}
-            placeholder="API key"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-          />
-          <input
-            className="input"
-            style={{ fontSize: 12 }}
-            placeholder="Stark private key (0x…)"
-            type="password"
-            value={l2PrivateKey}
-            onChange={(e) => setL2PrivateKey(e.target.value)}
-          />
-          <input
-            className="input"
-            style={{ fontSize: 12 }}
-            placeholder="Vault / position id"
-            value={vaultId}
-            onChange={(e) => setVaultId(e.target.value)}
-          />
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <label style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
-              <input type="radio" checked={network === "testnet"} onChange={() => setNetwork("testnet")} /> testnet
-            </label>
             <label style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
               <input type="radio" checked={network === "mainnet"} onChange={() => setNetwork("mainnet")} /> mainnet
             </label>
+            <label style={{ fontSize: 11, display: "flex", alignItems: "center", gap: 4 }}>
+              <input type="radio" checked={network === "testnet"} onChange={() => setNetwork("testnet")} /> testnet
+            </label>
           </div>
+          {step !== null ? (
+            <p style={{ fontSize: 11, margin: 0 }}>{STEP_LABELS[step]}… check your wallet.</p>
+          ) : (
+            <button className="btn btn-primary" style={{ fontSize: 12 }} disabled={!address || !walletClient} onClick={connectWithWallet}>
+              {address ? "Connect Extended with my wallet" : "Connect a wallet first"}
+            </button>
+          )}
           {error && <p style={{ fontSize: 11, margin: 0, color: "var(--risk-bad, #c0392b)" }}>{error}</p>}
-          <button className="btn btn-primary" style={{ fontSize: 12 }} onClick={connect}>
-            Connect
+
+          <button
+            className="btn btn-secondary"
+            style={{ fontSize: 10, padding: "2px 8px", alignSelf: "flex-start" }}
+            onClick={() => setManual((v) => !v)}
+          >
+            {manual ? "hide API keys" : "use API keys instead"}
           </button>
+          {manual && (
+            <>
+              <p style={{ fontSize: 11, margin: 0 }} className="text-muted">
+                From extended.exchange → API management: API key, Stark private key and vault id. They stay in this browser;
+                the Stark key can also withdraw on Extended, so only paste one you&apos;re comfortable automating.
+              </p>
+              <input className="input" style={{ fontSize: 12 }} placeholder="API key" value={apiKey} onChange={(e) => setApiKey(e.target.value)} />
+              <input
+                className="input"
+                style={{ fontSize: 12 }}
+                placeholder="Stark private key (0x…)"
+                type="password"
+                value={l2PrivateKey}
+                onChange={(e) => setL2PrivateKey(e.target.value)}
+              />
+              <input className="input" style={{ fontSize: 12 }} placeholder="Vault / position id" value={vaultId} onChange={(e) => setVaultId(e.target.value)} />
+              <button className="btn btn-secondary" style={{ fontSize: 12 }} onClick={connectManual}>
+                Connect with API keys
+              </button>
+            </>
+          )}
         </div>
       )}
 
