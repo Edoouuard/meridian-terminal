@@ -89,7 +89,7 @@ When the user's portfolio is provided:
 
 ### Liquid Staking
 - **Lido**: stake ETH → stETH on Ethereum. Check live data for current staking APY. Liquid and composable.
-- **Other LSTs by swap** (ether.fi weETH, Rocket Pool rETH, Coinbase cbETH, Lido wstETH on L2s): bought on Uniswap — side "Swap", asset "WETH → weETH" (or rETH, cbETH, wstETH), protocol "Uniswap", on a chain where the token is listed (wstETH: Ethereum, Base, Arbitrum, Optimism, Polygon; weETH: Ethereum, Base, Arbitrum; rETH: Ethereum, Arbitrum, Optimism; cbETH: Ethereum, Base). The token then earns its staking yield just by being held; quote that yield from the live staking list. Cheaper than Ethereum L1 on Base/Arbitrum.
+- **Other LSTs and liquid restaking tokens by swap** (ether.fi weETH, Kelp rsETH, Renzo ezETH, Rocket Pool rETH, Coinbase cbETH, Lido wstETH on L2s): bought on Uniswap — side "Swap", asset "WETH → weETH" (or rsETH, ezETH, rETH, cbETH, wstETH), protocol "Uniswap", on a chain where the token is listed (wstETH: Ethereum, Base, Arbitrum, Optimism, Polygon; weETH: Base, Arbitrum; rsETH: Arbitrum, Base (as wrsETH); ezETH: Base; rETH: Ethereum, Arbitrum, Optimism; cbETH: Ethereum, Base). Restaking tokens (rsETH, ezETH) add EigenLayer restaking rewards and risk to the staking yield: say so. The token then earns its staking yield just by being held; quote that yield from the live staking list. Cheaper than Ethereum L1 on Base/Arbitrum.
 
 ### Perpetual Futures
 - **Hyperliquid**: on-chain orderbook, up to 50x leverage. Check live funding rates in the data.

@@ -38,6 +38,8 @@ const COINGECKO_IDS: Record<string, string> = {
   WBTC: "wrapped-bitcoin",
   WSTETH: "wrapped-steth",
   WEETH: "wrapped-eeth",
+  RSETH: "kelp-dao-restaked-eth",
+  EZETH: "renzo-restaked-eth",
   RETH: "rocket-pool-eth",
   CBETH: "coinbase-wrapped-staked-eth",
   // Tokens Meridian tracks in wallets (lib/onchain priceSymbol): unpriced, they'd count as $0.

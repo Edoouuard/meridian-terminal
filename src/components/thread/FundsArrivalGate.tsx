@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { useAccount, useReadContract } from "wagmi";
 import type { Address } from "viem";
 import { ERC20_ABI, CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
@@ -47,10 +47,16 @@ export function FundsArrivalGate({
     query: { enabled: !!token && !!address, refetchInterval: (q) => (q.state.data !== undefined && needed !== undefined && q.state.data >= needed ? false : POLL_MS) },
   });
 
+  // Once the funds have arrived the leg stays open: executing it spends them,
+  // and the gate must not re-lock (and hide the confirmation) when they leave.
+  const reached = balance !== undefined && needed !== undefined && balance >= needed;
+  const [arrived, setArrived] = useState(false);
+  if (reached && !arrived) setArrived(true);
+
   // Can't measure it (unknown token or no price) → don't block; the leg's own
   // pre-signature balance check still applies.
   if (!token || needed === undefined || !address) return <>{children}</>;
-  if (balance !== undefined && balance >= needed) return <>{children}</>;
+  if (reached || arrived) return <>{children}</>;
 
   const chainLabel = CHAIN_LABEL[chainId] ?? `chain ${chainId}`;
   return (

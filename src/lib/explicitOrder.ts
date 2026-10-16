@@ -73,7 +73,8 @@ export function strategyForOrder(order: ExplicitPerpOrder, assets?: BudgetAsset[
   const capital = deployableUsd(assets) + hyperliquidMarginOnlyUsd(assets);
   // Without a size: most of what the user can put up as margin (the budget fit trims it to the wallet).
   const notional = Math.max(MIN_NOTIONAL_USD, Math.floor(order.sizeUsd ?? (capital > 0 ? capital * 0.8 * lev : 100)));
-  const margin = Math.ceil(notional / lev);
+  // Margin for the notional plus the 2% the order keeps for fees and slippage (and a little rounding).
+  const margin = Math.ceil((notional * 1.03) / lev);
   const protection = [order.stopLossPct ? `stop-loss ${order.stopLossPct}%` : "", order.takeProfitPct ? `take-profit ${order.takeProfitPct}%` : ""].filter(Boolean).join(", ");
   const perp: LLMLeg = {
     side: order.side,

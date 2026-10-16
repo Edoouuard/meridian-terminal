@@ -3,7 +3,7 @@ import { getAddress, isAddress } from "viem";
 import { VAULTS, findVault, isTrustedVault } from "@/lib/protocols/vaults";
 import { isExecutablePool } from "@/lib/protocols/registry";
 import { parseOpportunities } from "@/lib/protocols/opportunities";
-import { approveOrderFor, resolveOrderForLeg } from "@/lib/assetMap";
+import { approveOrderFor, findToken, resolveOrderForLeg } from "@/lib/assetMap";
 import { buildExecution, type Order } from "@/lib/execution";
 import { isWalletDebitingAction } from "@/lib/executionPlan";
 
@@ -109,5 +109,25 @@ describe("DefiLlama opportunities", () => {
     expect(isExecutablePool("sparklend", 8453, "USDC")).toBe(false);
     expect(isExecutablePool("fluid-lending", 137, "USDC")).toBe(false);
     expect(isExecutablePool("maple", 1, "USDC")).toBe(false);
+  });
+});
+
+describe("liquid restaking bought by swap (ether.fi, Kelp, Renzo)", () => {
+  it("is executable only on the chains with a deep Uniswap WETH pool", () => {
+    expect(isExecutablePool("kelp", 42161, "RSETH")).toBe(true);
+    expect(isExecutablePool("kelp", 8453, "RSETH")).toBe(true);
+    expect(isExecutablePool("renzo", 8453, "EZETH")).toBe(true);
+    expect(isExecutablePool("ether.fi-stake", 8453, "WEETH")).toBe(true);
+    // Thin on Ethereum: comparison only there.
+    expect(isExecutablePool("kelp", 1, "RSETH")).toBe(false);
+    expect(isExecutablePool("renzo", 1, "EZETH")).toBe(false);
+    expect(isExecutablePool("ether.fi-stake", 1, "WEETH")).toBe(false);
+  });
+
+  it("finds the tokens a Swap leg names, rsETH being wrsETH on Base", () => {
+    expect(findToken("rsETH", 42161)?.address).toBe("0x4186BFC76E2E237523CBC30FD220FE055156b41F");
+    expect(findToken("rsETH", 8453)?.symbol).toBe("wrsETH");
+    expect(findToken("ezETH", 8453)?.address).toBe("0x2416092f143378750bb29b79eD961ab195CcEea5");
+    expect(findToken("ezETH", 1)).toBeUndefined();
   });
 });

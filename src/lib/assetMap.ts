@@ -114,6 +114,8 @@ const SYMBOL_ALIASES: Record<string, string> = {
   celo: "CELO",
   avax: "WAVAX",
   btc: "WBTC",
+  // Kelp's rsETH is bridged to Base as wrsETH.
+  rseth: "wrsETH",
 };
 
 /** Find a tracked token by symbol on a given chain (case-insensitive). Tries exact match first, then common aliases (ETH→WETH, BNB→WBNB, etc.). */

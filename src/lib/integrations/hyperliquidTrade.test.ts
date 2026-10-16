@@ -5,6 +5,7 @@ import {
   cancelPerpOrder,
   fetchPerpAccount,
   fetchPerpMarket,
+  fitNotionalToMargin,
   hip3AssetId,
   splitDexCoin,
   fundingAprForSide,
@@ -253,5 +254,22 @@ describe("HIP-3 markets (stocks, indices, commodities)", () => {
     const sent = mockHip3({ abstraction: "unifiedAccount" });
     await perpMarketOrder(env, key, { coin: "xyz:TSLA", isBuy: false, sizeUsd: 100, user: "0x00000000000000000000000000000000000000aa" });
     expect(sent.map((a) => a.type)).toEqual(["order"]);
+  });
+});
+
+describe("fitNotionalToMargin", () => {
+  it("keeps the asked size when the margin covers it", () => {
+    expect(fitNotionalToMargin(100, 2, 60)).toBe(100);
+  });
+
+  it("opens the most the margin allows when only the fees buffer is missing (the reported $66 vs $68.34)", () => {
+    const size = fitNotionalToMargin(134, 2, 66)!;
+    expect(size).toBeCloseTo(129.41, 2);
+    expect(marginNeededUsd(size, 2)).toBeLessThanOrEqual(66);
+  });
+
+  it("waits (undefined) while the deposit hasn't landed", () => {
+    expect(fitNotionalToMargin(134, 2, 0.8)).toBeUndefined();
+    expect(fitNotionalToMargin(134, 2, 50)).toBeUndefined();
   });
 });
