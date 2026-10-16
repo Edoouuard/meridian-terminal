@@ -7,7 +7,7 @@
  * Needs anvil forks at ANVIL_URL (Base) and ANVIL_ARB_URL (Arbitrum); skipped without them.
  */
 import { describe, expect, it } from "vitest";
-import { createPublicClient, createTestClient, createWalletClient, http, keccak256, parseEther, toHex, type Address, type Chain } from "viem";
+import { createPublicClient, createTestClient, createWalletClient, encodeAbiParameters, http, keccak256, pad, parseEther, toHex, type Address, type Chain } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { arbitrum, base } from "viem/chains";
 import { ERC20_ABI } from "@/lib/onchain";
@@ -19,7 +19,6 @@ import { executePreparedOrder, prepareOrder, type OrderRunnerClient, type OrderR
 // A fresh key with no history on any chain (anvil's default accounts carry real activity, even delegated
 // code, on live L2s that a fork replays), funded on the fork itself. Never holds real funds.
 const account = privateKeyToAccount(keccak256(toHex("meridian:e2e:restaking")));
-const WETH_DEPOSIT_ABI = [{ type: "function", name: "deposit", stateMutability: "payable", inputs: [], outputs: [] }] as const;
 
 function withoutChainId(args: Record<string, unknown>): Record<string, unknown> {
   const rest = { ...args };
@@ -42,7 +41,10 @@ function kit(url: string, chain: Chain) {
   });
   const balanceOf = (token: string) => publicClient.readContract({ address: token as Address, abi: ERC20_ABI, functionName: "balanceOf", args: [account.address] });
 
-  /** Wrap 0.1 ETH and swap it for `symbol`, exactly as a "Swap WETH → symbol" leg does. */
+  /**
+   * Credit 0.1 WETH on the fork, then swap it for `symbol` exactly as a "Swap WETH → symbol" leg does.
+   * (A payable WETH.deposit() hung anvil's Base fork in CI, taking the other Base tests with it.)
+   */
   async function buy(symbol: string) {
     const weth = findToken("WETH", chain.id)!;
     const out = findToken(symbol, chain.id);
@@ -52,8 +54,14 @@ function kit(url: string, chain: Chain) {
       await testClient.setBalance({ address: account.address, value: parseEther("10") });
       funded = true;
     }
-    const hash = await walletClient.writeContract({ address: weth.address as Address, abi: WETH_DEPOSIT_ABI, functionName: "deposit", value: amount });
-    await publicClient.waitForTransactionReceipt({ hash });
+    try {
+      await testClient.request({ method: "anvil_dealERC20" as never, params: [weth.address, account.address, toHex(amount)] as never });
+    } catch {
+      // WETH9 keeps balances in slot 3.
+      const slot = keccak256(encodeAbiParameters([{ type: "address" }, { type: "uint256" }], [account.address, 3n]));
+      await testClient.setStorageAt({ address: weth.address as Address, index: slot, value: pad(toHex(amount)) });
+    }
+    expect(await balanceOf(weth.address)).toBe(amount);
 
     const quotes = await Promise.all(
       QUOTE_FEE_TIERS.map(async (fee) => {
