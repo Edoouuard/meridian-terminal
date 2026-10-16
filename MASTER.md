@@ -42,7 +42,8 @@ Un utilisateur DeFi équipé d'un wallet, qui gère de quelques milliers à quel
 | Exécution spot (Aave, Morpho, Spark, Fluid, Yearn, Sky, Ethena, Lido, EigenLayer, Pendle, Uniswap, wrap WETH) | 🟡 prouvée sur forks en CI | Aucune transaction réelle confirmée par protocole |
 | Bridges (deBridge, LI.FI) | 🟡 prouvés sur fork Arbitrum | Aucun bridge réel de bout en bout |
 | Hyperliquid (dépôt, perps avec SL/TP, vente spot UETH/UBTC, retrait) | 🟡 signature identique au SDK officiel (vecteurs testés) ; retrait vers Compound confirmé par le propriétaire | Perps jamais exécutés sur un vrai compte |
-| Perps Extended, Ondo, Lighter | 🟡 codés, activés en prod | Jamais exécutés en réel |
+| Perps Extended | 🟡 connexion wallet + ordres prouvés sur testnet | Jamais exécuté sur mainnet |
+| Perps Ondo, Lighter | 🟡 codés, activés en prod | Jamais exécutés en réel |
 | Bêta (mot de passe, bug report `/api/feedback`, Sentry, `[exec-log]`, WalletConnect si configuré) | ✅ | WalletConnect à configurer ; aucun testeur |
 | TradFi | ❌ absent (hors perps Ondo) | — |
 
@@ -114,7 +115,7 @@ Un utilisateur DeFi équipé d'un wallet, qui gère de quelques milliers à quel
 3. **Simulation avant signature.** Une simulation qui échoue bloque.
 4. **Health factor** : tout borrow/withdraw Aave simulé ; refus sous 1,10.
 5. **Meridian ne signe jamais** : le serveur ne détient aucune clé.
-6. **Un seul chemin d'exécution** : tout ordre wallet passe par `lib/orderRunner.ts` (via `useExecuteOrder` ou `useStrategyExecutor`). Seuls les perps et le spot Hyperliquid ont leur propre chemin : Hyperliquid signe avec une clé de trading générée dans le navigateur et approuvée une fois par le wallet (`lib/integrations/hyperliquidTrade.ts`, elle peut trader, jamais retirer) ; Extended (StarkEx) et Ondo/Lighter (LI.FI Perps) ont leur signature propre.
+6. **Un seul chemin d'exécution** : tout ordre wallet passe par `lib/orderRunner.ts` (via `useExecuteOrder` ou `useStrategyExecutor`). Seuls les perps et le spot Hyperliquid ont leur propre chemin : Hyperliquid signe avec une clé de trading générée dans le navigateur et approuvée une fois par le wallet (`lib/integrations/hyperliquidTrade.ts`, elle peut trader, jamais retirer) ; Extended (StarkEx, clé Stark dérivée d'une signature du wallet, appels via le relais `/api/extended` faute de CORS) et Ondo/Lighter (LI.FI Perps) ont leur signature propre.
 7. **Budget** : aucune stratégie ne demande plus de capital frais que le solde libre (`lib/budgetFit.ts`, appliqué côté serveur après le LLM).
 
 ### 3.4 Configuration (Vercel)
@@ -223,7 +224,13 @@ Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenis�
 - [ ] [moi] Moonwell / Venus (forks Compound) sur Base et BNB.
 
 **P4 Autres venues perps**
-- [ ] [moi] Prouver Extended, Ondo, Lighter en réel (aujourd'hui codés, jamais exécutés) puis GMX v2 (Arbitrum, ordres on-chain via `onchain.ts`).
+- [x] [moi] Extended : connexion par trois signatures du wallet (clé de trading Stark dérivée de la signature, compte ouvert ou retrouvé, clé API émise), plus de copier-coller de clés. L'API d'Extended n'a pas de CORS : tous les appels passent par le relais `/api/extended/<réseau>/…` (chemins limités à `api/v1/*` et `auth/onboard`, rien n'est stocké). Ordres dimensionnés sur le prix mark d'Extended, arrondis au pas et au tick du marché, minimum vérifié, levier appliqué, fill confirmé (un IOC annulé est un échec, avec la raison). *Preuve : signatures identiques au SDK python officiel (tests `extendedOnboarding`), parcours complet sur le testnet Extended le 2026-10-16 (compte ouvert, onboarding répété → même compte, clé API, ordre limite posé puis annulé), tests `extended-live`.*
+- [ ] [toi] Connecter Extended (mainnet), déposer 15-20 $ sur extended.exchange avec le même wallet, ouvrir puis fermer un long ETH minimal (0,01 ETH). *Preuve : fill affiché + position dans Risk → Perp positions.*
+- [ ] [moi] Dépôt vers Extended depuis Meridian (aujourd'hui sur extended.exchange).
+- [ ] [moi] Prouver Ondo, Lighter en réel puis GMX v2 (Arbitrum, ordres on-chain via `onchain.ts`).
+
+**P5 Suivi des positions perps**
+- [x] [moi] Onglet Risk : le panneau « Perp positions » remplace « Vault risk ». Toutes les positions (Hyperliquid, HIP-3, Extended) avec PnL latent et ROE, funding reçu / payé depuis l'ouverture, distance à la liquidation (orange < 25 %, rouge < 10 %), SL / TP ; totaux en tête (PnL, funding, marge, position la plus proche de la liquidation) ; rafraîchi toutes les 15 s. *Preuve : tests `perpPositions` ; signe du funding Hyperliquid vérifié sur positions réelles (`cumFunding.sinceOpen` positif = payé) ; captures desktop et mobile.*
 
 ### Phase 1 — Bêta fermée : apprendre et fiabiliser (semaines 3-8)
 
@@ -393,6 +400,7 @@ Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenis�
 
 | Date | Fait | Preuve |
 |---|---|---|
+| 2026-10-16 | Extended connecté par le wallet (trois signatures, plus de clés à coller) via un relais serveur (l'API Extended n'a pas de CORS : l'intégration précédente ne pouvait pas marcher depuis le navigateur) ; ordres au prix mark Extended avec pas, tick, minimum, levier et fill confirmé. Panneau « Perp positions » dans Risk à la place de « Vault risk » : PnL, funding, liquidation, SL/TP sur toutes les venues | tests `extendedOnboarding` (vecteurs SDK python), `extended-live`, `perpPositions` ; testnet Extended |
 | 2026-10-16 | Bug (test réel du propriétaire) : short ETH bloqué « needs ~$68.34 » avec 66 $ de marge déposée — l'ordre s'ajuste à la marge quand seul le tampon de frais manque, les plans déposent ce tampon ; l'étape dépôt ne se re-bloque plus une fois les fonds arrivés | tests `fitNotionalToMargin`, `strategyIntegrity` |
 | 2026-10-16 | Restaking liquide exécutable : Kelp rsETH / wrsETH, Renzo ezETH, ether.fi weETH par swap Uniswap sur Base et Arbitrum | `e2e/restaking.fork.test.ts` (Arbitrum), cotations live (Base), tests `protocols` |
 | 2026-10-16 | Bug : « short ETH levier 2, SL 20% » donnait du lending. Un ordre explicite (côté, marché, levier, SL/TP, taille) devient la stratégie 1, garanti côté serveur ; SL/TP pré-remplis sur le bouton perp | tests `explicitOrder` |

@@ -1,9 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import type { Signer as ExtendedSigner } from "@blackcube/extended-sdk";
-import { executeExtendedPerp, type ExecuteExtendedResult } from "@/lib/integrations/extended-live";
-import type { PriceEntry } from "@/lib/quote";
+import { executeExtendedPerp, type ExecuteExtendedParams, type ExecuteExtendedResult } from "@/lib/integrations/extended-live";
 
 export type ExtendedPerpStatus = "idle" | "submitting" | "confirmed" | "error";
 
@@ -14,7 +12,7 @@ export interface ExtendedPerpState {
 }
 
 export interface UseExtendedPerpResult extends ExtendedPerpState {
-  execute: (p: { signer: ExtendedSigner; symbol: string; isBuy: boolean; sizeUsd: number; prices?: PriceEntry[]; reduceOnly?: boolean; qtyOverride?: number }) => Promise<void>;
+  execute: (p: ExecuteExtendedParams) => Promise<void>;
   reset: () => void;
 }
 
@@ -30,7 +28,7 @@ export function useExtendedPerp(): UseExtendedPerpResult {
   const submittingRef = useRef(false);
 
   const execute = useCallback(
-    async (p: { signer: ExtendedSigner; symbol: string; isBuy: boolean; sizeUsd: number; prices?: PriceEntry[]; reduceOnly?: boolean }) => {
+    async (p: ExecuteExtendedParams) => {
       if (submittingRef.current) return;
       submittingRef.current = true;
       try {

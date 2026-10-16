@@ -451,7 +451,7 @@ export function ExtendedPerpExecuteButton({ leg, prices }: { leg: TradeLeg; pric
     return (
       <NotWired
         venue="Extended"
-        reason="Connect your Extended account (API key + Stark key from extended.exchange → API management) in the Extended panel to trade this leg live."
+        reason="Connect Extended in Tools → Extended (three wallet signatures, no gas) to trade this leg live."
       />
     );
   }
@@ -467,7 +467,9 @@ export function ExtendedPerpExecuteButton({ leg, prices }: { leg: TradeLeg; pric
   if (status === "confirmed" && result) {
     return (
       <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-accent-700)" }}>
-        Order submitted on Extended {result.network}: {result.market}{result.qty ? ` · ${result.qty}` : ""}. Check the fill in the Extended panel.
+        {result.filledQty
+          ? `Filled on Extended: ${result.filledQty} ${symbol.toUpperCase()}${result.avgPrice ? ` at $${Number(result.avgPrice).toLocaleString("en-US", { maximumFractionDigits: 4 })}` : ""}. Track it under Risk → Perp positions.`
+          : `Order sent to Extended ${result.network}: ${result.market} · ${result.qty}. The fill shows under Risk → Perp positions.`}
         <button onClick={reset} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 11 }}>
           clear
         </button>
@@ -506,7 +508,7 @@ export function ExtendedPerpExecuteButton({ leg, prices }: { leg: TradeLeg; pric
               <>
                 {" "}
                 ≈ <strong>{coinQty.toFixed(4)}</strong> {symbol.toUpperCase()} at ~${price!.toFixed(2)} each, signed
-                with your Stark key and submitted directly to Extended.
+                in this browser with your Extended trading key. Sized on Extended&apos;s own mark price at submission, filled within 1% or not at all.
               </>
             ) : (
               <> No live price for {symbol} yet — signing will be refused if one isn&apos;t available.</>
@@ -517,7 +519,7 @@ export function ExtendedPerpExecuteButton({ leg, prices }: { leg: TradeLeg; pric
         warning={signer.network === "testnet" ? "TESTNET — no real funds." : "Mainnet — real funds. Confirm carefully."}
         onConfirm={() => {
           setConfirming(false);
-          execute({ signer, symbol, isBuy, sizeUsd, prices });
+          execute({ signer, symbol, isBuy, sizeUsd, prices, leverage: leg.leverage });
         }}
         onCancel={() => setConfirming(false)}
       />

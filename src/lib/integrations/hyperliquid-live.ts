@@ -65,6 +65,15 @@ export interface HlPosition {
   leverage: number;
   /** 0 when Hyperliquid reports none (e.g. fully isolated-margin-covered). */
   liquidationPx: number;
+  /** Margin locked by this position, USD. */
+  marginUsed?: number;
+  /**
+   * Funding received (+) or paid (−) since the position opened. Hyperliquid's
+   * `cumFunding.sinceOpen` counts funding PAID as positive, so it is negated
+   * (checked 2026-10-16 against `userFunding`: a BTC long paying a positive
+   * rate had sinceOpen +562; a DYDX short receiving it had −526).
+   */
+  fundingSinceOpen?: number;
 }
 
 /** The user's Hyperliquid account snapshot. */
@@ -85,6 +94,8 @@ interface RawPosition {
     notional?: string;
     leverage?: { value?: number | string };
     liquidationPx?: string | null;
+    marginUsed?: string;
+    cumFunding?: { sinceOpen?: string };
   };
 }
 
@@ -113,6 +124,8 @@ export function parseClearinghouseState(data: (RawClearinghouse & { clearinghous
       unrealizedPnl: num(p.unrealizedPnl),
       leverage: num(p.leverage?.value ?? 1),
       liquidationPx: p.liquidationPx ? num(p.liquidationPx) : 0,
+      marginUsed: num(p.marginUsed),
+      fundingSinceOpen: p.cumFunding?.sinceOpen !== undefined ? -num(p.cumFunding.sinceOpen) : 0,
     }))
     .filter((p) => Math.abs(p.size) > 0.00000001);
   const totalMargin = num(ch.marginSummary?.totalMarginUsed);

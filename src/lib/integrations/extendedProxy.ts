@@ -1,0 +1,60 @@
+/**
+ * extendedProxy.ts — the same-origin relay to Extended's API.
+ *
+ * Extended's API answers no CORS preflight (405, no Access-Control-* headers;
+ * checked 2026-10-16 on mainnet and testnet), so the browser talks to
+ * `/api/extended/<network>/…` and the route in `app/api/extended` forwards to
+ * Extended. These helpers are shared by that route (what may be forwarded)
+ * and by the browser code (where the SDK should send its requests).
+ */
+
+export type ExtendedNetworkName = "mainnet" | "testnet";
+
+/** Extended's own hosts (python SDK `x10/config.py`). Onboarding and REST share the host. */
+export const EXTENDED_HOSTS: Record<ExtendedNetworkName, string> = {
+  mainnet: "https://api.starknet.extended.exchange",
+  testnet: "https://api.starknet.sepolia.extended.exchange",
+};
+
+const SEGMENT = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * The Extended URL a relayed request maps to, or null when the request is not
+ * one Meridian makes: only the REST API (`api/v1/…`) and account onboarding
+ * (`auth/onboard`) are reachable, never arbitrary paths on the host.
+ */
+export function extendedUpstreamUrl(network: string, path: string[], search = ""): string | null {
+  if (network !== "mainnet" && network !== "testnet") return null;
+  if (path.length === 0 || path.some((s) => !SEGMENT.test(s) || s === "." || s === "..")) return null;
+  const isRest = path[0] === "api" && path[1] === "v1" && path.length > 2;
+  const isOnboard = path.length === 2 && path[0] === "auth" && path[1] === "onboard";
+  if (!isRest && !isOnboard) return null;
+  return `${EXTENDED_HOSTS[network]}/${path.join("/")}${search}`;
+}
+
+/** Request headers Extended needs; everything else (cookies, origin…) stays here. */
+const FORWARDED = ["content-type", "accept", "x-api-key", "l1_signature", "l1_message_time", "x-x10-active-account"];
+
+export function forwardableExtendedHeaders(incoming: Headers): Headers {
+  const out = new Headers();
+  for (const name of FORWARDED) {
+    const v = incoming.get(name);
+    if (v) out.set(name, v);
+  }
+  // Extended rejects requests without a User-Agent; browsers won't let a page set one.
+  out.set("user-agent", "meridian-terminal");
+  return out;
+}
+
+/** Base path of the relay for a network, as seen from the browser. */
+export function extendedRelayBase(network: ExtendedNetworkName, origin = typeof window === "undefined" ? "" : window.location.origin): string {
+  return `${origin}/api/extended/${network}`;
+}
+
+/** SDK `restUrls` pointing at the relay (the SDK appends paths like `/user/positions`). */
+export function extendedRestUrls(origin?: string): Record<ExtendedNetworkName, string> {
+  return {
+    mainnet: `${extendedRelayBase("mainnet", origin)}/api/v1`,
+    testnet: `${extendedRelayBase("testnet", origin)}/api/v1`,
+  };
+}

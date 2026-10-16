@@ -18,7 +18,7 @@ import { HyperliquidPanel } from "@/components/HyperliquidPanel";
 import { ExtendedConnectPanel } from "@/components/ExtendedConnectPanel";
 import { LifiPerpsConnectPanel } from "@/components/LifiPerpsConnectPanel";
 import { LidoWithdrawalsPanel } from "@/components/LidoWithdrawalsPanel";
-import { VaultRiskPanel } from "@/components/VaultRiskPanel";
+import { PerpPositionsPanel } from "@/components/PerpPositionsPanel";
 import { SolanaPanel } from "@/components/SolanaPanel";
 import { McpStatusPanel } from "@/components/McpStatusPanel";
 import { BridgePanel } from "@/components/BridgePanel";
@@ -116,7 +116,7 @@ export default function TerminalApp() {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   // Everything below Positions used to stack 9 panels in one long scroll
-  // (Risk, Vault risk, 4 venue connect panels, History, Chains, Solana) --
+  // (Risk, Perp positions, 4 venue connect panels, History, Chains, Solana) --
   // grouped into tabs so the left column stays scannable instead of dense.
   const [leftTab, setLeftTab] = useState<"risk" | "strategies" | "venues" | "activity">("risk");
   const sideTabsRef = useRef<HTMLDivElement>(null);
@@ -368,7 +368,7 @@ export default function TerminalApp() {
           {leftTab === "risk" && (
             <>
               <RiskPanel live={live} isConnected={isConnected} />
-              <VaultRiskPanel />
+              <PerpPositionsPanel />
             </>
           )}
           {leftTab === "venues" && (
