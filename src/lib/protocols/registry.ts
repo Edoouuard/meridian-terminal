@@ -42,11 +42,12 @@ export const PROTOCOLS: Record<string, ProtocolInfo> = {
   "yearn-finance": { name: "Yearn", category: "savings", coverage: "vault" },
   // Watched: live rates for comparison only
   maple: { name: "Maple", category: "credit", coverage: "watch" },
-  "ether.fi-stake": { name: "ether.fi", category: "staking", coverage: "watch" },
+  // Liquid (re)staking tokens bought with a Uniswap swap, on the chains with a deep WETH pool (see SWAP_LST_CHAINS).
+  "ether.fi-stake": { name: "ether.fi", category: "staking", coverage: "execute" },
+  kelp: { name: "Kelp", category: "restaking", coverage: "execute" },
+  renzo: { name: "Renzo", category: "restaking", coverage: "execute" },
   "binance-staked-eth": { name: "Binance wBETH", category: "staking", coverage: "watch" },
   "coinbase-wrapped-staked-eth": { name: "Coinbase cbETH", category: "staking", coverage: "watch" },
-  kelp: { name: "Kelp", category: "restaking", coverage: "watch" },
-  renzo: { name: "Renzo", category: "restaking", coverage: "watch" },
   "stakewise-v3": { name: "StakeWise", category: "staking", coverage: "watch" },
   "meth-protocol": { name: "Mantle mETH", category: "staking", coverage: "watch" },
   "liquid-collective": { name: "Liquid Collective", category: "staking", coverage: "watch" },
@@ -64,6 +65,13 @@ export const PROTOCOLS: Record<string, ProtocolInfo> = {
   "hyperlend-pooled": { name: "HyperLend", category: "lending", coverage: "watch" },
   "kinetiq-khype": { name: "Kinetiq", category: "staking", coverage: "watch" },
   "felix-cdp": { name: "Felix", category: "savings", coverage: "watch" },
+};
+
+/** Where a liquid (re)staking token is bought by swap: chains whose Uniswap v3 WETH pool is deep (checked on-chain 2026-10-16). */
+export const SWAP_LST_CHAINS: Record<string, number[]> = {
+  "ether.fi-stake": [8453, 42161],
+  kelp: [42161, 8453],
+  renzo: [8453],
 };
 
 /** DefiLlama chain name → chain id, for Meridian's active chains (HyperEVM is "Hyperliquid L1" in DefiLlama). */
@@ -84,7 +92,7 @@ export function assetKind(symbol: string): "stable" | "eth" | "hype" | "other" {
   const s = symbol.toUpperCase();
   if (STABLE_SYMBOLS.has(s)) return "stable";
   if (/^(HYPE|WHYPE|KHYPE|STHYPE|WSTHYPE|LHYPE|BEHYPE|HBHYPE)$/.test(s)) return "hype";
-  if (/^(W?ETH|STETH|WSTETH|RETH|CBETH|WEETH|EZETH|RSETH|METH|WBETH|OSETH|LSETH|ETHX)$/.test(s)) return "eth";
+  if (/^(W?ETH|STETH|WSTETH|RETH|CBETH|WEETH|EZETH|RSETH|WRSETH|METH|WBETH|OSETH|LSETH|ETHX)$/.test(s)) return "eth";
   return "other";
 }
 
@@ -106,6 +114,7 @@ export function isExecutablePool(project: string, chainId: number, symbol: strin
     if (project === "sparklend" || project === "lido" || project === "rocket-pool") return chainId === 1;
     if (project === "pendle") return chainId === 1 || chainId === 8453 || chainId === 42161;
     if (project === "morpho-blue") return chainId === 1 || chainId === 8453 || chainId === 42161;
+    if (SWAP_LST_CHAINS[project]) return SWAP_LST_CHAINS[project].includes(chainId);
     return true;
   }
   if (info.coverage === "vault") return vaultForPool(project, chainId, symbol) !== undefined;

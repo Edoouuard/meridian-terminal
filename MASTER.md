@@ -143,7 +143,8 @@ Un utilisateur DeFi équipé d'un wallet, qui gère de quelques milliers à quel
 
 - **Exécutables (intégration dédiée)** : Aave, Compound, Morpho, Spark (SparkLend), Lido, Rocket Pool, Pendle, EigenLayer.
 - **Exécutables (vaults ERC-4626 vérifiés, un seul chemin de signature)** : Fluid (fUSDC/fUSDT/fWETH sur Ethereum, Arbitrum, Base), Sky sUSDS (Ethereum), Spark Savings sUSDC (Ethereum, Base, Arbitrum), Ethena sUSDe (Ethereum, sortie en 7 jours). Chaque vault : `asset()` vérifié on-chain avant ajout et à chaque audit, dépôt prouvé sur fork en CI.
-- **Comparaison seulement** : Maple, ether.fi, cbETH, wBETH, Kelp, Renzo, StakeWise, mETH, Liquid Collective, Aave v4, Yearn, Curve LlamaLend, Venus, Lista, Dolomite, Euler, Silo, Benqi, Moonwell, Centrifuge.
+- **Exécutables par swap Uniswap (pool WETH profond vérifié on-chain)** : ether.fi weETH (Base, Arbitrum), Kelp rsETH (Arbitrum, wrsETH sur Base), Renzo ezETH (Base).
+- **Comparaison seulement** : Maple, cbETH, wBETH, StakeWise, mETH, Liquid Collective, Aave v4, Yearn, Curve LlamaLend, Venus, Lista, Dolomite, Euler, Silo, Benqi, Moonwell, Centrifuge.
 - Onglet **Yields** (colonne droite) et contexte du planner : meilleurs rendements mono-actif ≥ 5 M$ de TVL sur les 7 chaînes, séparés « exécutable » / « comparaison ».
 - Ajouter un protocole = une ligne dans `registry.ts` (et, pour un vault ERC-4626, une ligne vérifiée dans `vaults.ts`).
 
@@ -217,7 +218,8 @@ Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenis�
 
 **P3 Plus de protocoles exécutables**
 - [ ] [moi] Vaults ERC-4626 vérifiés on-chain : Euler v2, Morpho (coffres supplémentaires), Yearn v3, Silo v2 — une ligne par vault dans `vaults.ts`, dépôt prouvé sur fork.
-- [ ] [moi] Restaking liquide : ether.fi (weETH), Kelp (rsETH), Renzo (ezETH) — dépôt direct ou swap Uniswap.
+- [x] [moi] Restaking liquide par swap Uniswap, là où le pool WETH est profond (vérifié on-chain : 0,1 WETH coté à < 1 % du taux) : ether.fi weETH (Base, Arbitrum), Kelp rsETH (Arbitrum ; wrsETH sur Base), Renzo ezETH (Base). Ethereum exclu (pools trop minces). Jetons suivis dans le portefeuille et valorisés, protocoles exécutables dans le registre, planner informé. *Preuve : test fork `e2e/restaking.fork.test.ts` (achat réel via orderRunner sur forks Base et Arbitrum), tests registre / jetons.*
+- [ ] [moi] Vaults Euler v2 / Silo v2 : DefiLlama n'en liste aucun ≥ 5 M$ en USDC/WETH sur Ethereum, Base ou Arbitrum (vérifié 2026-10-16) — à reprendre quand la liquidité y sera.
 - [ ] [moi] Moonwell / Venus (forks Compound) sur Base et BNB.
 
 **P4 Autres venues perps**
@@ -391,6 +393,7 @@ Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenis�
 
 | Date | Fait | Preuve |
 |---|---|---|
+| 2026-10-16 | Restaking liquide exécutable : Kelp rsETH / wrsETH, Renzo ezETH, ether.fi weETH par swap Uniswap sur Base et Arbitrum | `e2e/restaking.fork.test.ts`, tests `protocols` |
 | 2026-10-16 | Bug : « short ETH levier 2, SL 20% » donnait du lending. Un ordre explicite (côté, marché, levier, SL/TP, taille) devient la stratégie 1, garanti côté serveur ; SL/TP pré-remplis sur le bouton perp | tests `explicitOrder` |
 | 2026-10-16 | Perps HIP-3 (actions, indices, matières premières) : résolution des marchés, identifiants d'actif, levier isolé, abstraction de dex, liste live dans le planner, positions et ordres dans le panneau | tests `hyperliquidExchange` (vecteurs SDK), `hyperliquidTrade` (HIP-3) |
 | 2026-10-16 | Ordres limite Hyperliquid (GTC / post-only), annulation et déplacement des ordres ouverts, stop-loss / take-profit visibles dans le panneau | tests `hyperliquidExchange` (vecteurs SDK cancel, batchModify), `hyperliquidTrade` |

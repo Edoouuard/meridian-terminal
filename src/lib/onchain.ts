@@ -212,6 +212,9 @@ export const TRACKED_TOKENS_BY_CHAIN: Record<number, TrackedToken[]> = {
     { symbol: "AERO", address: "0x940181a94A35A4569E4529A3CDfB74e38FD98631", decimals: 18, priceSymbol: "AERO", venue: "Wallet" },
     { symbol: "cbETH", address: "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22", decimals: 18, priceSymbol: "CBETH", venue: "Wallet" },
     { symbol: "weETH", address: "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A", decimals: 18, priceSymbol: "WEETH", venue: "Wallet" },
+    // Liquid restaking (Kelp, Renzo): symbol/decimals checked on-chain 2026-10-16; Uniswap v3 WETH pools quote 0.1 WETH within 1% of the exchange rate.
+    { symbol: "wrsETH", address: "0xEDfa23602D0EC14714057867A78d01e94176BEA0", decimals: 18, priceSymbol: "RSETH", venue: "Wallet" },
+    { symbol: "ezETH", address: "0x2416092f143378750bb29b79eD961ab195CcEea5", decimals: 18, priceSymbol: "EZETH", venue: "Wallet" },
     { symbol: "USDT", address: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", decimals: 6, priceSymbol: "USDT", venue: "Wallet" },
   ],
   [arbitrum.id]: [
@@ -227,6 +230,8 @@ export const TRACKED_TOKENS_BY_CHAIN: Record<number, TrackedToken[]> = {
     { symbol: "UNI", address: "0xFa7F8980b0f1E64A2062791cc3b0871572f1F7f0", decimals: 18, priceSymbol: "UNI", venue: "Wallet" },
     { symbol: "AAVE", address: "0xba5DdD1f9d7F570dc94a51479a000E3BCE967196", decimals: 18, priceSymbol: "AAVE", venue: "Wallet" },
     { symbol: "weETH", address: "0x35751007a407ca6FEFfE80b3cB397736D2cf4dbe", decimals: 18, priceSymbol: "WEETH", venue: "Wallet" },
+    // Kelp rsETH: symbol/decimals checked on-chain 2026-10-16; the 0.3% Uniswap v3 WETH pool quotes 0.1 WETH within 1% of the exchange rate.
+    { symbol: "rsETH", address: "0x4186BFC76E2E237523CBC30FD220FE055156b41F", decimals: 18, priceSymbol: "RSETH", venue: "Wallet" },
     { symbol: "rETH", address: "0xEC70Dcb4A1EFa46b8F2D97C310C9c4790ba5ffA8", decimals: 18, priceSymbol: "RETH", venue: "Wallet" },
     { symbol: "GHO", address: "0x7dfF72693f6A4149b17e7C6314655f6A9F7c8B33", decimals: 18, priceSymbol: "GHO", venue: "Wallet" },
   ],
