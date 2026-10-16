@@ -24,6 +24,9 @@ export interface LLMLeg {
   chain?: string;
   toChain?: string;
   fromAsset?: string;
+  /** Perp legs: stop-loss / take-profit in % of price from the entry. */
+  stopLossPct?: number;
+  takeProfitPct?: number;
 }
 
 export interface LLMStrategy {
@@ -290,7 +293,7 @@ function cleanNumbers(l: LLMLeg): LLMLeg {
   const protocol = typeof l.protocol === "string" ? l.protocol : "";
   // Hyperliquid deposits only go from Arbitrum (Bridge2), whatever chain the model wrote ("Hyperliquid", none…).
   const chain = /hyperliquid/i.test(protocol) && /^deposit$/i.test(l.side.trim()) ? "Arbitrum" : l.chain;
-  return { ...l, protocol, chain, sizeUsd: num(l.sizeUsd), leverage: num(l.leverage) };
+  return { ...l, protocol, chain, sizeUsd: num(l.sizeUsd), leverage: num(l.leverage), stopLossPct: num(l.stopLossPct), takeProfitPct: num(l.takeProfitPct) };
 }
 
 /** Below this, the planner already says the wallet is too thin: nothing to scale to. */

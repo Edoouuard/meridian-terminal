@@ -59,6 +59,9 @@ export interface TradeLeg {
    * unconverted instead of silently reinterpreting or dropping it.
    */
   sizeToken?: string;
+  /** Perp legs: stop-loss / take-profit distance the user asked for, in % of price from the entry. */
+  stopLossPct?: number;
+  takeProfitPct?: number;
 }
 
 export interface TradePlan {
