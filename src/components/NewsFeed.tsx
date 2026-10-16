@@ -6,6 +6,7 @@ import type { AlphaEntry, AlphaTag } from "@/app/api/alpha/route";
 import { ChainOverview } from "@/components/ChainOverview";
 import { AskButton } from "@/components/AskButton";
 import { YieldsPanel } from "@/components/YieldsPanel";
+import { newsPrompt, type NewsItem } from "@/lib/news";
 
 const ALPHA_TAG_CLASS: Record<AlphaTag, string> = {
   "New protocol": "tag-neutral",
@@ -47,6 +48,86 @@ function useAlpha() {
   });
 }
 
+interface NewsResponse {
+  status: "ok" | "stale" | "unavailable" | "not_configured";
+  items: NewsItem[];
+  fetchedAt?: string;
+}
+
+function useNews(enabled: boolean) {
+  return useQuery<NewsResponse>({
+    queryKey: ["news"],
+    queryFn: async () => {
+      const res = await fetch("/api/news", { cache: "no-store" });
+      if (!res.ok) throw new Error("news fetch failed");
+      return res.json();
+    },
+    enabled,
+    staleTime: 10 * 60_000,
+    refetchInterval: enabled ? 15 * 60_000 : false,
+  });
+}
+
+function fmtPublished(iso: string | undefined, now: number): string {
+  if (!iso) return "";
+  const m = Math.round((now - Date.parse(iso)) / 60_000);
+  if (!Number.isFinite(m) || m < 1) return "just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  return h < 48 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
+}
+
+/** Crypto headlines (NewsData.io via /api/news), each with an "Ask Meridian" about the user's positions. */
+function NewsPanel({ now }: { now: number }) {
+  const news = useNews(true);
+  const items = news.data?.items ?? [];
+  const status = news.data?.status;
+  return (
+    <section className="panel-card" style={{ gap: 0 }}>
+      <div className="panel-card__head">
+        <h6 className="panel-card__title">News</h6>
+        <span className="text-muted" style={{ fontSize: 11 }}>
+          {items.length > 0 ? `NewsData${status === "stale" ? " · delayed" : ""} · ${fmtAge(now - news.dataUpdatedAt)}` : ""}
+        </span>
+      </div>
+      {items.length > 0 ? (
+        items.map((n) => (
+          <article key={n.id} className="news-item">
+            <p className="news-item__meta text-muted">
+              {n.source}
+              {n.publishedAt ? ` · ${fmtPublished(n.publishedAt, now)}` : ""}
+            </p>
+            <a className="news-item__title" href={n.link} target="_blank" rel="noopener noreferrer">
+              {n.title}
+            </a>
+            {n.coins.length > 0 && (
+              <div className="news-item__coins">
+                {n.coins.slice(0, 4).map((c) => (
+                  <span key={c} className="tag tag-neutral">
+                    {c}
+                  </span>
+                ))}
+              </div>
+            )}
+            <AskButton label="Ask about this" prompt={newsPrompt(n)} />
+          </article>
+        ))
+      ) : (
+        <p className="text-muted" style={{ fontSize: 12, margin: "var(--space-2) 0 0" }}>
+          {news.isLoading
+            ? "Fetching headlines…"
+            : status === "not_configured"
+              ? "News isn't configured yet (NEWSDATA_API_KEY)."
+              : "No headlines right now — the news source is unreachable."}
+        </p>
+      )}
+      <p className="text-muted" style={{ fontSize: 10, margin: "var(--space-2) 0 0" }}>
+        Headlines from NewsData.io, refreshed every 15 minutes. Not investment advice; links open the original article.
+      </p>
+    </section>
+  );
+}
+
 /**
  * The "Chains / Alpha" column — Meridian's pitch is being the overlay across
  * every DeFi protocol/chain it supports, so this slot leads with exactly
@@ -63,7 +144,7 @@ function useAlpha() {
  * stale content that looks live but isn't.
  */
 export function NewsFeed() {
-  const [tab, setTab] = useState<"yields" | "chains" | "alpha">("yields");
+  const [tab, setTab] = useState<"yields" | "news" | "chains" | "alpha">("yields");
   const now = useNowTick();
 
   const alpha = useAlpha();
@@ -71,10 +152,14 @@ export function NewsFeed() {
 
   return (
     <>
-      <div className="seg side-tabs" style={{ gridTemplateColumns: "repeat(3, 1fr)" }}>
+      <div className="seg side-tabs" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
         <label className="seg-opt">
           <input type="radio" name="feed-tab" checked={tab === "yields"} onChange={() => setTab("yields")} />
           <span>Yields</span>
+        </label>
+        <label className="seg-opt">
+          <input type="radio" name="feed-tab" checked={tab === "news"} onChange={() => setTab("news")} />
+          <span>News</span>
         </label>
         <label className="seg-opt">
           <input type="radio" name="feed-tab" checked={tab === "chains"} onChange={() => setTab("chains")} />
@@ -88,6 +173,8 @@ export function NewsFeed() {
 
       {tab === "yields" ? (
         <YieldsPanel />
+      ) : tab === "news" ? (
+        <NewsPanel now={now} />
       ) : tab === "chains" ? (
         <section className="panel-card">
           <ChainOverview hideDivider />

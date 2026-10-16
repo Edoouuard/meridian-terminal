@@ -65,7 +65,7 @@ const ALL_STEPS: TourStep[] = [
   {
     target: "markets",
     title: "Live rates and markets",
-    body: "Yields by asset, chain overview and alpha. Every row has an “Ask Meridian” button that turns it into a strategy.",
+    body: "Yields by asset, crypto news, chain overview and alpha. Every row has an “Ask Meridian” button that turns it into a strategy.",
   },
   {
     target: "extended",
