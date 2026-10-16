@@ -43,6 +43,8 @@ export interface TrackedStrategy {
   /** Set when the last leg confirms: the strategy is live from then on. */
   completedAt?: number;
   legs: TrackedLeg[];
+  /** Two legs that make one neutral position: exposed while only one of them is filled. */
+  pair?: [number, number];
 }
 
 export interface ConfirmInfo {
@@ -75,6 +77,7 @@ function trackedFromPlan(plan: TradePlan, now: number, owner?: string): TrackedS
     tier: view.tier,
     exit: view.exit,
     createdAt: now,
+    pair: plan.pair?.legs,
     legs: plan.legs.map((l: TradeLeg) => ({
       side: l.side,
       asset: l.asset,
@@ -137,6 +140,37 @@ export function liveSince(s: TrackedStrategy): number | undefined {
   if (!isLive(s.legs)) return undefined;
   const times = s.legs.filter((l) => !isMoveLeg(l) && l.confirmedAt !== undefined).map((l) => l.confirmedAt as number);
   return times.length > 0 ? Math.max(...times) : s.createdAt;
+}
+
+/**
+ * Where a strategy stands: "partially_filled" when one leg of its neutral pair
+ * is filled and the other isn't (the position carries price exposure until
+ * the second fills or the first is closed), "live" once every leg is in,
+ * "pending" otherwise.
+ */
+export function strategyState(s: TrackedStrategy): "pending" | "partially_filled" | "live" {
+  if (s.pair) {
+    const [a, b] = s.pair.map((i) => s.legs[i]?.status === "confirmed");
+    if (a !== b) return "partially_filled";
+  }
+  return liveSince(s) !== undefined ? "live" : "pending";
+}
+
+/** Base quantity a venue fill reference records ("hyperliquid:ETH:0.0123@2470", "extended:ETH-USD:0.012@2471"). */
+export function filledQtyFromRef(ref: string | undefined): number | undefined {
+  const m = ref?.match(/:(\d+(?:\.\d+)?)@/);
+  const q = m ? Number(m[1]) : NaN;
+  return Number.isFinite(q) && q > 0 ? q : undefined;
+}
+
+/** For a leg of a neutral pair whose partner already filled: the quantity it must match. */
+export function pairPartnerQty(s: TrackedStrategy | undefined, legIndex: number): number | undefined {
+  if (!s?.pair) return undefined;
+  const [a, b] = s.pair;
+  const partner = legIndex === a ? b : legIndex === b ? a : undefined;
+  if (partner === undefined || s.legs[legIndex]?.status === "confirmed") return undefined;
+  const p = s.legs[partner];
+  return p?.status === "confirmed" ? filledQtyFromRef(p.hash) : undefined;
 }
 
 /** How a leg reads in the monitor: a move still pending on a live strategy wasn't needed. */

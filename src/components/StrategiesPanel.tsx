@@ -14,6 +14,7 @@ import {
   liveSince,
   matchOpportunity,
   removeStrategy,
+  strategyState,
   useTrackedStrategies,
   type TrackedStrategy,
 } from "@/lib/strategyTracker";
@@ -116,6 +117,13 @@ function StrategyCard({ s, opps, now }: { s: TrackedStrategy; opps: Opportunity[
           </div>
         )}
       </dl>
+
+      {strategyState(s) === "partially_filled" && (
+        <p className="strat-alert">
+          Partially filled: one leg of the neutral pair is open, the other isn&apos;t, so the position moves with the price. Open the other leg now,
+          or close the filled one in Risk → Perp positions.
+        </p>
+      )}
 
       {drift !== undefined && drift < -1 && (
         <p className="strat-alert">

@@ -20,7 +20,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FEATURES } from "@/lib/features";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
 import { StrategyLegContext } from "@/components/thread/strategyLegContext";
-import { confirmStrategyLeg } from "@/lib/strategyTracker";
+import { confirmStrategyLeg, pairPartnerQty, strategyId, useTrackedStrategies } from "@/lib/strategyTracker";
 import { typicalWait } from "@/components/TxProgress";
 import { BridgeExecuteButton } from "@/components/BridgeExecuteButton";
 import { HyperliquidSpotSellButton } from "@/components/execute/HyperliquidSpotSellButton";
@@ -98,7 +98,12 @@ const ARBITRUM_ID = 42161;
 /** Renders execution legs for a single strategy. */
 export function StrategyLegs({ plan }: { plan: TradePlan }) {
   const { data: prices } = useLivePrices();
-  const { chain } = useAccount();
+  const { chain, address } = useAccount();
+  // A venue order that fills (no transaction hash) still completes its step in the tracker.
+  const recordFill = (i: number) => (ref: string) => confirmStrategyLeg(plan, i, { hash: ref, owner: address });
+  // The second leg of a neutral pair trades the quantity the first one filled.
+  const tracked = useTrackedStrategies(address).find((s) => s.id === strategyId(plan));
+  const partnerQty = (i: number) => pairPartnerQty(tracked, i);
 
   const orderAmountDisplay = (order: Order): string =>
     typeof order.amount === "bigint"
@@ -176,13 +181,13 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
             ) : isHlSpotSell ? (
               <HyperliquidSpotSellButton leg={leg} />
             ) : isHlSpotBuy ? (
-              <HyperliquidSpotBuyButton leg={leg} />
+              <HyperliquidSpotBuyButton leg={leg} onFilled={recordFill(i)} />
             ) : isPerp && !FEATURES.perps ? (
               <NotWired venue={leg.protocol} reason="Perps are paused during the beta while spot execution is validated end to end." />
             ) : isPerp && /hyperliquid/i.test(leg.protocol || "") ? (
-              <PerpExecuteButton leg={leg} hedged={hedgesSpot(leg, plan.legs)} />
+              <PerpExecuteButton leg={leg} hedged={hedgesSpot(leg, plan.legs)} onFilled={recordFill(i)} baseQty={partnerQty(i)} />
             ) : /extended/i.test(leg.protocol || "") ? (
-              <ExtendedPerpExecuteButton leg={leg} prices={prices} />
+              <ExtendedPerpExecuteButton leg={leg} prices={prices} onFilled={recordFill(i)} baseQty={partnerQty(i)} />
             ) : /ondo/i.test(leg.protocol || "") ? (
               <LifiPerpExecuteButton leg={leg} prices={prices} provider="ondo" />
             ) : /lighter/i.test(leg.protocol || "") ? (

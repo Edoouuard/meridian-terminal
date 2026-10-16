@@ -66,6 +66,8 @@ export interface LivePerp {
 }
 
 export interface LivePortfolio {
+  /** Hyperliquid account balances by role (null until read). */
+  hyperliquidAccount: { unified: boolean; collateralUsd: number; marginUsedUsd: number; freeMarginUsd: number; spotUsdcUsd: number } | null;
   isConnected: boolean;
   isLoading: boolean;
   assets: LiveAsset[];
@@ -488,7 +490,20 @@ export function useLivePortfolio(): LivePortfolio {
 
   const stakingConcentrationPct = stakingConcentration(assets, netUsd);
 
+  // The Hyperliquid account as the planner needs it: collateral, margin in use, and what new positions can use.
+  const hlSpotUsdcFree = (hlHoldings?.spot ?? []).find((b) => b.coin === "USDC")?.free ?? 0;
+  const hyperliquidAccount = hlAccount
+    ? {
+        unified: hlUnified,
+        collateralUsd: hlUnified ? hlSpotUsdcFree + hlAccount.totalMarginUsed : hlAccount.accountValue,
+        marginUsedUsd: hlAccount.totalMarginUsed,
+        freeMarginUsd: hlUnified ? hlSpotUsdcFree : hlAccount.withdrawable,
+        spotUsdcUsd: hlSpotUsdcFree,
+      }
+    : null;
+
   return {
+    hyperliquidAccount,
     isConnected,
     isLoading:
       Object.values(nativeBalanceByChainId).some((q) => q.isLoading) || tokenBalancesQuery.isLoading || lendingQuery.isLoading || cometQuery.isLoading,

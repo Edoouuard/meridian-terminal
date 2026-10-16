@@ -30,6 +30,9 @@ import { FEATURES } from "@/lib/features";
 import { deployableUsd } from "@/lib/budgetFit";
 import { routeThesis, type TradePlan } from "@/lib/routeThesis";
 import { routeThesisAsync, type PortfolioContext } from "@/lib/intentEngine";
+import { useExtendedAccount } from "@/hooks/useExtendedAccount";
+import { fetchExtendedBalance } from "@/lib/integrations/extended-live";
+import type { Signer as ExtendedSigner } from "@blackcube/extended-sdk";
 import { fundPlan } from "@/lib/fundingPlanner";
 import { browserFundingDeps } from "@/lib/fundingDeps";
 import { useLivePrices } from "@/hooks/useLivePrices";
@@ -106,6 +109,17 @@ function buildQuickPrompts(assets: { symbol: string; balance: number; usd: numbe
   ];
 }
 
+/** The Extended account as the planner sees it: connected or not, and its USDC (a slow read never holds the plan up). */
+async function extendedSnapshot(signer: ExtendedSigner | null): Promise<PortfolioContext["extended"]> {
+  if (!signer) return { connected: false };
+  try {
+    const b = await Promise.race([fetchExtendedBalance(signer), new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 4000))]);
+    return { connected: true, network: signer.network, equityUsd: b?.equity ?? 0, availableUsd: b?.availableForTrade ?? 0 };
+  } catch {
+    return { connected: true, network: signer.network };
+  }
+}
+
 export default function TerminalApp() {
   const [thread, setThread] = useState<ThreadItem[]>([]);
   const [promptText, setPromptText] = useState("");
@@ -131,6 +145,7 @@ export default function TerminalApp() {
   }, []);
 
   const { isConnected, address, chain } = useAccount();
+  const extendedSigner = useExtendedAccount();
   const trackedStrategies = useTrackedStrategies(address);
   const live = useLivePortfolio();
   const { data: livePrices } = useLivePrices();
@@ -167,8 +182,12 @@ export default function TerminalApp() {
 
   // Submit a thesis to the LLM engine (used by both input and quick prompts)
   async function submitThesis(text: string) {
-    const trimmed = text.trim();
-    if (!trimmed || isAnalyzing) return;
+    const typed = text.trim();
+    if (!typed || isAnalyzing) return;
+    // A reply to the planner's question carries the original request with it.
+    const last = thread[thread.length - 1];
+    const answering = last?.clarify && last.text ? last : undefined;
+    const trimmed = answering ? `${answering.text} — ${typed}` : typed;
     setPromptText("");
     setPendingText(trimmed);
     setIsAnalyzing(true);
@@ -192,11 +211,13 @@ export default function TerminalApp() {
           lendingPositions: live.aavePositions,
           perps: live.perps,
           netDeltaEthTotal: live.netDeltaEthTotal,
+          hyperliquid: live.hyperliquidAccount,
+          extended: await extendedSnapshot(extendedSigner),
         }
       : undefined;
 
     try {
-      const routed = await fundThreadItem(await routeThesisAsync(trimmed, portfolioSnapshot));
+      const routed = await fundThreadItem(await routeThesisAsync(trimmed, portfolioSnapshot, { clarified: !!answering, answeredQuestion: answering?.clarify?.question }));
       setThread((cur) => cur.concat([routed]));
     } catch {
       setThread((cur) => cur.concat([{ ...routeThesis(trimmed), notice: "Something went wrong building your plan. Below is a basic plan from local rules, without live rates; ask again in a moment." }]));
@@ -479,7 +500,12 @@ export default function TerminalApp() {
             )}
 
             {thread.map((item, i) => (
-              <ThreadCard key={i} item={item} onSelectVariant={(plan) => selectVariant(i, plan)} />
+              <ThreadCard
+                key={i}
+                item={item}
+                onSelectVariant={(plan) => selectVariant(i, plan)}
+                onAnswer={i === thread.length - 1 && !isAnalyzing ? (answer) => void submitThesis(answer) : undefined}
+              />
             ))}
 
             {isAnalyzing && (

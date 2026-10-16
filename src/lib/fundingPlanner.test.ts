@@ -196,3 +196,16 @@ describe("fundingPlanner — Hyperliquid deposit and untracked sources", () => {
     expect(out.legs.some((l) => l.side === "Bridge")).toBe(false);
   });
 });
+
+describe("fundingPlanner — Hyperliquid neutral position", () => {
+  it("leaves a UETH buy on Hyperliquid to the account's USDC (no wallet UETH needed, no bridge)", async () => {
+    const p = plan(
+      { side: "Buy", asset: "UETH", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 44 },
+      { side: "Short", asset: "ETH PERP", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 44, leverage: 2 },
+    );
+    expect(spentSymbol(p.legs[0], 42161)).toBeNull();
+    const out = await fundPlan(p, deps([{ symbol: "POL", chain: "Polygon", usd: 1 }]));
+    expect(out.legs.map((l) => l.side)).toEqual(["Buy", "Short"]);
+    expect(out.fundingNotes ?? []).toEqual([]);
+  });
+});
