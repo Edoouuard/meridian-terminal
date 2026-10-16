@@ -220,3 +220,38 @@ describe("planner contract — non-venue economics and ranking", () => {
     expect(out.strategies[0].status).toBe("executable");
   });
 });
+
+describe("planner contract — the server sizes perp legs from the free margin (owner's SPCX test, 2026-10-16)", () => {
+  const spcx: MarketSnapshot = {
+    fetchedAt: markets.fetchedAt,
+    quotes: [
+      hlQuote({ market: "xyz:SPCX", base: "SPCX", markUsd: 146.4, fundingHourly: 0.0000153, szDecimals: 2, maxLeverage: 20, dayVolumeUsd: 3e7 }),
+      extendedQuote({ market: "SPCX-USD", base: "SPCX", markUsd: 146.4, fundingHourly: 0.00002, sizeStep: 0.01, minQty: 0.1, maxLeverage: 20, dayVolumeUsd: 1e6 }),
+    ],
+  };
+  const spcxPair = strat("SPCX Beta-Neutral", [
+    { side: "Short", asset: "SPCX-USD PERP", protocol: "Extended", chain: "Arbitrum", sizeUsd: 10, leverage: 10 },
+    { side: "Long", asset: "xyz:SPCX PERP", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 10, leverage: 10 },
+  ]);
+  const balances: VenueBalances = { hyperliquidFreeUsd: 21.79, extendedFreeUsd: 21, walletDeployableUsd: 10 };
+  const run = (share: number | undefined) =>
+    enforceConformance([spcxPair], "farming", ctx({ markets: spcx, balances, extended: { connected: true, network: "mainnet", availableUsd: 21 }, namedVenues: ["Hyperliquid", "Extended"], sizeShare: share })).strategies[0];
+
+  it("100% of the capital at 10x: two legs, ~$194 each, executable", () => {
+    const s = run(1);
+    expect(s.legs).toHaveLength(2);
+    expect(s.status).toBe("executable");
+    expect(s.economics?.legs?.map((l) => l.baseQuantity)).toEqual([1.32, 1.32]);
+    expect(s.apy).toBeUndefined();
+  });
+
+  it("a share too small for the market minimum is blocked with the margin it needs", () => {
+    const s = run(0.05);
+    expect(s.status).toBe("blocked");
+    expect(s.blockers?.join(" ")).toMatch(/under the market minimum \(0\.1 SPCX\); at 10x it needs about \$2\.51 free on Extended/);
+  });
+
+  it("without a share, the model's dollar size stands", () => {
+    expect(run(undefined).economics?.legs?.map((l) => l.baseQuantity)).toEqual([0.06, 0.06]);
+  });
+});

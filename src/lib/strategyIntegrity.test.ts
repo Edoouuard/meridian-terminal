@@ -232,3 +232,36 @@ describe("strategyIntegrity — neutral with the money on Hyperliquid (owner's t
     expect(dropBelowMinimum([tiny, good], true).map((x) => x.legs.length)).toEqual([2, 2]);
   });
 });
+
+describe("strategyIntegrity — a perp pair across venues (owner's SPCX test, 2026-10-16)", () => {
+  it("sees xyz:SPCX on Hyperliquid and SPCX-USD on Extended as one asset: no spot buy, no bridge", () => {
+    const legs: LLMLeg[] = [
+      { side: "Short", asset: "SPCX-USD PERP", protocol: "Extended", chain: "Arbitrum", sizeUsd: 10, leverage: 10 },
+      { side: "Long", asset: "xyz:SPCX PERP", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 10, leverage: 10 },
+    ];
+    const out = validateAndFixStrategy(strat("SPCX Beta-Neutral", legs));
+    expect(out.legs.map((l) => `${l.side} ${l.asset}`)).toEqual(["Short SPCX-USD PERP", "Long xyz:SPCX PERP"]);
+  });
+
+  it("does the same for ETH-USD on Extended against ETH on Hyperliquid", () => {
+    const legs: LLMLeg[] = [
+      { side: "Long", asset: "ETH PERP", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 20, leverage: 1 },
+      { side: "Short", asset: "ETH-USD PERP", protocol: "Extended", chain: "Arbitrum", sizeUsd: 20, leverage: 1 },
+    ];
+    expect(validateAndFixStrategy(strat("ETH beta-neutral", legs)).legs).toHaveLength(2);
+  });
+
+  it("doesn't shrink an Extended leg to the wallet: its margin is on Extended", () => {
+    const legs: LLMLeg[] = [
+      { side: "Short", asset: "SPCX-USD PERP", protocol: "Extended", chain: "Arbitrum", sizeUsd: 200, leverage: 10 },
+      { side: "Long", asset: "xyz:SPCX PERP", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 200, leverage: 10 },
+    ];
+    const out = validateAndFixStrategy(strat("SPCX Beta-Neutral", legs), {
+      assets: [
+        { symbol: "USDC", venue: "Wallet", chain: "Base", usd: 10 },
+        { symbol: "USDC", venue: "Hyperliquid Perps", chain: "Arbitrum", usd: 21.79 },
+      ],
+    });
+    expect(out.legs.map((l) => l.sizeUsd)).toEqual([200, 200]);
+  });
+});
