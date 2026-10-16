@@ -1,10 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { privateKeyToAccount } from "viem/accounts";
+import { parseOpenOrders } from "@/lib/integrations/hyperliquid-live";
 import {
+  cancelPerpOrder,
   fetchPerpAccount,
   fundingAprForSide,
   hyperliquidEnv,
   marginNeededUsd,
+  perpLimitOrder,
   perpMarketOrder,
   protectionPrices,
   withdrawUsdcToArbitrum,
@@ -128,5 +131,53 @@ describe("perps: funding, margin, protection", () => {
     expect(out.protection).toMatchObject({ ok: true, sl: 1800 });
     const trigger = sent.at(-1) as unknown as { orders: { a: number; b: boolean; r: boolean; s: string; t: unknown }[] };
     expect(trigger.orders[0]).toMatchObject({ a: 1, b: false, r: true, s: "0.05", t: { trigger: { isMarket: true, triggerPx: "1800", tpsl: "sl" } } });
+  });
+});
+
+describe("perps: limit orders, cancel, open orders", () => {
+  const meta = { universe: [{ name: "BTC", szDecimals: 5, maxLeverage: 40 }, { name: "ETH", szDecimals: 4, maxLeverage: 25 }] };
+  const key = "0x0123456789012345678901234567890123456789012345678901234567890123" as const;
+
+  function mockExchange(reply: unknown) {
+    const sent: { type: string; orders?: { p: string; s: string; t: unknown }[]; cancels?: unknown[] }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body);
+      const json = (v: unknown) => ({ ok: true, status: 200, json: async () => v });
+      if (url.endsWith("/exchange")) {
+        sent.push(body.action);
+        return json(reply);
+      }
+      if (body.type === "meta") return json(meta);
+      return json(null);
+    }));
+    return sent;
+  }
+
+  it("places a GTC limit (or post-only ALO) at the rounded price and reads the resting id", async () => {
+    const sent = mockExchange({ status: "ok", response: { type: "order", data: { statuses: [{ resting: { oid: 42 } }] } } });
+    const out = await perpLimitOrder(env, key, { coin: "ETH", isBuy: true, px: 1950.123, sizeUsd: 100, postOnly: true });
+    expect(out).toMatchObject({ ok: true, resting: { oid: 42 } });
+    expect(sent[0].orders?.[0]).toMatchObject({ p: "1950.1", s: "0.0513", t: { limit: { tif: "Alo" } } });
+  });
+
+  it("refuses an order under Hyperliquid's $10 minimum before signing", async () => {
+    const sent = mockExchange({ status: "ok" });
+    expect(await perpLimitOrder(env, key, { coin: "ETH", isBuy: true, px: 2000, sizeUsd: 5 })).toMatchObject({ ok: false });
+    expect(sent).toHaveLength(0);
+  });
+
+  it("cancels by asset id and order id", async () => {
+    const sent = mockExchange({ status: "ok", response: { type: "cancel", data: { statuses: ["success"] } } });
+    expect(await cancelPerpOrder(env, key, { coin: "ETH", oid: 42 })).toMatchObject({ ok: true });
+    expect(sent[0]).toEqual({ type: "cancel", cancels: [{ a: 1, o: 42 }] });
+  });
+
+  it("reads stop-loss / take-profit trigger prices from frontendOpenOrders", () => {
+    const [sl, lim] = parseOpenOrders([
+      { coin: "ETH", side: "A", sz: "0.05", limitPx: "1620", oid: 7, orderType: "Stop Market", triggerPx: "1800", isTrigger: true, reduceOnly: true },
+      { coin: "ETH", side: "B", sz: "0.05", limitPx: "1950", oid: 8, orderType: "Limit", triggerPx: "0", isTrigger: false },
+    ]);
+    expect(sl).toMatchObject({ orderType: "Stop Market", triggerPx: 1800, reduceOnly: true });
+    expect(lim).toMatchObject({ orderType: "Limit", triggerPx: 0, limitPx: 1950 });
   });
 });

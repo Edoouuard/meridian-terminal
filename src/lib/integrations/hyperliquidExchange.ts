@@ -77,6 +77,16 @@ export function orderAction(orders: OrderWire[]) {
   return { type: "order", orders, grouping: "na" };
 }
 
+/** Cancel resting orders (limit, stop-loss, take-profit) by asset and order id. */
+export function cancelAction(cancels: { asset: number; oid: number }[]) {
+  return { type: "cancel", cancels: cancels.map((c) => ({ a: c.asset, o: c.oid })) };
+}
+
+/** Replace a resting order in place (new price / size), keeping its place in the book when possible. */
+export function modifyAction(oid: number, order: OrderWire) {
+  return { type: "batchModify", modifies: [{ oid, order }] };
+}
+
 export function updateLeverageAction(asset: number, leverage: number, isCross = true) {
   return { type: "updateLeverage", asset, isCross, leverage: Math.round(leverage) };
 }
@@ -203,6 +213,8 @@ export interface ExchangeOutcome {
   ok: boolean;
   /** Filled size and average price when an IOC order (partly) filled. */
   filled?: { totalSz: number; avgPx: number };
+  /** Order id of a limit order now resting on the book. */
+  resting?: { oid: number };
   error?: string;
 }
 
@@ -214,10 +226,11 @@ export function parseExchangeResponse(body: unknown): ExchangeOutcome {
     return { ok: false, error: msg || "Hyperliquid rejected the request." };
   }
   const resp = b.response as { type?: string; data?: { statuses?: unknown[] } } | undefined;
-  const status = resp?.data?.statuses?.[0] as { filled?: { totalSz?: string; avgPx?: string }; resting?: unknown; error?: string } | string | undefined;
+  const status = resp?.data?.statuses?.[0] as { filled?: { totalSz?: string; avgPx?: string }; resting?: { oid?: number }; error?: string } | string | undefined;
   if (status && typeof status === "object") {
     if (status.error) return { ok: false, error: status.error };
     if (status.filled) return { ok: true, filled: { totalSz: Number(status.filled.totalSz ?? 0), avgPx: Number(status.filled.avgPx ?? 0) } };
+    if (typeof status.resting?.oid === "number") return { ok: true, resting: { oid: status.resting.oid } };
   }
   return { ok: true };
 }

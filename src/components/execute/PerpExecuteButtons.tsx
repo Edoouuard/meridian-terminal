@@ -55,8 +55,11 @@ export function PerpExecuteButton({ leg, hedged = false }: { leg: TradeLeg; hedg
   const { signTypedDataAsync } = useSignTypedData();
   const envName = useSharedHlEnv();
   const env = hyperliquidEnv(envName === "testnet");
-  const { status, result, error, execute, reset } = useHyperliquid();
+  const { status, result, error, execute, placeLimit, reset } = useHyperliquid();
   const [confirming, setConfirming] = useState<"open" | "close" | null>(null);
+  const [orderType, setOrderType] = useState<"market" | "limit">("market");
+  const [limitPx, setLimitPx] = useState("");
+  const [postOnly, setPostOnly] = useState(false);
   const [slOn, setSlOn] = useState(!hedged);
   const [tpOn, setTpOn] = useState(false);
   const [moving, setMoving] = useState<string | null>(null);
@@ -90,8 +93,8 @@ export function PerpExecuteButton({ leg, hedged = false }: { leg: TradeLeg; hedg
       recordedRef.current = "ok";
       recordExecution({
         type: isBuy ? "buy" : "sell",
-        label: `${isBuy ? "Long" : "Short"} ${symbol}`,
-        amount: result.filled ? String(result.filled.totalSz) : undefined,
+        label: result.resting ? `Limit ${isBuy ? "buy" : "sell"} ${symbol} placed` : `${isBuy ? "Long" : "Short"} ${symbol}`,
+        amount: result.filled ? String(result.filled.totalSz) : result.size !== undefined ? String(result.size) : undefined,
         asset: symbol,
         protocol: "Hyperliquid",
         status: "confirmed",
@@ -148,6 +151,16 @@ export function PerpExecuteButton({ leg, hedged = false }: { leg: TradeLeg; hedg
           {status === "approving" ? "Approve the Meridian trading key in your wallet (one time)…" : status === "preparing" ? "Fetching the Hyperliquid price…" : "Submitting to Hyperliquid…"}
         </p>
       </>
+    );
+  }
+
+  if (status === "confirmed" && result?.resting) {
+    return (
+      <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-accent-700)" }}>
+        Limit order resting on Hyperliquid {envName}: {isBuy ? "buy" : "sell"} {result.size} {m.coin} at ${result.marketPrice}. It fills when the price gets there;
+        cancel or move it in the Hyperliquid panel.
+        {clearBtn}
+      </p>
     );
   }
 
@@ -260,16 +273,81 @@ export function PerpExecuteButton({ leg, hedged = false }: { leg: TradeLeg; hedg
     />
   );
 
+  const px = Number(limitPx);
+  const isLimit = orderType === "limit";
+  const limitInvalid = isLimit && !(px > 0);
+  // A limit through the market fills at once: say so rather than let it surprise.
+  const limitCrosses = isLimit && px > 0 && (isBuy ? px >= m.mark : px <= m.mark);
+  const tab = (t: "market" | "limit", label: string) => (
+    <button
+      onClick={() => {
+        setOrderType(t);
+        if (t === "limit" && !limitPx) setLimitPx(String(Number((m.mark * (isBuy ? 0.99 : 1.01)).toPrecision(5))));
+      }}
+      style={{
+        fontSize: 11,
+        padding: "2px 8px",
+        cursor: "pointer",
+        border: "1px solid var(--color-divider)",
+        background: orderType === t ? "var(--color-accent-700)" : "none",
+        color: orderType === t ? "#fff" : "var(--color-text)",
+        borderRadius: 4,
+      }}
+    >
+      {label}
+    </button>
+  );
+
   return (
     <>
       {info}
-      <button className="btn btn-primary" style={{ fontSize: 13, marginTop: 6, cursor: "pointer" }} onClick={() => setConfirming("open")}>
-        Open {isBuy ? "long" : "short"} {m.coin} {fmtUsd(sizeUsd)} at {leverage}x on Hyperliquid →
+      <div style={{ display: "flex", gap: 6, alignItems: "center", marginTop: 6, fontSize: 12 }}>
+        {tab("market", "Market")}
+        {tab("limit", "Limit")}
+        {isLimit && (
+          <>
+            <input
+              type="number"
+              value={limitPx}
+              min={0}
+              step="any"
+              aria-label="Limit price"
+              onChange={(e) => setLimitPx(e.target.value)}
+              style={{ width: 90, fontSize: 12 }}
+            />
+            <label style={{ fontSize: 11 }}>
+              <input type="checkbox" checked={postOnly} onChange={(e) => setPostOnly(e.target.checked)} /> post-only
+            </label>
+          </>
+        )}
+      </div>
+      {limitCrosses && (
+        <p style={{ ...muted, color: "var(--risk-bad, #c0392b)" }}>
+          {postOnly ? "Post-only will be refused: this price would fill immediately." : "This price is through the market: it fills now, like a market order."}
+        </p>
+      )}
+      <button
+        className="btn btn-primary"
+        style={{ fontSize: 13, marginTop: 6, cursor: limitInvalid ? "not-allowed" : "pointer" }}
+        disabled={limitInvalid}
+        onClick={() => setConfirming("open")}
+      >
+        {isLimit ? `Place limit ${isBuy ? "buy" : "sell"} ${m.coin} at $${limitPx}` : `Open ${isBuy ? "long" : "short"} ${m.coin}`} {fmtUsd(sizeUsd)} at {leverage}x on Hyperliquid →
       </button>
       <ConfirmDialog
         open={confirming === "open"}
         title={`Confirm ${isBuy ? "long" : "short"} ${m.coin} on Hyperliquid ${envName}`}
         body={
+          isLimit ? (
+            <div>
+              <p style={{ margin: 0 }}>
+                Limit {isBuy ? "buy" : "sell"} of {fmtUsd(sizeUsd)} ≈ <strong>{(sizeUsd / px).toFixed(4)}</strong> {m.coin} at ${limitPx}, {leverage}x cross margin
+                {postOnly ? ", post-only (refused if it would fill at once)" : ""}. It rests on the book until filled or cancelled. A stop-loss / take-profit
+                isn&apos;t added to a resting order: add it once it fills. The first trade asks your wallet to approve a Meridian trading key once; it can trade,
+                never withdraw.
+              </p>
+            </div>
+          ) : (
           <div>
             <p style={{ margin: 0 }}>
               Market {isBuy ? "long" : "short"} of {fmtUsd(sizeUsd)} ≈ <strong>{coinQty.toFixed(4)}</strong> {m.coin} at ~${m.mark.toLocaleString("en-US", { maximumFractionDigits: 4 })}, {leverage}x cross
@@ -290,12 +368,17 @@ export function PerpExecuteButton({ leg, hedged = false }: { leg: TradeLeg; hedg
               </p>
             )}
           </div>
+          )
         }
-        confirmLabel="Submit order"
+        confirmLabel={isLimit ? "Place order" : "Submit order"}
         warning={envName === "testnet" ? "TESTNET — no real funds." : "Mainnet — real funds. Confirm carefully."}
         onConfirm={() => {
           setConfirming(null);
           recordedRef.current = null;
+          if (isLimit) {
+            void placeLimit({ symbol: m.coin, isBuy, px, sizeUsd, leverage, postOnly, testnet: envName === "testnet" });
+            return;
+          }
           execute({
             symbol: m.coin,
             isBuy,

@@ -16,9 +16,11 @@ import type { Address, Hex } from "viem";
 import {
   HL_WITHDRAW_FEE_USD,
   approveAgentAction,
+  cancelAction,
   firstOrderError,
   isUnknownAgentError,
   l1TypedData,
+  modifyAction,
   orderAction,
   orderWire,
   parseExchangeResponse,
@@ -246,6 +248,52 @@ export async function perpMarketOrder(
   const { sl, tp } = protectionPrices(out.filled.avgPx, o.isBuy, o);
   const placed = await placeProtection(env, agentKey, { asset: market.asset, szDecimals: market.szDecimals, isLong: o.isBuy, size: out.filled.totalSz, sl, tp });
   return { ...out, mid, size, protection: { ...placed, sl, tp } };
+}
+
+/**
+ * Perp limit order at `px` (GTC: rests until filled or cancelled; ALO:
+ * post-only, refused if it would take liquidity). Leverage is set first when asked.
+ */
+export async function perpLimitOrder(
+  env: HyperliquidEnv,
+  agentKey: Hex,
+  o: { coin: string; isBuy: boolean; px: number; sizeUsd?: number; coinQty?: number; leverage?: number; reduceOnly?: boolean; postOnly?: boolean },
+): Promise<MarketOrderResult> {
+  const market = await fetchPerpMarket(env, o.coin);
+  if (!market) return { ok: false, error: `${o.coin} isn't listed on Hyperliquid.` };
+  if (!(o.px > 0)) return { ok: false, error: "Set a limit price." };
+  if (o.leverage && !o.reduceOnly) {
+    const lev = Math.min(Math.max(1, Math.round(o.leverage)), market.maxLeverage);
+    const set = await sendL1(env, agentKey, updateLeverageAction(market.asset, lev));
+    if (!set.ok) return set;
+  }
+  const px = roundPrice(o.px, market.szDecimals, false);
+  const size = roundSize(o.coinQty && o.coinQty > 0 ? o.coinQty : (o.sizeUsd ?? 0) / px, market.szDecimals);
+  if (!(size > 0)) return { ok: false, error: "Order size rounds to zero." };
+  if (size * px < HL_MIN_ORDER_USD) return { ok: false, error: `Hyperliquid's minimum order is $${HL_MIN_ORDER_USD}.` };
+  const out = await sendL1(env, agentKey, orderAction([orderWire({ asset: market.asset, isBuy: o.isBuy, px, sz: size, reduceOnly: o.reduceOnly, tif: o.postOnly ? "Alo" : "Gtc" })]));
+  return { ...out, mid: px, size };
+}
+
+/** Cancel a resting order (limit, stop-loss or take-profit). */
+export async function cancelPerpOrder(env: HyperliquidEnv, agentKey: Hex, o: { coin: string; oid: number }): Promise<ExchangeOutcome> {
+  const market = await fetchPerpMarket(env, o.coin);
+  if (!market) return { ok: false, error: `${o.coin} isn't listed on Hyperliquid.` };
+  const out = await sendL1(env, agentKey, cancelAction([{ asset: market.asset, oid: o.oid }]));
+  return out;
+}
+
+/** Move a resting limit order to a new price, same side and size. */
+export async function modifyPerpLimit(
+  env: HyperliquidEnv,
+  agentKey: Hex,
+  o: { coin: string; oid: number; isBuy: boolean; size: number; px: number; reduceOnly?: boolean },
+): Promise<ExchangeOutcome> {
+  const market = await fetchPerpMarket(env, o.coin);
+  if (!market) return { ok: false, error: `${o.coin} isn't listed on Hyperliquid.` };
+  const px = roundPrice(o.px, market.szDecimals, false);
+  const wire = orderWire({ asset: market.asset, isBuy: o.isBuy, px, sz: roundSize(o.size, market.szDecimals), reduceOnly: o.reduceOnly, tif: "Gtc" });
+  return sendL1(env, agentKey, modifyAction(o.oid, wire));
 }
 
 /** Sell a spot token for USDC at market (IOC through the mid), at most what the account holds. */

@@ -273,14 +273,19 @@ export async function fetchHlHoldings(address: string, env: HyperliquidEnv): Pro
 
 export interface HlOpenOrder {
   coin: string;
+  /** "B" (buy) or "A" (sell), as Hyperliquid reports it. */
   side: string;
   size: number;
   limitPx: number;
   reduceOnly: boolean;
   oid: number;
+  /** "Limit", "Stop Market", "Take Profit Market"… */
+  orderType: string;
+  /** Trigger price of a stop-loss / take-profit, 0 for a plain limit. */
+  triggerPx: number;
 }
 
-/** Fetch a wallet's open orders on the venue. Read-only. */
+/** Fetch a wallet's open orders on the venue, stop-loss and take-profit included. Read-only. */
 export async function fetchOpenOrders(
   address: string,
   env: HyperliquidEnv,
@@ -288,24 +293,24 @@ export async function fetchOpenOrders(
   const res = await fetch(env.infoUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type: "openOrders", user: address }),
+    body: JSON.stringify({ type: "frontendOpenOrders", user: address }),
   });
   if (!res.ok) return [];
-  const data = (await res.json()) as Array<{
-    coin?: string;
-    side?: string;
-    sz?: string;
-    limitPx?: string;
-    reduceOnly?: boolean;
-    oid?: number;
-  }>;
-  return data.map((o) => ({
+  return parseOpenOrders(await res.json());
+}
+
+export function parseOpenOrders(
+  data: Array<{ coin?: string; side?: string; sz?: string; limitPx?: string; reduceOnly?: boolean; oid?: number; orderType?: string; triggerPx?: string; isTrigger?: boolean }> | null,
+): HlOpenOrder[] {
+  return (data ?? []).map((o) => ({
     coin: o.coin ?? "",
     side: o.side ?? "",
     size: num(o.sz),
     limitPx: num(o.limitPx),
     reduceOnly: !!o.reduceOnly,
     oid: o.oid ?? 0,
+    orderType: o.orderType ?? "Limit",
+    triggerPx: o.isTrigger ? num(o.triggerPx) : 0,
   }));
 }
 

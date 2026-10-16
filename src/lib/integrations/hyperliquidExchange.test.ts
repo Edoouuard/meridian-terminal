@@ -4,6 +4,8 @@ import { planSpotSell } from "@/lib/integrations/hyperliquidTrade";
 import { isHyperCoreSystemAddress } from "@/lib/execution";
 import {
   approveAgentAction,
+  cancelAction,
+  modifyAction,
   firstOrderError,
   floatToWire,
   l1TypedData,
@@ -49,6 +51,19 @@ describe("hyperliquidExchange — signatures match the official SDK", () => {
     expect(BigInt(sig.r)).toBe(BigInt("0x2ef9312aafd4858e8dfee8eb0ed74102111c5d5cf337f1909ae5f46b401ee2b"));
     expect(BigInt(sig.s)).toBe(BigInt("0x157aadf4e03e9fd0aa46cbaa381c15ef362a6c6edf4901d7f1c4272a1d084a7d"));
     expect(sig.v).toBe(27);
+  });
+
+  it("signs a cancel and a modify (batchModify) like the SDK", async () => {
+    const cancel = await l1(cancelAction([{ asset: 1, oid: 123456789 }]), 1700000000123, true);
+    expect(BigInt(cancel.r)).toBe(BigInt("0xbd42754784a9d0df546e142cc5b4194cbdd2975cb9f1e859a4edb92bf2130e21"));
+    expect(BigInt(cancel.s)).toBe(BigInt("0x6a7a3871a4d0725e76c994acf17bb16005299d7756b5f88a6205c0c41e487342"));
+    const modify = await l1(modifyAction(123456789, orderWire({ asset: 1, isBuy: true, px: 1950.5, sz: 0.05, tif: "Alo" })), 1700000000123, true);
+    expect(BigInt(modify.r)).toBe(BigInt("0xc100834b2443549fb5ba0a218aac0e95d5b36ffa2f04ac5269eddef8c16ed18f"));
+    expect(BigInt(modify.s)).toBe(BigInt("0xfe118072252a49846ab5efa8909a1f82fe4ad1f6c20f9dd85edbfeec7fc9e69"));
+  });
+
+  it("reads a resting limit order's id", () => {
+    expect(parseExchangeResponse({ status: "ok", response: { type: "order", data: { statuses: [{ resting: { oid: 77 } }] } } })).toEqual({ ok: true, resting: { oid: 77 } });
   });
 
   it("reads the first error of a multi-order response", () => {

@@ -208,7 +208,7 @@ Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenis�
 - [x] [moi] Stop-loss / take-profit réduits (ordres trigger) posés après le fill, au prix réel d'entrée ; désactivés par défaut sur un short qui couvre un spot. *Preuve : signature identique au SDK officiel (test `hyperliquidExchange`), test du flux ouverture → SL.*
 - [x] [moi] Fermer la position depuis l'étape de la stratégie. 
 - [ ] [toi] Ouvrir puis fermer un short ETH de 10 $ avec stop-loss sur mainnet. *Preuve : fills affichés + ordre SL visible dans l'app Hyperliquid.*
-- [ ] [moi] Ordres limite (GTC) et modification / annulation des TP/SL dans le panneau Hyperliquid.
+- [x] [moi] Ordres limite (GTC, post-only ALO) depuis l'étape perp ; ordres ouverts (limite, stop-loss, take-profit) listés dans le panneau Hyperliquid avec annulation et déplacement du prix. *Preuve : signatures cancel / batchModify identiques au SDK, tests `hyperliquidTrade` (limite au repos, minimum 10 $, annulation, lecture des triggers).*
 
 **P2 Perps HIP-3 sur Hyperliquid (actions, indices, matières premières)**
 - [ ] [moi] Marchés des dex HIP-3 (`perpDexs`, ex. `xyz:TSLA`, `xyz:NVDA`, `xyz:GOLD`, `xyz:XYZ100`) : identifiant d'actif `110000 + i × 10000 + index`, prix et funding par dex, collatéral du dex. *Preuve : vecteur de signature SDK + test des identifiants.*
@@ -390,6 +390,7 @@ Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenis�
 
 | Date | Fait | Preuve |
 |---|---|---|
+| 2026-10-16 | Ordres limite Hyperliquid (GTC / post-only), annulation et déplacement des ordres ouverts, stop-loss / take-profit visibles dans le panneau | tests `hyperliquidExchange` (vecteurs SDK cancel, batchModify), `hyperliquidTrade` |
 | 2026-10-15 | Perps Hyperliquid : marge et funding avant signature, attente du dépôt, transfert spot → perps, stop-loss / take-profit (ordres trigger) après le fill, fermeture depuis l'étape ; retrait Hyperliquid pour comptes unifiés (PR #38) | tests `hyperliquidExchange` (vecteur SDK trigger), `hyperliquidTrade`, `hedgesSpot` |
 | 2026-10-15 | Retrait Hyperliquid → Arbitrum (withdraw3 signé par le wallet, vecteurs SDK) inséré automatiquement quand une stratégie hors perps a besoin des USDC du compte Hyperliquid ; bridge et dépôt suivants attendent l'arrivée | tests `hyperliquidExchange`, `budgetFit`, `fundingPlanner` |
 | 2026-10-15 | Solde libre réel, budget appliqué, taux live derrière le mot de passe, prix de tous les jetons, wrap ETH auto, bug report, WalletConnect | PR #35 |
