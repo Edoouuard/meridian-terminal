@@ -128,11 +128,13 @@ export function parseClearinghouseState(data: (RawClearinghouse & { clearinghous
 export async function fetchClearinghouseState(
   address: string,
   env: HyperliquidEnv,
+  /** A HIP-3 dex ("xyz"); the main perp dex when omitted. */
+  dex?: string,
 ): Promise<HlAccount> {
   const res = await fetch(env.infoUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type: "clearinghouseState", user: address }),
+    body: JSON.stringify(dex ? { type: "clearinghouseState", user: address, dex } : { type: "clearinghouseState", user: address }),
   });
   if (!res.ok) throw new Error(`Hyperliquid clearinghouseState failed: ${res.status}`);
   const data = (await res.json()) as Parameters<typeof parseClearinghouseState>[0];
@@ -273,39 +275,48 @@ export async function fetchHlHoldings(address: string, env: HyperliquidEnv): Pro
 
 export interface HlOpenOrder {
   coin: string;
+  /** "B" (buy) or "A" (sell), as Hyperliquid reports it. */
   side: string;
   size: number;
   limitPx: number;
   reduceOnly: boolean;
   oid: number;
+  /** "Limit", "Stop Market", "Take Profit Market"… */
+  orderType: string;
+  /** Trigger price of a stop-loss / take-profit, 0 for a plain limit. */
+  triggerPx: number;
 }
 
-/** Fetch a wallet's open orders on the venue. Read-only. */
+/** The HIP-3 dex Meridian trades stocks, indices and commodities on (USDC margin). */
+export const HIP3_MAIN_DEX = "xyz";
+
+/** Fetch a wallet's open orders on the venue, stop-loss and take-profit included. Read-only. */
 export async function fetchOpenOrders(
   address: string,
   env: HyperliquidEnv,
+  dex?: string,
 ): Promise<HlOpenOrder[]> {
   const res = await fetch(env.infoUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type: "openOrders", user: address }),
+    body: JSON.stringify(dex ? { type: "frontendOpenOrders", user: address, dex } : { type: "frontendOpenOrders", user: address }),
   });
   if (!res.ok) return [];
-  const data = (await res.json()) as Array<{
-    coin?: string;
-    side?: string;
-    sz?: string;
-    limitPx?: string;
-    reduceOnly?: boolean;
-    oid?: number;
-  }>;
-  return data.map((o) => ({
+  return parseOpenOrders(await res.json());
+}
+
+export function parseOpenOrders(
+  data: Array<{ coin?: string; side?: string; sz?: string; limitPx?: string; reduceOnly?: boolean; oid?: number; orderType?: string; triggerPx?: string; isTrigger?: boolean }> | null,
+): HlOpenOrder[] {
+  return (data ?? []).map((o) => ({
     coin: o.coin ?? "",
     side: o.side ?? "",
     size: num(o.sz),
     limitPx: num(o.limitPx),
     reduceOnly: !!o.reduceOnly,
     oid: o.oid ?? 0,
+    orderType: o.orderType ?? "Limit",
+    triggerPx: o.isTrigger ? num(o.triggerPx) : 0,
   }));
 }
 

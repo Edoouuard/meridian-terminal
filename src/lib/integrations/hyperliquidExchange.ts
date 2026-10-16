@@ -50,7 +50,7 @@ export interface OrderWire {
   p: string;
   s: string;
   r: boolean;
-  t: { limit: { tif: "Gtc" | "Ioc" | "Alo" } };
+  t: { limit: { tif: "Gtc" | "Ioc" | "Alo" } } | { trigger: { isMarket: boolean; triggerPx: string; tpsl: "tp" | "sl" } };
 }
 
 /** Key order matters: it is part of the msgpack hash. */
@@ -58,8 +58,33 @@ export function orderWire(o: { asset: number; isBuy: boolean; px: number; sz: nu
   return { a: o.asset, b: o.isBuy, p: floatToWire(o.px), s: floatToWire(o.sz), r: o.reduceOnly ?? false, t: { limit: { tif: o.tif ?? "Ioc" } } };
 }
 
+/**
+ * A reduce-only stop-loss or take-profit: when the mark crosses `triggerPx`
+ * it becomes a market order, `px` being the worst price it may fill at.
+ */
+export function triggerOrderWire(o: { asset: number; isBuy: boolean; px: number; sz: number; triggerPx: number; tpsl: "tp" | "sl" }): OrderWire {
+  return {
+    a: o.asset,
+    b: o.isBuy,
+    p: floatToWire(o.px),
+    s: floatToWire(o.sz),
+    r: true,
+    t: { trigger: { isMarket: true, triggerPx: floatToWire(o.triggerPx), tpsl: o.tpsl } },
+  };
+}
+
 export function orderAction(orders: OrderWire[]) {
   return { type: "order", orders, grouping: "na" };
+}
+
+/** Cancel resting orders (limit, stop-loss, take-profit) by asset and order id. */
+export function cancelAction(cancels: { asset: number; oid: number }[]) {
+  return { type: "cancel", cancels: cancels.map((c) => ({ a: c.asset, o: c.oid })) };
+}
+
+/** Replace a resting order in place (new price / size), keeping its place in the book when possible. */
+export function modifyAction(oid: number, order: OrderWire) {
+  return { type: "batchModify", modifies: [{ oid, order }] };
 }
 
 export function updateLeverageAction(asset: number, leverage: number, isCross = true) {
@@ -188,6 +213,8 @@ export interface ExchangeOutcome {
   ok: boolean;
   /** Filled size and average price when an IOC order (partly) filled. */
   filled?: { totalSz: number; avgPx: number };
+  /** Order id of a limit order now resting on the book. */
+  resting?: { oid: number };
   error?: string;
 }
 
@@ -199,12 +226,22 @@ export function parseExchangeResponse(body: unknown): ExchangeOutcome {
     return { ok: false, error: msg || "Hyperliquid rejected the request." };
   }
   const resp = b.response as { type?: string; data?: { statuses?: unknown[] } } | undefined;
-  const status = resp?.data?.statuses?.[0] as { filled?: { totalSz?: string; avgPx?: string }; resting?: unknown; error?: string } | string | undefined;
+  const status = resp?.data?.statuses?.[0] as { filled?: { totalSz?: string; avgPx?: string }; resting?: { oid?: number }; error?: string } | string | undefined;
   if (status && typeof status === "object") {
     if (status.error) return { ok: false, error: status.error };
     if (status.filled) return { ok: true, filled: { totalSz: Number(status.filled.totalSz ?? 0), avgPx: Number(status.filled.avgPx ?? 0) } };
+    if (typeof status.resting?.oid === "number") return { ok: true, resting: { oid: status.resting.oid } };
   }
   return { ok: true };
+}
+
+/** The first per-order error of a multi-order action (a TP and an SL), if any. */
+export function firstOrderError(body: unknown): string | undefined {
+  const parsed = parseExchangeResponse(body);
+  if (!parsed.ok) return parsed.error;
+  const statuses = (body as { response?: { data?: { statuses?: unknown[] } } }).response?.data?.statuses ?? [];
+  for (const st of statuses) if (st && typeof st === "object" && "error" in st) return String((st as { error: unknown }).error);
+  return undefined;
 }
 
 /** "User or API Wallet 0x… does not exist." — the agent isn't (or is no longer) approved. */

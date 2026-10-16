@@ -528,11 +528,86 @@ function carryRows(perChain: { chainId: number; reserves: AaveReserve[] }[], poo
   return rows.sort((a, b) => b.netApy - a.netApy).slice(0, 1);
 }
 
+/* ---------- Hyperliquid HIP-3: stock, index and commodity perps ---------- */
+
+interface Hip3Market {
+  coin: string;
+  mark: number;
+  fundingAnnualizedPct: number;
+  maxLeverage: number;
+  dayVolumeUsd: number;
+  isolatedOnly: boolean;
+}
+
+/** The most traded HIP-3 perps on dexes collateralised in USDC (the ones Meridian can fund). */
+async function fetchHip3Markets(): Promise<Hip3Market[]> {
+  const post = async (body: object) => {
+    const res = await fetch(HYPERLIQUID_INFO, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(TIMEOUT),
+      cache: "no-store",
+    });
+    if (!res.ok) throw new Error(String(res.status));
+    return res.json();
+  };
+  try {
+    const dexes = ((await post({ type: "perpDexs" })) as ({ name: string } | null)[]).filter((d): d is { name: string } => !!d).map((d) => d.name);
+    const all = await Promise.all(
+      dexes.map(async (dex) => {
+        try {
+          const [meta, ctxs] = (await post({ type: "metaAndAssetCtxs", dex })) as [
+            { collateralToken?: number; universe?: { name: string; maxLeverage: number; onlyIsolated?: boolean; isDelisted?: boolean }[] },
+            { markPx?: string; funding?: string; dayNtlVlm?: string }[],
+          ];
+          if ((meta.collateralToken ?? 0) !== 0) return [];
+          return (meta.universe ?? []).flatMap((u, i): Hip3Market[] => {
+            const mark = Number(ctxs[i]?.markPx);
+            if (u.isDelisted || !(mark > 0)) return [];
+            return [
+              {
+                coin: u.name,
+                mark,
+                fundingAnnualizedPct: Number(ctxs[i]?.funding ?? 0) * 24 * 365 * 100,
+                maxLeverage: u.maxLeverage,
+                dayVolumeUsd: Number(ctxs[i]?.dayNtlVlm ?? 0),
+                isolatedOnly: !!u.onlyIsolated,
+              },
+            ];
+          });
+        } catch {
+          return [];
+        }
+      }),
+    );
+    return all
+      .flat()
+      .filter((m) => m.dayVolumeUsd >= 1_000_000)
+      .sort((a, b) => b.dayVolumeUsd - a.dayVolumeUsd)
+      .slice(0, 40);
+  } catch {
+    return [];
+  }
+}
+
+function hip3Summary(markets: Hip3Market[]): string {
+  if (markets.length === 0) return "";
+  const lines = ["\n### Stock, index & commodity perps (Hyperliquid HIP-3, USDC margin, executable) — exact market name | price | funding | max leverage | 24h volume"];
+  for (const m of markets) {
+    const sign = m.fundingAnnualizedPct >= 0 ? "+" : "";
+    lines.push(
+      `- ${m.coin} | $${m.mark.toLocaleString("en-US", { maximumFractionDigits: 4 })} | ${sign}${m.fundingAnnualizedPct.toFixed(1)}% annualized | ${m.maxLeverage}x${m.isolatedOnly ? " isolated" : ""} | ${fmtTvl(m.dayVolumeUsd)}`,
+    );
+  }
+  return lines.join("\n");
+}
+
 /* ---------- Handler ---------- */
 
 export async function GET() {
   // Fetch ALL sources in parallel — each is independently null-safe
-  const [defiLlama, funding, hlp, lighterVaults, philidor, aaveReserves, haikuYields, pendleMarkets, morphoVaults] = await Promise.all([
+  const [defiLlama, funding, hlp, lighterVaults, philidor, aaveReserves, haikuYields, pendleMarkets, morphoVaults, hip3] = await Promise.all([
     fetchDefiLlama(),
     fetchFundingRates(),
     fetchHlpVault(),
@@ -542,6 +617,7 @@ export async function GET() {
     haiku.fetchYieldOpportunities({ minApy: 1 }).catch(() => []),
     Promise.all(PENDLE_CHAINS.map((c) => fetchPendleMarkets(c))).then((all) => all.flat()),
     fetchMorphoExecutableVaults(),
+    fetchHip3Markets(),
   ]);
 
   const vaults: VaultYield[] = [
@@ -585,6 +661,7 @@ export async function GET() {
     opportunitiesSummary(defiLlama.pools) +
     pendleSummary(pendleMarkets) +
     neutralCarrySummary(carryRows(aaveReserves, defiLlama.pools)) +
+    hip3Summary(hip3) +
     (aaveMcp ? `\n${aaveMcp}` : "");
 
   return NextResponse.json(ctx);

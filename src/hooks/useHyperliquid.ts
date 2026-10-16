@@ -3,7 +3,10 @@
 import { useCallback, useRef, useState } from "react";
 import { useAccount, useSignTypedData } from "wagmi";
 import {
+  cancelPerpOrder,
   hyperliquidEnv,
+  modifyPerpLimit,
+  perpLimitOrder,
   perpMarketOrder,
   spotMarketSell,
   withAgent,
@@ -22,6 +25,10 @@ export interface HlResult {
   size?: number;
   /** What actually filled (IOC orders fill now or not at all). */
   filled?: { totalSz: number; avgPx: number };
+  /** Stop-loss / take-profit placed after the fill. */
+  protection?: MarketOrderResult["protection"];
+  /** A limit order resting on the book (not filled yet). */
+  resting?: { oid: number };
   error?: string;
 }
 
@@ -42,7 +49,16 @@ export interface UseHyperliquidResult extends HlState {
     /** Exact coin quantity; when positive it is used instead of sizeUsd / mid. */
     coinQty?: number;
     reduceOnly?: boolean;
+    /** Reduce-only stop-loss / take-profit, in % of price from the fill. */
+    stopLossPct?: number;
+    takeProfitPct?: number;
   }) => Promise<void>;
+  /** Perp limit order: rests on the book (GTC) or post-only (ALO). */
+  placeLimit: (p: { symbol: string; isBuy: boolean; px: number; sizeUsd: number; leverage?: number; postOnly?: boolean; testnet?: boolean }) => Promise<void>;
+  /** Cancel a resting order (limit, stop-loss, take-profit). */
+  cancelOrder: (p: { coin: string; oid: number; testnet?: boolean }) => Promise<void>;
+  /** Move a resting limit order to a new price. */
+  modifyOrder: (p: { coin: string; oid: number; isBuy: boolean; size: number; px: number; reduceOnly?: boolean; testnet?: boolean }) => Promise<void>;
   /** Sell a spot token (UETH, UBTC, HYPE…) for USDC on Hyperliquid spot; at most what the account holds. */
   sellSpot: (p: { token: string; amount?: number; testnet?: boolean }) => Promise<void>;
   reset: () => void;
@@ -62,7 +78,12 @@ export function useHyperliquid(): UseHyperliquidResult {
   const submittingRef = useRef(false);
 
   const run = useCallback(
-    async (testnet: boolean | undefined, order: (env: ReturnType<typeof hyperliquidEnv>, agentKey: `0x${string}`) => Promise<MarketOrderResult>) => {
+    async (
+      testnet: boolean | undefined,
+      order: (env: ReturnType<typeof hyperliquidEnv>, agentKey: `0x${string}`) => Promise<MarketOrderResult>,
+      /** Market orders must fill now; a limit, a cancel or a modify succeeds without a fill. */
+      expectFill = true,
+    ) => {
       if (submittingRef.current) return;
       submittingRef.current = true;
       try {
@@ -82,9 +103,17 @@ export function useHyperliquid(): UseHyperliquidResult {
             return last;
           },
         );
-        const result: HlResult = { ok: out.ok, marketPrice: last.mid ?? null, size: last.size, filled: out.filled, error: out.error };
+        const result: HlResult = {
+          ok: out.ok,
+          marketPrice: last.mid ?? null,
+          size: last.size,
+          filled: out.filled,
+          protection: last.protection,
+          resting: out.resting,
+          error: out.error,
+        };
         // An IOC order that didn't fill at all is not a success, whatever the transport said.
-        if (out.ok && out.filled === undefined) {
+        if (expectFill && out.ok && out.filled === undefined) {
           setState({ status: "error", result, error: "The order didn't fill (no liquidity within 5% of the mid). Nothing was traded." });
           return;
         }
@@ -102,9 +131,19 @@ export function useHyperliquid(): UseHyperliquidResult {
   const execute = useCallback<UseHyperliquidResult["execute"]>(
     (p) =>
       run(p.testnet, (env, key) =>
-        perpMarketOrder(env, key, { coin: p.symbol, isBuy: p.isBuy, sizeUsd: p.sizeUsd, coinQty: p.coinQty, leverage: p.leverage, reduceOnly: p.reduceOnly }),
+        perpMarketOrder(env, key, {
+          coin: p.symbol,
+          isBuy: p.isBuy,
+          sizeUsd: p.sizeUsd,
+          coinQty: p.coinQty,
+          leverage: p.leverage,
+          reduceOnly: p.reduceOnly,
+          stopLossPct: p.stopLossPct,
+          takeProfitPct: p.takeProfitPct,
+          user: address,
+        }),
       ),
-    [run],
+    [run, address],
   );
 
   const sellSpot = useCallback<UseHyperliquidResult["sellSpot"]>(
@@ -112,9 +151,29 @@ export function useHyperliquid(): UseHyperliquidResult {
     [run, address],
   );
 
+  const placeLimit = useCallback<UseHyperliquidResult["placeLimit"]>(
+    (p) =>
+      run(
+        p.testnet,
+        (env, key) => perpLimitOrder(env, key, { coin: p.symbol, isBuy: p.isBuy, px: p.px, sizeUsd: p.sizeUsd, leverage: p.leverage, postOnly: p.postOnly, user: address }),
+        false,
+      ),
+    [run, address],
+  );
+
+  const cancelOrder = useCallback<UseHyperliquidResult["cancelOrder"]>(
+    (p) => run(p.testnet, (env, key) => cancelPerpOrder(env, key, { coin: p.coin, oid: p.oid }), false),
+    [run],
+  );
+
+  const modifyOrder = useCallback<UseHyperliquidResult["modifyOrder"]>(
+    (p) => run(p.testnet, (env, key) => modifyPerpLimit(env, key, p), false),
+    [run],
+  );
+
   const reset = useCallback(() => setState({ status: "idle" }), []);
 
-  return { ...state, execute, sellSpot, reset };
+  return { ...state, execute, placeLimit, cancelOrder, modifyOrder, sellSpot, reset };
 }
 
 /** One line for a filled order: "0.0198 @ $2,431.20". */

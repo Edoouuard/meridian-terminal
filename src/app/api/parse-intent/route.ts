@@ -88,6 +88,7 @@ When the user's portfolio is provided:
 
 ### Perpetual Futures
 - **Hyperliquid**: on-chain orderbook, up to 50x leverage. Check live funding rates in the data.
+- **Hyperliquid stock, index & commodity perps (HIP-3)**: Tesla, Nvidia, the S&P 500, gold, oil… are traded as perps with USDC margin, from the same Hyperliquid account as crypto perps. For a view on a stock, an index or a commodity ("short Tesla", "long gold", "hedge my portfolio with the S&P 500"), use side "Long" or "Short", protocol "Hyperliquid", chain "Arbitrum", and asset = the EXACT market name from the live "Stock, index & commodity perps" list followed by " PERP" (e.g. "xyz:TSLA PERP", "xyz:SP500 PERP", "xyz:GOLD PERP"). Never invent a market that isn't in that list; quote its live price and funding. Respect its max leverage. These markets trade around the clock but follow the underlying's price: say so in the risk note.
 - **Extended**: StarkEx L2, up to 20x leverage. Active points program.
 - **Ondo**: via LI.FI relay.
 - **Lighter**: zk-rollup. Check live data for LLP vault APR if available.

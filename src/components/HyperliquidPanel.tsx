@@ -10,7 +10,9 @@ import { setSharedHlEnv, useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
 import {
   fetchClearinghouseState,
   fetchOpenOrders,
+  HIP3_MAIN_DEX,
   hyperliquidEnv,
+  type HlAccount,
   type HlOpenOrder,
 } from "@/lib/integrations/hyperliquid-live";
 
@@ -29,11 +31,15 @@ export function HyperliquidPanel() {
   const env = useSharedHlEnv();
   const account = useSharedHlAccount();
   const [orders, setOrders] = useState<HlOpenOrder[]>([]);
+  // Stock / commodity positions live on the HIP-3 dex, outside the main account the portfolio reads.
+  const [hip3Positions, setHip3Positions] = useState<HlAccount["positions"]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const { status, result, error: hlErr, execute, reset } = useHyperliquid();
+  const { status, result, error: hlErr, execute, cancelOrder, modifyOrder, reset } = useHyperliquid();
   const [closing, setClosing] = useState<{ coin: string; size: number } | null>(null);
+  const [lastAction, setLastAction] = useState<"close" | "cancel" | "modify">("close");
+  const [editing, setEditing] = useState<{ order: HlOpenOrder; px: string } | null>(null);
 
   const refresh = useCallback(async () => {
     if (!address) return;
@@ -41,13 +47,16 @@ export function HyperliquidPanel() {
     setError(null);
     try {
       const e = hyperliquidEnv(env === "testnet");
-      const [acc, ord] = await Promise.all([
+      const [acc, ord, hip3Acc, hip3Ord] = await Promise.all([
         fetchClearinghouseState(address, e),
         fetchOpenOrders(address, e),
+        fetchClearinghouseState(address, e, HIP3_MAIN_DEX).catch(() => null),
+        fetchOpenOrders(address, e, HIP3_MAIN_DEX).catch(() => [] as HlOpenOrder[]),
       ]);
       // Push into the shared store so the portfolio and this panel agree.
       setSharedHlAccount(acc);
-      setOrders(ord);
+      setHip3Positions(hip3Acc?.positions ?? []);
+      setOrders([...ord, ...hip3Ord]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -73,7 +82,20 @@ export function HyperliquidPanel() {
   const closeOne = (p: { coin: string; size: number }) => {
     // closing: if long (size>0) reduce by selling; if short (size<0) reduce by buying
     const isBuy = p.size < 0;
+    setLastAction("close");
     execute({ symbol: p.coin, isBuy, sizeUsd: 0, coinQty: Math.abs(p.size), reduceOnly: true, leverage: 1, testnet: env === "testnet" });
+  };
+
+  const cancelOne = async (o: HlOpenOrder) => {
+    setLastAction("cancel");
+    await cancelOrder({ coin: o.coin, oid: o.oid, testnet: env === "testnet" });
+    void refresh();
+  };
+
+  const moveOne = async (o: HlOpenOrder, px: number) => {
+    setLastAction("modify");
+    await modifyOrder({ coin: o.coin, oid: o.oid, isBuy: o.side === "B", size: o.size, px, reduceOnly: o.reduceOnly, testnet: env === "testnet" });
+    void refresh();
   };
 
   return (
@@ -118,13 +140,13 @@ export function HyperliquidPanel() {
             <span style={{ fontVariantNumeric: "tabular-nums" }}>{fmtUsd(account.totalMarginUsed)}</span>
           </div>
 
-          {account.positions.length === 0 && (
+          {account.positions.length === 0 && hip3Positions.length === 0 && (
             <p style={{ fontSize: 11, margin: "4px 0 0" }} className="text-muted">
               No open positions on {env === "testnet" ? "Hyperliquid testnet" : "Hyperliquid"}.
             </p>
           )}
 
-          {account.positions.map((p) => {
+          {[...account.positions, ...hip3Positions].map((p) => {
             const ok = p.unrealizedPnl >= 0;
             return (
               <div
@@ -166,9 +188,60 @@ export function HyperliquidPanel() {
           })}
 
           {orders.length > 0 && (
-            <p style={{ fontSize: 10, margin: "4px 0 0" }} className="text-muted">
-              {orders.length} open order{orders.length > 1 ? "s" : ""}
-            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 4 }}>
+              <span style={{ fontSize: 10 }} className="text-muted">
+                {orders.length} open order{orders.length > 1 ? "s" : ""}
+              </span>
+              {orders.map((o) => {
+                const isTrigger = o.triggerPx > 0;
+                const label = isTrigger ? (/take profit/i.test(o.orderType) ? "Take-profit" : "Stop-loss") : "Limit";
+                return (
+                  <div
+                    key={o.oid}
+                    style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6, fontSize: 11, border: "1px solid var(--color-divider)", borderRadius: "var(--radius-sm)", padding: "4px 8px" }}
+                  >
+                    <span>
+                      {label} {o.side === "B" ? "buy" : "sell"} {o.size} {o.coin} @ {fmtPx(isTrigger ? o.triggerPx : o.limitPx)}
+                      {o.reduceOnly && !isTrigger ? " · reduce-only" : ""}
+                    </span>
+                    <span style={{ display: "flex", gap: 4 }}>
+                      {!isTrigger &&
+                        (editing?.order.oid === o.oid ? (
+                          <>
+                            <input
+                              type="number"
+                              value={editing.px}
+                              step="any"
+                              aria-label="New limit price"
+                              onChange={(e) => setEditing({ order: o, px: e.target.value })}
+                              style={{ width: 70, fontSize: 10 }}
+                            />
+                            <button
+                              className="btn btn-secondary"
+                              style={{ fontSize: 10, padding: "2px 6px" }}
+                              disabled={!(Number(editing.px) > 0)}
+                              onClick={() => {
+                                const px = Number(editing.px);
+                                setEditing(null);
+                                void moveOne(o, px);
+                              }}
+                            >
+                              Save
+                            </button>
+                          </>
+                        ) : (
+                          <button className="btn btn-secondary" style={{ fontSize: 10, padding: "2px 6px" }} onClick={() => setEditing({ order: o, px: String(o.limitPx) })}>
+                            Edit
+                          </button>
+                        ))}
+                      <button className="btn btn-secondary" style={{ fontSize: 10, padding: "2px 6px" }} onClick={() => void cancelOne(o)}>
+                        Cancel
+                      </button>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       )}
@@ -178,7 +251,11 @@ export function HyperliquidPanel() {
           {status === "preparing" || status === "approving" || status === "submitting"
             ? `${status === "approving" ? "Approve the Meridian trading key in your wallet (once)…" : "Working…"}`
             : status === "confirmed" && result
-              ? `Closed: ${describeFill(result)}`
+              ? lastAction === "cancel"
+                ? "Order cancelled."
+                : lastAction === "modify"
+                  ? "Order moved."
+                  : `Closed: ${describeFill(result)}`
               : `Error: ${hlErr ?? "failed"}`}
           <button onClick={reset} style={{ marginLeft: 6, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 10 }}>
             clear
