@@ -177,7 +177,16 @@ function intentLabel(intent: string): string {
   return map[intent] || "Custom strategy";
 }
 
-export function ThreadCard({ item, onSelectVariant }: { item: ThreadItem; onSelectVariant?: (plan: TradePlan) => void }) {
+export function ThreadCard({
+  item,
+  onSelectVariant,
+  onAnswer,
+}: {
+  item: ThreadItem;
+  onSelectVariant?: (plan: TradePlan) => void;
+  /** Answer the planner's question (only on the latest message). */
+  onAnswer?: (answer: string) => void;
+}) {
   const strategies = item.variants && item.variants.length > 1 ? item.variants : item.plan ? [item.plan] : [];
   const recommendedIdx = strategies.length > 1 ? defaultStrategyIndex(strategies, item.recommendedIndex) : 0;
   const [activeIdx, setActiveIdx] = useState(() => {
@@ -185,6 +194,44 @@ export function ThreadCard({ item, onSelectVariant }: { item: ThreadItem; onSele
     const idx = strategies.indexOf(item.plan);
     return idx >= 0 ? idx : recommendedIdx;
   });
+
+  if (item.clarify) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+        <div className="user-bubble"><p>{item.text}</p></div>
+        <div className="ai-bubble ai-bubble--wide">
+          <div className="answer-head">
+            <span className="answer-head__kicker">One question first</span>
+            {item.understanding && <p className="answer-head__text">{item.understanding}</p>}
+          </div>
+          <p style={{ fontSize: 14, fontWeight: 600, margin: "var(--space-2) 0 4px" }}>{item.clarify.question}</p>
+          {item.clarify.why && (
+            <p className="text-muted" style={{ fontSize: 12, margin: "0 0 var(--space-2)" }}>
+              {item.clarify.why}
+            </p>
+          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-start" }}>
+            {item.clarify.options.map((o, i) => (
+              <button
+                key={o}
+                className={i === 0 ? "btn btn-primary" : "btn btn-secondary"}
+                style={{ fontSize: 13, textAlign: "left", whiteSpace: "normal" }}
+                disabled={!onAnswer}
+                onClick={() => onAnswer?.(o)}
+              >
+                {o}
+              </button>
+            ))}
+          </div>
+          {onAnswer && (
+            <p className="text-muted" style={{ fontSize: 11, margin: "var(--space-2) 0 0" }}>
+              Or type your own answer below.
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   if (!item.plan) {
     return (

@@ -1,3 +1,5 @@
+import { crossVenueFunding, crossVenueSummary, extendedSummary, parseExtendedMarketRows, type ExtendedMarketRow } from "@/lib/perpVenues";
+import { EXTENDED_HOSTS } from "@/lib/integrations/extendedProxy";
 import { NextResponse } from "next/server";
 import { parseOpportunities, type Opportunity } from "@/lib/protocols/opportunities";
 import { aaveYieldSummary, fetchAaveReservesByChain, type AaveReserve } from "@/lib/mcp/aave";
@@ -442,7 +444,7 @@ function buildSummary(ctx: Omit<YieldContext, "summary" | "fetchedAt">): string 
   }
 
   if (ctx.funding.length > 0) {
-    lines.push("\n### Perp Funding Rates (Hyperliquid) — yield for delta-neutral / cost for directional");
+    lines.push("\n### Perp Funding Rates (Hyperliquid) — positive = longs pay shorts: a SHORT earns a positive rate, a LONG pays it (negative: the reverse)");
     for (const f of ctx.funding) {
       const sign = f.annualizedPct >= 0 ? "+" : "";
       lines.push(`- ${f.coin} | ${sign}${f.annualizedPct.toFixed(1)}% annualized | ${sign}${(f.hourlyRate * 100).toFixed(4)}%/hr`);
@@ -593,7 +595,7 @@ async function fetchHip3Markets(): Promise<Hip3Market[]> {
 
 function hip3Summary(markets: Hip3Market[]): string {
   if (markets.length === 0) return "";
-  const lines = ["\n### Stock, index & commodity perps (Hyperliquid HIP-3, USDC margin, executable) — exact market name | price | funding | max leverage | 24h volume"];
+  const lines = ["\n### Stock, index & commodity perps (Hyperliquid HIP-3, USDC margin, executable) — exact market name | price | funding (positive = a short earns it) | max leverage | 24h volume"];
   for (const m of markets) {
     const sign = m.fundingAnnualizedPct >= 0 ? "+" : "";
     lines.push(
@@ -603,11 +605,27 @@ function hip3Summary(markets: Hip3Market[]): string {
   return lines.join("\n");
 }
 
+/* ---------- Extended: markets and funding ---------- */
+
+async function fetchExtendedMarkets(): Promise<ExtendedMarketRow[]> {
+  try {
+    const res = await fetch(`${EXTENDED_HOSTS.mainnet}/api/v1/info/markets`, {
+      headers: { "user-agent": "meridian-terminal" },
+      signal: AbortSignal.timeout(TIMEOUT),
+      cache: "no-store",
+    });
+    if (!res.ok) return [];
+    return parseExtendedMarketRows(((await res.json()) as { data?: Parameters<typeof parseExtendedMarketRows>[0] }).data);
+  } catch {
+    return [];
+  }
+}
+
 /* ---------- Handler ---------- */
 
 export async function GET() {
   // Fetch ALL sources in parallel — each is independently null-safe
-  const [defiLlama, funding, hlp, lighterVaults, philidor, aaveReserves, haikuYields, pendleMarkets, morphoVaults, hip3] = await Promise.all([
+  const [defiLlama, funding, hlp, lighterVaults, philidor, aaveReserves, haikuYields, pendleMarkets, morphoVaults, hip3, extended] = await Promise.all([
     fetchDefiLlama(),
     fetchFundingRates(),
     fetchHlpVault(),
@@ -618,6 +636,7 @@ export async function GET() {
     Promise.all(PENDLE_CHAINS.map((c) => fetchPendleMarkets(c))).then((all) => all.flat()),
     fetchMorphoExecutableVaults(),
     fetchHip3Markets(),
+    fetchExtendedMarkets(),
   ]);
 
   const vaults: VaultYield[] = [
@@ -662,6 +681,14 @@ export async function GET() {
     pendleSummary(pendleMarkets) +
     neutralCarrySummary(carryRows(aaveReserves, defiLlama.pools)) +
     hip3Summary(hip3) +
+    extendedSummary(extended) +
+    crossVenueSummary(
+      crossVenueFunding(
+        [...funding, ...hip3.map((m) => ({ coin: m.coin, hourlyRate: m.fundingAnnualizedPct / 100 / (24 * 365) }))],
+        // Liquid markets only: a pair needs both books deep enough to open and close at size.
+        extended.filter((m) => m.dayVolumeUsd >= 1_000_000),
+      ).sort((a, b) => b.spreadPct - a.spreadPct),
+    ) +
     (aaveMcp ? `\n${aaveMcp}` : "");
 
   return NextResponse.json(ctx);

@@ -10,6 +10,7 @@ import { describeFill, useHyperliquid } from "@/hooks/useHyperliquid";
 import { useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
 import { useExtendedAccount } from "@/hooks/useExtendedAccount";
 import { useExtendedPerp } from "@/hooks/useExtendedPerp";
+import { fetchExtendedMarket } from "@/lib/integrations/extended-live";
 import { useLifiPerpsSetup } from "@/hooks/useLifiPerpsSetup";
 import { useLifiPerpOrder } from "@/hooks/useLifiPerpOrder";
 import { LIFI_PROVIDER_LABEL, type LifiPerpsProviderId } from "@/lib/integrations/lifiPerps";
@@ -420,7 +421,14 @@ export function ExtendedPerpExecuteButton({ leg, prices }: { leg: TradeLeg; pric
   const side = (leg.side || "").toLowerCase();
   const isBuy = side.startsWith("long") || side === "buy";
 
-  const price = resolvePriceFromList(prices, symbol);
+  // Extended's own market (stocks trade as AMD_24_5-USD): its mark sizes the order.
+  const extMarket = useQuery({
+    queryKey: ["extended-market", signer?.network, leg.asset],
+    queryFn: () => fetchExtendedMarket(signer!.network, leg.asset),
+    enabled: !!signer,
+    staleTime: 15_000,
+  });
+  const price = extMarket.data?.mark ?? resolvePriceFromList(prices, symbol);
   const coinQty = price !== null ? sizeUsd / price : undefined;
 
   const recordedRef = useRef<string | null>(null);
@@ -519,7 +527,7 @@ export function ExtendedPerpExecuteButton({ leg, prices }: { leg: TradeLeg; pric
         warning={signer.network === "testnet" ? "TESTNET — no real funds." : "Mainnet — real funds. Confirm carefully."}
         onConfirm={() => {
           setConfirming(false);
-          execute({ signer, symbol, isBuy, sizeUsd, prices, leverage: leg.leverage });
+          execute({ signer, symbol: leg.asset, isBuy, sizeUsd, prices, leverage: leg.leverage });
         }}
         onCancel={() => setConfirming(false)}
       />

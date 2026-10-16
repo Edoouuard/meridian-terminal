@@ -12,6 +12,7 @@
 import type { ThreadItem, ThreadType } from "@/lib/data";
 import type { TradePlan, TradeIntent, TradeLeg } from "@/lib/tradePlan";
 import { routeThesis } from "@/lib/routeThesis";
+import { cleanClarify, type PlannerClarify } from "@/lib/planner/clarify";
 
 /* ------------------------------------------------------------------ */
 /*  Types for the /api/parse-intent response                          */
@@ -60,6 +61,8 @@ export interface LLMStrategy {
 export interface ParseIntentResponse {
   understanding: string;
   strategies: LLMStrategy[];
+  /** One question the planner asks before planning (STRATEGIST.md section 3). */
+  clarify?: PlannerClarify;
   /** Index of the strategy the planner recommends for this user. */
   recommended?: number;
 }
@@ -214,6 +217,8 @@ export interface PortfolioContext {
   perps: { coin: string; size: number; notional: number; unrealizedPnl: number }[];
   /** Net ETH delta across all venues (spot + perps). */
   netDeltaEthTotal: number | null;
+  /** The user's Extended account: connected or not, and its USDC when it is. */
+  extended?: { connected: boolean; network?: string; equityUsd?: number; availableUsd?: number };
 }
 
 /**
@@ -221,7 +226,7 @@ export interface PortfolioContext {
  * Falls back to the sync regex parser on any error (network, API key missing,
  * malformed response, etc.) — the app never breaks.
  */
-export async function routeThesisAsync(rawText: string, portfolio?: PortfolioContext): Promise<ThreadItem> {
+export async function routeThesisAsync(rawText: string, portfolio?: PortfolioContext, opts: { clarified?: boolean } = {}): Promise<ThreadItem> {
   const text = (rawText ?? "").trim();
   if (!text) return routeThesis(text);
 
@@ -230,7 +235,7 @@ export async function routeThesisAsync(rawText: string, portfolio?: PortfolioCon
       method: "POST",
       signal: AbortSignal.timeout(60_000),
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ thesis: text, portfolio }),
+      body: JSON.stringify({ thesis: text, portfolio, clarified: opts.clarified === true }),
     });
 
     if (!res.ok) {
@@ -239,6 +244,12 @@ export async function routeThesisAsync(rawText: string, portfolio?: PortfolioCon
     }
 
     const data: ParseIntentResponse = await res.json();
+
+    // The planner needs one answer first: show its question, not a fallback plan.
+    const clarify = cleanClarify(data.clarify);
+    if (clarify && (!data.strategies || data.strategies.length === 0)) {
+      return { type: "custom", text, understanding: cleanText(data.understanding, 240), clarify };
+    }
 
     if (!data.strategies || data.strategies.length === 0) {
       throw new Error("No strategies returned");

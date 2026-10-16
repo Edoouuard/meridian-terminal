@@ -4,6 +4,8 @@ import { enforceExplicitOrder, parseExplicitPerpOrder } from "@/lib/explicitOrde
 import { NextRequest, NextResponse } from "next/server";
 import { ACTIVE_CHAIN_IDS, CHAIN_LABEL } from "@/lib/onchain";
 import { routingChainNames } from "@/lib/mcp/routerAllowlist";
+import { strategistDoctrine } from "@/lib/planner/strategist";
+import { cleanClarify } from "@/lib/planner/clarify";
 import { dropBelowMinimum, hyperliquidMarginUsd, validateAndFixStrategy } from "@/lib/strategyIntegrity";
 
 /**
@@ -33,37 +35,12 @@ For a hedge, a beta-neutral or delta-neutral goal, use the spot-only version: th
 const ACTIVE_CHAINS = ACTIVE_CHAIN_IDS.map((id) => CHAIN_LABEL[id]).join(", ");
 const BRIDGE_CHAINS = routingChainNames();
 
-const SYSTEM_PROMPT = `You are Meridian's DeFi strategy engine. You receive a user's investment thesis and LIVE MARKET DATA, and produce 3 executable strategies.
-
-## CRITICAL: USE LIVE DATA ONLY
-
-The user message contains LIVE YIELD DATA fetched seconds ago from protocol APIs. This includes real-time APYs, funding rates, vault yields, risk scores, and TVL.
-
-You MUST:
-- Use ONLY the rates from the live data. Never invent, estimate, or recall rates from memory.
-- Quote the exact live APY/APR in every leg note and summary (e.g. "Currently 4.23% APY").
-- Compare opportunities from the live data to pick the best ones for each strategy.
-- If an asset/protocol the user wants isn't in the live data, say so honestly in the note.
-
-You MUST NOT:
-- Use approximate rates like "~5%" or "~3-4%". Use the exact number from the live data.
-- Assume any rate is stable. Mention in variantNote that rates are variable and current as of now.
-
-## EXPLICIT ORDERS COME FIRST (CRITICAL)
-
-When the user gives an order — a side and a market, optionally leverage, a stop-loss, a take-profit or a size ("short ETH 2x SL 20%", "long BTC 3x", "short Tesla") — strategy 1 IS that order, exactly: a "Deposit" USDC on Hyperliquid (chain "Arbitrum", the margin = size / leverage) then the "Short"/"Long" leg with that leverage and, on the perp leg, "stopLossPct" / "takeProfitPct" as numbers (20 for "SL 20%"). Size it from the free balance (most of it as margin when no size is given). A small balance is NEVER a reason to replace the order with something else: Hyperliquid accepts positions from $10. Strategies 2 and 3 are variants of the same view (another leverage, a limit entry noted in the summary, a hedged version), never an unrelated yield strategy.
-
-## Your Process (MANDATORY)
-
-Before generating strategies, analyze:
-1. WHAT does the user want? (yield, exposure, hedge, points, income, protection?)
-2. WHAT asset(s) and chain(s)?
-3. WHAT is their risk appetite from their language?
-4. WHAT time horizon?
-5. ANALYZE THE USER'S PORTFOLIO: What do they already hold? What positions are open? What is their current exposure? Use this to SIZE strategies appropriately and AVOID redundant actions.
-6. SCAN the live data: which protocols currently offer the best rates for this goal?
-7. COMPARE: for yield, rank all available options from the live data. For exposure, check funding rates. For staking, compare all staking providers.
-8. COMPOSE 3 genuinely different approaches using the best live opportunities.
+/**
+ * Technical reference appended to the strategist doctrine (lib/planner/STRATEGIST.md):
+ * venues, structural rules, leg format and output schema. The doctrine owns the
+ * reasoning (read data, decode intent, ask or build, rank); this owns the format.
+ */
+const SYSTEM_PROMPT = `# Technical reference
 
 ## Portfolio-Aware Strategy Design (CRITICAL)
 
@@ -204,7 +181,7 @@ RULES:
 
 ## Strategy Design
 
-1. **3 genuinely different strategies** — different mechanisms, not just different leverage on the same idea.
+1. **3 strategies** — different mechanisms when the goal allows; when the user fixed the mechanism (an explicit order, two named venues), vary size, leverage or market instead (doctrine section 7).
 2. **Protocol selection from live data**: pick the protocol that currently offers the best rate for the user's goal. If Morpho has higher APY than Aave for USDC right now, say so. If a vault has exceptional yield, include it.
 3. **Multi-leg composition**: 1-5 legs per strategy. Each leg = one on-chain action. Verify structural integrity rules above.
 4. **Size**: use user's amount if given, otherwise $10,000.
@@ -223,13 +200,12 @@ Before returning your JSON, verify each strategy against this checklist:
 - [ ] Are spot legs (Supply/Stake/Swap/Buy) free of leverage fields?
 - [ ] Does every summary quote exact rates from the live data?
 - [ ] Does each strategy's "apy" match the rates in its leg notes, and is "exit" honest about lock-ups and queues?
-- [ ] Do the 3 strategies use 3 DIFFERENT mechanisms? The same legs on another chain or with another LST is the SAME mechanism: replace it.
-- [ ] Neutral or hedge goal with perps available and positive ETH funding: is one strategy the "LST + short perp" recipe?
+- [ ] Unless the user fixed the mechanism, do the 3 strategies use 3 DIFFERENT mechanisms? The same legs on another chain or with another LST is the SAME mechanism: replace it.
 
 ## Leg Format (STRICT)
 
 side: exactly one of: "Supply", "Borrow", "Repay", "Withdraw", "Long", "Short", "Swap", "Stake", "Bridge", "Transfer", "Restake", "Buy", "Deposit", "Sell" (Deposit only for the Hyperliquid deposit; Sell only for selling UETH/UBTC/USOL on Hyperliquid spot)
-asset: token symbol. Perps: "ETH PERP" (optional "stopLossPct" / "takeProfitPct" numbers on the perp leg). Swaps: "USDC → ETH". Staking: output token "stETH".
+asset: token symbol. Perps: "ETH PERP" (optional "stopLossPct" / "takeProfitPct" numbers on the perp leg); Hyperliquid stocks "xyz:AMD PERP"; Extended markets by their exact name + " PERP" ("ETH-USD PERP", "AMD_24_5-USD PERP"). Swaps: "USDC → ETH". Staking: output token "stETH".
 protocol: exactly one of: "Aave", "Compound", "Spark", "Lido", "Hyperliquid", "Extended", "Ondo", "Lighter", "Uniswap", "Morpho", "Pendle", "EigenLayer", "Fluid", "Sky", "Spark Savings", "Ethena", "Yearn", "Wallet", "deBridge" (same-chain swaps use "Uniswap"; LI.FI same-chain swaps are not executable)
 sizeUsd: integer USD value.
 leverage: only for Long/Short legs. Integer.
@@ -242,7 +218,20 @@ Every leg MUST set "chain" to the chain where that leg executes, using one of: $
 
 ## Output Format
 
-Return ONLY valid JSON (no markdown, no text before/after):
+Return ONLY valid JSON (no markdown, no text before/after).
+
+When you need ONE answer from the user before planning (doctrine section 3), return this instead, with "strategies" empty:
+{
+  "understanding": "One sentence restating the goal, and what is missing.",
+  "clarify": {
+    "question": "Short question in the user's language",
+    "why": "One line: what in the data makes it necessary",
+    "options": ["Recommended complete answer", "Other complete answer", "…"]
+  },
+  "strategies": []
+}
+
+Otherwise:
 {
   "understanding": "One sentence restating the user's goal in their terms, with the amount and asset (e.g. 'You want the best yield on your 5,000 USDC, moving chains only when it pays.')",
   "recommended": 1,
@@ -291,6 +280,17 @@ async function fetchYieldContext(baseUrl: string, cookie: string | null): Promis
   }
 }
 
+/** What the planner may do on Extended, from the user's Extended account state. */
+function extendedAccountLine(ext: PortfolioSnapshot["extended"]): string {
+  if (!ext?.connected) {
+    return "EXTENDED ACCOUNT: not connected. An Extended leg can't run yet: connecting takes three wallet signatures (Tools → Extended), then a USDC deposit on extended.exchange.";
+  }
+  if (ext.network && ext.network !== "mainnet") return `EXTENDED ACCOUNT: connected on ${ext.network} only (test funds); real Extended legs need the mainnet account.`;
+  if (ext.availableUsd === undefined) return "EXTENDED ACCOUNT: connected on mainnet; its balance couldn't be read just now (assume it may be empty and say so).";
+  if (ext.availableUsd < 1) return "EXTENDED ACCOUNT: connected on mainnet with no USDC. An Extended leg needs a deposit on extended.exchange first (Meridian can't deposit there yet).";
+  return `EXTENDED ACCOUNT: connected on mainnet, $${Math.round(ext.availableUsd).toLocaleString()} USDC free as margin (equity $${Math.round(ext.equityUsd ?? 0).toLocaleString()}). Extended legs up to that margin run now.`;
+}
+
 /** Format a portfolio snapshot into a human-readable string for the LLM. */
 function formatPortfolioContext(portfolio: PortfolioSnapshot | undefined): string {
   if (!portfolio) return "";
@@ -321,6 +321,8 @@ function formatPortfolioContext(portfolio: PortfolioSnapshot | undefined): strin
   if (hlMargin >= 1) {
     lines.push(`HYPERLIQUID ACCOUNT: $${Math.round(hlMargin).toLocaleString()} of stablecoins already in the user's Hyperliquid account, usable right now as perp margin and to buy UETH/UBTC on Hyperliquid spot (the long side of a neutral position there, see the recipe). A Long/Short on Hyperliquid needs NO Deposit leg up to that margin; add a Deposit only for margin beyond it. To use it anywhere else (lending, vaults, another chain), the FIRST leg is a withdrawal: side "Withdraw", protocol "Hyperliquid", asset "USDC", chain "Arbitrum", sizeUsd ≤ that amount — it lands as USDC on Arbitrum in ~5 min minus a $1 fee; Meridian adds any bridge after it. Never plan a leg elsewhere that spends this USDC without that withdrawal.`);
   }
+
+  lines.push(extendedAccountLine(portfolio.extended));
 
   if (portfolio.assets && portfolio.assets.length > 0) {
     lines.push("\n### Wallet Holdings");
@@ -363,6 +365,7 @@ interface PortfolioSnapshot {
   lendingPositions?: { protocol: string; chain: string; collateralUsd: number; debtUsd: number; healthFactor: number | null }[];
   perps?: { coin: string; size: number; notional: number; unrealizedPnl: number }[];
   netDeltaEthTotal?: number | null;
+  extended?: { connected: boolean; network?: string; equityUsd?: number; availableUsd?: number };
 }
 
 /** The planner call can take ~30s; give the function room past the default limit. */
@@ -374,7 +377,7 @@ const PLANNER_TIMEOUT_MS = 50_000;
 
 export async function POST(req: NextRequest) {
   try {
-    const { thesis, portfolio } = await req.json();
+    const { thesis, portfolio, clarified } = await req.json();
     if (!thesis || typeof thesis !== "string" || thesis.trim().length === 0) {
       return NextResponse.json({ error: "thesis is required" }, { status: 400 });
     }
@@ -405,6 +408,7 @@ export async function POST(req: NextRequest) {
     if (yieldContext) sections.push(yieldContext);
     else sections.push("## LIVE DATA UNAVAILABLE\nThe live rates could not be loaded for this request. Do not quote any APY or rate: omit \"apy\", and say in each summary that rates will be shown live before signing.");
     sections.push(`User thesis: ${thesis.trim()}`);
+    if (clarified) sections.push("The user has just answered your clarifying question (their answer is at the end of the thesis). Do not ask another question: return strategies.");
     const userMessage = sections.join("\n\n---\n\n");
 
     const response = await fetch(OPENROUTER_URL, {
@@ -421,7 +425,7 @@ export async function POST(req: NextRequest) {
         max_tokens: 4096,
         temperature: 0.4,
         messages: [
-          { role: "system", content: FEATURES.perps ? SYSTEM_PROMPT : SYSTEM_PROMPT + PERPS_DISABLED_NOTE },
+          { role: "system", content: `${strategistDoctrine()}\n\n---\n\n${FEATURES.perps ? SYSTEM_PROMPT : SYSTEM_PROMPT + PERPS_DISABLED_NOTE}` },
           { role: "user", content: userMessage },
         ],
       }),
@@ -453,17 +457,24 @@ export async function POST(req: NextRequest) {
     }
 
     const parsed = JSON.parse(jsonMatch[0]);
+    // An explicit order ("short ETH 2x, SL 20%") is strategy 1, whatever the model proposed.
+    const explicit = FEATURES.perps ? parseExplicitPerpOrder(thesis) : null;
+    if (!Array.isArray(parsed.strategies)) parsed.strategies = [];
 
-    if (!parsed.strategies || !Array.isArray(parsed.strategies) || parsed.strategies.length === 0) {
+    // One clarifying question instead of plans (doctrine section 3) — never
+    // after the user already answered one, and never over an explicit order.
+    const clarify = cleanClarify(parsed.clarify);
+    if (clarify && parsed.strategies.length === 0 && !clarified && !explicit) {
+      return NextResponse.json({ understanding: typeof parsed.understanding === "string" ? parsed.understanding : "", clarify, strategies: [] });
+    }
+    if (parsed.strategies.length === 0 && !explicit) {
       return NextResponse.json({ error: "No strategies in response" }, { status: 500 });
     }
 
     // Post-LLM structural validation: catch strategies that are logically
     // incoherent (e.g. labeled "neutral" but only have one directional leg).
     const wallet = { assets: (portfolio as PortfolioSnapshot | undefined)?.assets };
-    // An explicit order ("short ETH 2x, SL 20%") is strategy 1, whatever the model proposed.
-    const explicit = FEATURES.perps ? parseExplicitPerpOrder(thesis) : null;
-    parsed.strategies = enforceExplicitOrder(parsed.strategies, explicit, wallet.assets);
+    parsed.strategies = enforceExplicitOrder(parsed.strategies, explicit, wallet.assets, (portfolio as PortfolioSnapshot | undefined)?.extended?.availableUsd);
     parsed.strategies = dropBelowMinimum(
       parsed.strategies.map((st: Parameters<typeof validateAndFixStrategy>[0]) => validateAndFixStrategy(st, wallet)),
       explicit !== null,

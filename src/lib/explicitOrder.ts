@@ -8,6 +8,7 @@
 
 import { deployableUsd, hyperliquidMarginOnlyUsd, type BudgetAsset } from "@/lib/budgetFit";
 import type { LLMLeg, LLMStrategy } from "@/lib/strategyIntegrity";
+import { marketBase } from "@/lib/perpVenues";
 
 export interface ExplicitPerpOrder {
   side: "Long" | "Short";
@@ -18,6 +19,8 @@ export interface ExplicitPerpOrder {
   takeProfitPct?: number;
   /** Position size in USD when the user gave one. */
   sizeUsd?: number;
+  /** The venue the user named; Hyperliquid when none. */
+  venue?: "Hyperliquid" | "Extended";
 }
 
 /** Names people write for markets → the perp ticker (HIP-3 stocks and commodities resolve by ticker). */
@@ -52,7 +55,9 @@ export function parseExplicitPerpOrder(thesis: string): ExplicitPerpOrder | null
   const stopLossPct = sl ? Math.abs(num(sl[1]) ?? 0) : undefined;
   const takeProfitPct = num(tp?.[1]);
   const sizeUsd = size ? Number((size[1] ?? size[2]).replace(/,/g, "")) : undefined;
+  const venue = /\b(extended|x10)\b/i.test(text) ? ("Extended" as const) : /\b(hyperliquid|hl)\b/i.test(text) ? ("Hyperliquid" as const) : undefined;
   return {
+    venue,
     side,
     asset,
     leverage: leverage && leverage > 0 ? leverage : undefined,
@@ -62,13 +67,12 @@ export function parseExplicitPerpOrder(thesis: string): ExplicitPerpOrder | null
   };
 }
 
-const perpBase = (asset: string) => asset.replace(/[-\s]?PERP(ETUAL)?$/i, "").trim().toUpperCase().replace(/^[A-Z0-9]+:/, "");
-
 /** Hyperliquid refuses orders under $10 of notional: aim a little above. */
 const MIN_NOTIONAL_USD = 11;
 
 /** The order as Meridian executes it: margin deposited on Hyperliquid when needed, then the position. */
-export function strategyForOrder(order: ExplicitPerpOrder, assets?: BudgetAsset[]): LLMStrategy {
+export function strategyForOrder(order: ExplicitPerpOrder, assets?: BudgetAsset[], extendedFreeUsd?: number): LLMStrategy {
+  if (order.venue === "Extended") return extendedOrder(order, extendedFreeUsd);
   const lev = order.leverage ?? 1;
   const capital = deployableUsd(assets) + hyperliquidMarginOnlyUsd(assets);
   // Without a size: most of what the user can put up as margin (the budget fit trims it to the wallet).
@@ -97,16 +101,57 @@ export function strategyForOrder(order: ExplicitPerpOrder, assets?: BudgetAsset[
 }
 
 /**
+ * The order on Extended: no deposit leg (Meridian can't deposit there), sized
+ * from the Extended account's free margin when the user gave no size. With no
+ * margin there, it says so rather than moving the order to another venue.
+ */
+function extendedOrder(order: ExplicitPerpOrder, freeUsd = 0): LLMStrategy {
+  const lev = order.leverage ?? 1;
+  const notional = Math.max(MIN_NOTIONAL_USD, Math.floor(order.sizeUsd ?? (freeUsd > 0 ? freeUsd * 0.9 * lev : 20)));
+  const protection = [order.stopLossPct ? `stop-loss ${order.stopLossPct}%` : "", order.takeProfitPct ? `take-profit ${order.takeProfitPct}%` : ""].filter(Boolean).join(", ");
+  const needs = Math.ceil((notional * 1.03) / lev);
+  return {
+    name: `${order.side} ${order.asset} ${lev}x (Extended)`,
+    risk: "aggressive",
+    summary: `Your order: ${order.side.toLowerCase()} ${order.asset} on Extended, ${lev}x${protection ? `, ${protection}` : ""}.`,
+    variantNote: `Directional ${order.side.toLowerCase()}: a ${(100 / lev).toFixed(0)}% move against you approaches liquidation; funding is paid or earned every hour.`,
+    fundingNotes:
+      freeUsd >= needs
+        ? undefined
+        : [`Your Extended account has $${Math.floor(freeUsd)} free; this order needs ~$${needs} of margin there. Deposit USDC on extended.exchange with this wallet, then sign.`],
+    legs: [
+      {
+        side: order.side,
+        asset: `${order.asset} PERP`,
+        protocol: "Extended",
+        chain: "Arbitrum",
+        sizeUsd: notional,
+        leverage: lev,
+        stopLossPct: order.stopLossPct,
+        takeProfitPct: order.takeProfitPct,
+        note: `${order.side} ${order.asset} on Extended at ${lev}x${protection ? `, ${protection}` : ""}, as you asked.`,
+      },
+    ],
+  };
+}
+
+/**
  * Put the user's order first: a strategy that already places it (same side,
  * same market) gets the asked leverage / stop-loss / take-profit and moves to
  * the top; otherwise the order itself becomes strategy 1 and the LLM's
  * proposals follow as alternatives.
  */
-export function enforceExplicitOrder(strategies: LLMStrategy[], order: ExplicitPerpOrder | null, assets?: BudgetAsset[]): LLMStrategy[] {
+export function enforceExplicitOrder(
+  strategies: LLMStrategy[],
+  order: ExplicitPerpOrder | null,
+  assets?: BudgetAsset[],
+  extendedFreeUsd?: number,
+): LLMStrategy[] {
   if (!order) return strategies;
-  const matches = (l: LLMLeg) => l.side.trim().toLowerCase() === order.side.toLowerCase() && perpBase(l.asset) === order.asset;
+  const venueOk = (l: LLMLeg) => (order.venue === "Extended" ? /extended/i.test(l.protocol) : !/extended/i.test(l.protocol));
+  const matches = (l: LLMLeg) => l.side.trim().toLowerCase() === order.side.toLowerCase() && marketBase(l.asset) === marketBase(order.asset) && venueOk(l);
   const i = strategies.findIndex((s) => Array.isArray(s.legs) && s.legs.some(matches));
-  if (i < 0) return [strategyForOrder(order, assets), ...strategies].slice(0, 3);
+  if (i < 0) return [strategyForOrder(order, assets, extendedFreeUsd), ...strategies].slice(0, 3);
   const fixed: LLMStrategy = {
     ...strategies[i],
     legs: strategies[i].legs.map((l) =>

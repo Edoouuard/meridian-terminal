@@ -91,6 +91,8 @@ export interface TradePlan {
   risks?: string[];
 }
 
+import type { PlannerClarify } from "@/lib/planner/clarify";
+
 /** Augment ThreadItem with an optional parsed plan (keeps data.ts untouched). */
 declare module "@/lib/data" {
   interface ThreadItem {
@@ -103,6 +105,8 @@ declare module "@/lib/data" {
     understanding?: string;
     /** Index in `variants` of the strategy the planner recommends. */
     recommendedIndex?: number;
+    /** The planner asks one question before planning; the next message answers it. */
+    clarify?: PlannerClarify;
   }
 }
 

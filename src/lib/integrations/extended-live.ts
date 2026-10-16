@@ -22,6 +22,7 @@
 import { Extended, type Signer as ExtendedSigner, type Network as ExtendedNetwork } from "@blackcube/extended-sdk";
 import { resolvePriceFromList, type PriceEntry } from "@/lib/quote";
 import { extendedRestUrls } from "@/lib/integrations/extendedProxy";
+import { marketBase } from "@/lib/perpVenues";
 
 /** SDK client bound to the connected account, talking to Extended through Meridian's relay (Extended has no CORS). */
 export function extendedClient(signer: ExtendedSigner): Extended {
@@ -30,8 +31,10 @@ export function extendedClient(signer: ExtendedSigner): Extended {
 
 /** Extended's market convention: hyphened base-quote against USD, e.g. "SOL" -> "SOL-USD". */
 export function toExtendedMarket(symbol: string): string {
-  const s = (symbol || "").toUpperCase().replace(/-PERP$/, "").replace(/-USD$/, "").trim();
-  return `${s}-USD`;
+  const raw = (symbol || "").trim().replace(/\s*-?PERP$/i, "");
+  // Exact Extended names keep their case ("AMD_24_5-USD", "SPX500m-USD").
+  if (/-USD$/i.test(raw)) return raw.replace(/-usd$/i, "-USD");
+  return `${raw.toUpperCase()}-USD`;
 }
 
 /**
@@ -104,10 +107,21 @@ export function parseExtendedMarket(raw: RawExtendedMarket | undefined): Extende
 
 export async function fetchExtendedMarket(network: ExtendedNetwork, symbol: string, fetchImpl: typeof fetch = fetch): Promise<ExtendedMarketInfo | null> {
   const market = toExtendedMarket(symbol);
-  const res = await fetchImpl(`${extendedRestUrls()[network]}/info/markets?market=${encodeURIComponent(market)}`);
-  if (!res.ok) return null;
-  const body = (await res.json()) as { data?: RawExtendedMarket[] };
-  return parseExtendedMarket(body.data?.find((m) => m.name === market));
+  const base = `${extendedRestUrls()[network]}/info/markets`;
+  const res = await fetchImpl(`${base}?market=${encodeURIComponent(market)}`);
+  if (res.ok) {
+    const exact = ((await res.json()) as { data?: RawExtendedMarket[] }).data?.find((m) => m.name === market);
+    if (exact) return parseExtendedMarket(exact);
+  }
+  // Stocks and indices carry a suffix ("AMD" trades as AMD_24_5-USD): match on what the market tracks.
+  const all = await fetchImpl(base);
+  if (!all.ok) return null;
+  const want = marketBase(symbol);
+  const rows = ((await all.json()) as { data?: (RawExtendedMarket & { marketStats?: { dailyVolume?: string } })[] }).data ?? [];
+  const match = rows
+    .filter((m) => m.name && marketBase(m.name) === want)
+    .sort((a, b) => Number(b.marketStats?.dailyVolume ?? 0) - Number(a.marketStats?.dailyVolume ?? 0))[0];
+  return parseExtendedMarket(match);
 }
 
 /** Decimals of a step like "0.001" → 3. */
@@ -225,8 +239,9 @@ export async function executeExtendedPerp(
 ): Promise<ExecuteExtendedResult> {
   const fetchImpl = deps.fetchImpl ?? fetch;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  const symbol = (params.symbol || "").toUpperCase().replace(/-PERP$/, "");
-  const market = toExtendedMarket(symbol);
+  // What the market tracks ("AMD" for AMD_24_5-USD): used for messages and the fallback price.
+  const symbol = marketBase(params.symbol || "");
+  let market = toExtendedMarket(params.symbol || "");
   const network = params.signer.network;
 
   const hasOverride = params.qtyOverride !== undefined;
@@ -237,7 +252,8 @@ export async function executeExtendedPerp(
     return { ok: false, network, market, error: `Refusing to execute: quantity for ${symbol} must be positive.` };
   }
 
-  const info = await fetchExtendedMarket(network, symbol, fetchImpl).catch(() => null);
+  const info = await fetchExtendedMarket(network, params.symbol, fetchImpl).catch(() => null);
+  if (info) market = info.name;
   if (info && !info.active) return { ok: false, network, market, error: `${market} is not open for trading on Extended right now.` };
   const price = info?.mark ?? resolvePriceFromList(params.prices, symbol);
   if (price === null || !(price > 0)) {
