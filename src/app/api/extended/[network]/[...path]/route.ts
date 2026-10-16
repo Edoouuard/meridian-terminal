@@ -29,6 +29,8 @@ async function relay(req: NextRequest, ctx: { params: Promise<{ network: string;
   try {
     const res = await fetch(url, { method: req.method, headers: forwardableExtendedHeaders(req.headers), body, cache: "no-store" });
     const text = await res.text();
+    // Diagnostics: the path and Extended's answer (never headers: they carry the API key and signatures).
+    if (!res.ok) console.error("[extended-relay]", req.method, `/${path.join("/")}`, res.status, text.slice(0, 200));
     // 451 = Extended refuses this server's location for legal reasons (geo-restriction), with an empty body.
     if (res.status === 451) {
       return NextResponse.json(

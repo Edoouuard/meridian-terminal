@@ -322,5 +322,7 @@ export function plannerFallbackNotice(err: unknown): string {
   if (status === 401) return `Your beta session expired. Reload the page and enter the access password again. ${basic}`;
   if ((err as { name?: string } | null)?.name === "TimeoutError") return `The AI planner took too long to answer. Ask again in a moment. ${basic}`;
   if (status === undefined && err instanceof TypeError) return `You seem to be offline. Check your connection and ask again. ${basic}`;
-  return `The AI planner is unavailable right now. Ask again in a moment. ${basic}`;
+  // The server's short reason (e.g. "No strategies in response") helps testers report what failed.
+  const reason = err instanceof Error && status !== undefined && err.message && !/^API error \d+$/.test(err.message) ? ` (${err.message.slice(0, 80)})` : "";
+  return `The AI planner is unavailable right now${reason}. Ask again in a moment. ${basic}`;
 }
