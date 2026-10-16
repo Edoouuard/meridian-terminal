@@ -199,6 +199,15 @@ export function explainExtendedReject(reason: string | undefined): string {
   }
 }
 
+/** The SDK's own messages are partly in French ("Réponse vide", "Requête échouée"): Meridian shows English only. */
+export function englishExtendedError(message: string): string {
+  const m = message.trim();
+  if (/^R[ée]ponse vide$/i.test(m)) return "Extended sent an empty answer";
+  if (/^Requ[êe]te [ée]chou[ée]e$/i.test(m)) return "Extended refused the request";
+  if (/^HTTP \d{3}$/.test(m)) return `Extended refused the request (${m}, no reason given)`;
+  return m;
+}
+
 /** Poll the order until Extended reports a fill or a final failure (IOC orders settle within a second). */
 async function confirmOrder(
   signer: ExtendedSigner,
@@ -299,7 +308,7 @@ export async function executeExtendedPerp(
     }
     return { ok: true, network, market, qty: qtyStr, order, filledQty: fill?.filledQty, avgPrice: fill?.avgPrice };
   } catch (err) {
-    return { ok: false, network, market, qty: qtyStr, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, network, market, qty: qtyStr, error: englishExtendedError(err instanceof Error ? err.message : String(err)) };
   }
 }
 

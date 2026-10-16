@@ -19,10 +19,10 @@ describe("capital share", () => {
 
 describe("size question", () => {
   const base = { hyperliquidFreeUsd: 21.79, extendedFreeUsd: 21 };
-  it("asks how much capital to use for a perp request with no size, in the user's language", () => {
+  it("asks how much capital to use for a perp request with no size, in English whatever the user's language", () => {
     const q = sizeQuestion({ ...base, thesis: "beta neutral en SPCX leverage 10" });
-    expect(q?.clarify.question).toMatch(/capital disponible/);
-    expect(q?.clarify.options[0]).toBe("100 % de mon capital disponible");
+    expect(q?.clarify.question).toBe("How much of your available capital should this use?");
+    expect(q?.clarify.options[0]).toBe("100% of my available capital");
     expect(q?.clarify.why).toMatch(/Hyperliquid \$21\.79, Extended \$21\.00/);
     expect(sizeQuestion({ ...base, thesis: "focus on SPCX, leverage 10 to maximize volume" })?.clarify.options[0]).toBe("100% of my available capital");
   });
@@ -31,7 +31,7 @@ describe("size question", () => {
     expect(sizeQuestion({ ...base, thesis: "long ETH 5x with $50" })).toBeNull();
     expect(sizeQuestion({ ...base, thesis: "beta neutral SPCX — 25% of my available capital" })).toBeNull();
     expect(sizeQuestion({ ...base, thesis: "beta neutral SPCX", answeredQuestion: "How much of your available capital should this use?" })).toBeNull();
-    expect(sizeQuestion({ ...base, thesis: "beta neutral SPCX entre HL et Extended — SPCX", answeredQuestion: "Sur quel actif ouvrir la position neutre ?" })).not.toBeNull();
+    expect(sizeQuestion({ ...base, thesis: "beta neutral SPCX between HL and Extended — SPCX", answeredQuestion: "Which asset should the neutral position use?" })).not.toBeNull();
     expect(sizeQuestion({ ...base, thesis: "best stablecoin yield on Base" })).toBeNull();
     expect(sizeQuestion({ thesis: "long ETH 3x", hyperliquidFreeUsd: null, extendedFreeUsd: null })).toBeNull();
   });

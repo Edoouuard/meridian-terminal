@@ -35,8 +35,6 @@ export function isPerpRequest(text: string): boolean {
   return /\b(long|short|levier|leverage|lev|\d+\s*x|x\s*\d+|neutral|neutre|perps?|hyperliquid|extended|funding|volume|farm\w*)\b/i.test(text);
 }
 
-export const looksFrench = (text: string) => /\b(en|le|la|les|du|des|et|sur|entre|mon|ma|mes|levier|neutre|avec|pour)\b/i.test(text);
-
 export interface SizeQuestionInput {
   thesis: string;
   /** The question the user just answered: this one is never asked twice (their answer stands, or the policy's share). */
@@ -61,16 +59,6 @@ export function sizeQuestion(i: SizeQuestionInput): { understanding: string; cla
   if (known.length === 0) return null;
   const fmt = (x: number) => `$${x.toLocaleString("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`;
   const balances = known.map((k) => `${k.venue} ${fmt(k.usd)}`).join(", ");
-  if (looksFrench(i.thesis)) {
-    return {
-      understanding: `Avant de dimensionner : marge libre ${balances}.`,
-      clarify: {
-        question: "Quelle part de ton capital disponible veux-tu engager ?",
-        why: `Marge libre ${balances}. Chaque marché a une taille minimale (Extended en quantité, Hyperliquid $10) : une petite part peut passer sous ce minimum.`,
-        options: ["100 % de mon capital disponible", "50 % de mon capital disponible", "25 % de mon capital disponible"],
-      },
-    };
-  }
   return {
     understanding: `Before sizing: free margin ${balances}.`,
     clarify: {

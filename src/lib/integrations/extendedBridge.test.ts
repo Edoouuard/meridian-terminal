@@ -11,6 +11,7 @@ import {
   quoteArbitrumDeposit,
   usdcUnits,
 } from "./extendedBridge";
+import { orderPathFor } from "./extendedProxy";
 
 const signer = { apiKey: "k", l2PrivateKey: "0x1", l2PublicKey: "0x2", vaultId: "1", network: "mainnet" } as never;
 const ok = (body: unknown) => new Response(JSON.stringify(body), { status: 200 });
@@ -68,5 +69,16 @@ describe("Extended deposit bridge", () => {
     const d = [{ id: "0x1", status: "IN_PROGRESS", amountUsd: 24.9, transactionHash: "0xABC", time: 1 }];
     expect(depositForTx(d, "0xabc")?.status).toBe("IN_PROGRESS");
     expect(depositForTx(d, "0xdef")).toBeUndefined();
+  });
+});
+
+describe("Extended relay — orders on RFQ markets (SPCX-USD, 2026-10-16)", () => {
+  const rfq = (m: string) => m === "SPCX-USD";
+  const body = (market: string) => JSON.stringify({ market, type: "MARKET", side: "SELL" });
+  it("sends an order on an RFQ market to /user/order/rfq, others unchanged", () => {
+    expect(orderPathFor(["api", "v1", "user", "order"], "POST", body("SPCX-USD"), rfq)).toEqual(["api", "v1", "user", "order", "rfq"]);
+    expect(orderPathFor(["api", "v1", "user", "order"], "POST", body("ETH-USD"), rfq)).toEqual(["api", "v1", "user", "order"]);
+    expect(orderPathFor(["api", "v1", "user", "leverage"], "PATCH", body("SPCX-USD"), rfq)).toEqual(["api", "v1", "user", "leverage"]);
+    expect(orderPathFor(["api", "v1", "user", "order"], "POST", "{bad", rfq)).toEqual(["api", "v1", "user", "order"]);
   });
 });

@@ -58,3 +58,21 @@ export function extendedRestUrls(origin?: string): Record<ExtendedNetworkName, s
     testnet: `${extendedRelayBase("testnet", origin)}/api/v1`,
   };
 }
+
+/**
+ * Extended routes orders on RFQ markets (market makers fill them; isRfq in
+ * GET /info/markets — most stock and many crypto markets) to a separate
+ * endpoint, POST /api/v1/user/order/rfq, with the same body and signature;
+ * the standard endpoint rejects them. The SDK always posts to /user/order,
+ * so the relay picks the path from the order's market.
+ */
+export function orderPathFor(path: string[], method: string, body: string | undefined, isRfq: (market: string) => boolean | undefined): string[] {
+  if (method !== "POST" || path.join("/") !== "api/v1/user/order" || !body) return path;
+  let market: unknown;
+  try {
+    market = (JSON.parse(body) as { market?: unknown }).market;
+  } catch {
+    return path;
+  }
+  return typeof market === "string" && isRfq(market) ? [...path, "rfq"] : path;
+}

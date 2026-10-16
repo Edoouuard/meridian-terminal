@@ -152,3 +152,13 @@ describe("extended-live — executeExtendedPerp", () => {
     expect(placed[0]).toMatchObject({ size: "0.054", reduceOnly: true });
   });
 });
+
+describe("Extended errors in English", () => {
+  it("translates the SDK's French messages and explains a bare HTTP status", async () => {
+    const { englishExtendedError } = await import("./extended-live");
+    expect(englishExtendedError("Réponse vide")).toBe("Extended sent an empty answer");
+    expect(englishExtendedError("Requête échouée")).toBe("Extended refused the request");
+    expect(englishExtendedError("HTTP 400")).toBe("Extended refused the request (HTTP 400, no reason given)");
+    expect(englishExtendedError("Market not found")).toBe("Market not found");
+  });
+});

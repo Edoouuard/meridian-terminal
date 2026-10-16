@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { extendedUpstreamUrl, forwardableExtendedHeaders } from "@/lib/integrations/extendedProxy";
+import { EXTENDED_HOSTS, extendedUpstreamUrl, forwardableExtendedHeaders, orderPathFor, type ExtendedNetworkName } from "@/lib/integrations/extendedProxy";
 
 /**
  * Relay to Extended's REST API. Extended sends no CORS headers (preflight
@@ -20,12 +20,32 @@ export const dynamic = "force-dynamic";
  */
 export const preferredRegion = "hnd1";
 
+/** Which markets are RFQ, per network, re-read every 5 minutes (a market can migrate to RFQ). */
+const rfqCache = new Map<string, { at: number; rfq: Set<string> }>();
+async function rfqMarkets(network: ExtendedNetworkName): Promise<Set<string> | null> {
+  const hit = rfqCache.get(network);
+  if (hit && Date.now() - hit.at < 300_000) return hit.rfq;
+  try {
+    const res = await fetch(`${EXTENDED_HOSTS[network]}/api/v1/info/markets`, { headers: { "user-agent": "meridian-terminal" }, cache: "no-store" });
+    if (!res.ok) return hit?.rfq ?? null;
+    const rows = ((await res.json()) as { data?: { name?: string; isRfq?: boolean }[] }).data ?? [];
+    const rfq = new Set(rows.filter((m) => m.isRfq && m.name).map((m) => m.name as string));
+    rfqCache.set(network, { at: Date.now(), rfq });
+    return rfq;
+  } catch {
+    return hit?.rfq ?? null;
+  }
+}
+
 async function relay(req: NextRequest, ctx: { params: Promise<{ network: string; path: string[] }> }): Promise<NextResponse> {
-  const { network, path } = await ctx.params;
+  const { network, path: requested } = await ctx.params;
+  const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.text();
+  // Orders on RFQ markets go to /user/order/rfq (same body and signature).
+  const rfq = req.method === "POST" && requested.join("/") === "api/v1/user/order" && (network === "mainnet" || network === "testnet") ? await rfqMarkets(network) : null;
+  const path = orderPathFor(requested, req.method, body, (m) => rfq?.has(m));
   const url = extendedUpstreamUrl(network, path, req.nextUrl.search);
   if (!url) return NextResponse.json({ status: "ERROR", error: { message: "Unknown Extended endpoint" } }, { status: 404 });
 
-  const body = req.method === "GET" || req.method === "HEAD" ? undefined : await req.text();
   try {
     const res = await fetch(url, { method: req.method, headers: forwardableExtendedHeaders(req.headers), body, cache: "no-store" });
     const text = await res.text();

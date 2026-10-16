@@ -114,7 +114,7 @@ The convention is in the product policy: "SL X%" is an adverse **price** move of
 - `understanding`: the goal in the user's terms with every hard constraint, and, in one clause, anything that blocks it.
 - `summary`: what the plan does and the validated figures that justify it now, as a projection at today's rates.
 - `risks`, `variantNote`, `fit`: specific to the plan (liquidation distance, funding flip, partial fill, venue deposit needed), never generic.
-- Write in the user's language.
+- Write in English only, whatever language the user writes in.
 - Never present a blocked plan as executable, and never hide a change inside a note.
 
 ---
