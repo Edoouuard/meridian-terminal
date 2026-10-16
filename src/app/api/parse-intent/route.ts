@@ -82,7 +82,7 @@ When the user's portfolio is provided:
 ### Perpetual Futures
 - **Hyperliquid**: on-chain orderbook, up to 50x leverage. Check live funding rates in the data.
 - **Hyperliquid stock, index & commodity perps (HIP-3)**: Tesla, Nvidia, the S&P 500, gold, oil… are traded as perps with USDC margin, from the same Hyperliquid account as crypto perps. For a view on a stock, an index or a commodity ("short Tesla", "long gold", "hedge my portfolio with the S&P 500"), use side "Long" or "Short", protocol "Hyperliquid", chain "Arbitrum", and asset = the EXACT market name from the live "Stock, index & commodity perps" list followed by " PERP" (e.g. "xyz:TSLA PERP", "xyz:SP500 PERP", "xyz:GOLD PERP"). Never invent a market that isn't in that list; quote its live price and funding. Respect its max leverage. These markets trade around the clock but follow the underlying's price: say so in the risk note.
-- **Extended**: StarkEx L2, up to 20x leverage. Active points program. Meridian signs Extended orders once the user has connected Extended AND has funds in that Extended account; deposits to Extended are made on extended.exchange (Meridian can't deposit there yet, so never plan a Deposit or Bridge to Extended). When the user asks for Extended, the plan uses Extended even if the account is not connected or not funded: the server marks it blocked with what unblocks it (a deposit on extended.exchange). A Hyperliquid version is only an alternative, never the requested plan.
+- **Extended**: StarkEx L2, up to 20x leverage. Active points program. Meridian signs Extended orders once the user has connected Extended. When the Extended account lacks margin and the wallet holds native USDC on Arbitrum, put a Deposit leg first (side "Deposit", protocol "Extended", asset "USDC", chain "Arbitrum", sizeUsd = the missing margin + $1, at least $10): Meridian deposits through Extended's bridge. When the user asks for Extended, the plan uses Extended even if the account is not connected or can't be funded: the server marks it blocked with what unblocks it. A Hyperliquid version is only an alternative, never the requested plan.
 - **Ondo**: via LI.FI relay.
 - **Lighter**: zk-rollup. Check live data for LLP vault APR if available.
 Choose the perp venue based on: the user's goal (points? liquidity? fees?), NOT a default preference.
@@ -334,11 +334,11 @@ function extractJson(text: string): unknown {
 /** What the planner may do on Extended, from the user's Extended account state. */
 function extendedAccountLine(ext: PortfolioSnapshot["extended"]): string {
   if (!ext?.connected) {
-    return "EXTENDED ACCOUNT: not connected. An Extended leg can't run yet: connecting takes three wallet signatures (Tools → Extended), then a USDC deposit on extended.exchange.";
+    return "EXTENDED ACCOUNT: not connected. An Extended leg can't run yet: connecting takes three wallet signatures (Tools → Extended); Meridian can then deposit USDC from Arbitrum.";
   }
   if (ext.network && ext.network !== "mainnet") return `EXTENDED ACCOUNT: connected on ${ext.network} only (test funds); real Extended legs need the mainnet account.`;
   if (ext.availableUsd === undefined) return "EXTENDED ACCOUNT: connected on mainnet; its balance couldn't be read just now (assume it may be empty and say so).";
-  if (ext.availableUsd < 1) return "EXTENDED ACCOUNT: connected on mainnet with no USDC. An Extended leg needs a deposit on extended.exchange first (Meridian can't deposit there yet).";
+  if (ext.availableUsd < 1) return "EXTENDED ACCOUNT: connected on mainnet with no USDC. An Extended leg needs a Deposit leg to Extended first (from native USDC on Arbitrum).";
   return `EXTENDED ACCOUNT: connected on mainnet, $${Math.round(ext.availableUsd).toLocaleString()} USDC free as margin (equity $${Math.round(ext.equityUsd ?? 0).toLocaleString()}). Extended legs up to that margin run now.`;
 }
 

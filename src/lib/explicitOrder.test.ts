@@ -68,7 +68,7 @@ describe("explicit order on Extended (owner's test: \"open short amd sur extende
     expect(first.legs).toEqual([expect.objectContaining({ side: "Short", asset: "AMD PERP", protocol: "Extended" })]);
     // $0 observed and no size given: the size stays unknown rather than invented.
     expect(first.legs[0].sizeUsd).toBeUndefined();
-    expect(first.fundingNotes?.[0]).toMatch(/has \$0 free: deposit USDC on extended\.exchange/);
+    expect(first.fundingNotes?.[0]).toMatch(/has \$0 free and the wallet has no USDC on Arbitrum to deposit/);
     expect(second).toBe(hlOnly);
     // Funded: sized from the Extended margin, no note.
     const [funded] = enforceExplicitOrder([], order, [], 50);
@@ -78,6 +78,24 @@ describe("explicit order on Extended (owner's test: \"open short amd sur extende
     const [unknown] = enforceExplicitOrder([], order, [], undefined);
     expect(unknown.legs[0].sizeUsd).toBeUndefined();
     expect(unknown.fundingNotes?.[0]).toMatch(/balance is unknown/);
+  });
+
+  it("adds a deposit from Arbitrum USDC when the Extended account lacks margin", () => {
+    const order = parseExplicitPerpOrder("open short amd sur extended");
+    const wallet = [{ symbol: "USDC", venue: "Wallet", chain: "Arbitrum", usd: 60 }];
+    // $0 on Extended, $60 USDC on Arbitrum: sized from what can be deposited, the deposit comes first.
+    const [s] = enforceExplicitOrder([], order, wallet, 0);
+    expect(s.legs.map((l) => [l.side, l.protocol])).toEqual([["Deposit", "Extended"], ["Short", "Extended"]]);
+    expect(s.legs[1].sizeUsd).toBe(47); // ($60 − $1 reserve) × 80%, 1x
+    expect(s.legs[0].sizeUsd).toBe(50); // margin 47 × 1.03 → 49, plus the $1 reserve for the bridge fee
+    expect(s.fundingNotes).toBeUndefined();
+    // Unknown Extended balance: no deposit planned (the account must be connected first).
+    const [unknown] = enforceExplicitOrder([], order, wallet, undefined);
+    expect(unknown.legs.map((l) => l.side)).toEqual(["Short"]);
+    // Not enough on Arbitrum for the margin: no deposit, the note says what's missing.
+    const [short] = enforceExplicitOrder([], { ...order!, sizeUsd: 500 }, wallet, 0);
+    expect(short.legs.map((l) => l.side)).toEqual(["Short"]);
+    expect(short.fundingNotes?.[0]).toMatch(/holds \$60 USDC on Arbitrum/);
   });
 });
 

@@ -83,6 +83,7 @@ export function isFailureState(state: OrderFlowState): state is FailureState {
  */
 const WALLET_DEBITING_ACTIONS: ReadonlySet<string> = new Set([
   "aave:supply",
+  "extended:supply", // deposit: spends Arbitrum USDC
   "aave:repay",
   "spark:supply",
   "spark:repay",

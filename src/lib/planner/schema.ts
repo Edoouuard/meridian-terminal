@@ -111,16 +111,24 @@ export function deviations(s: LLMStrategy, ctx: ConformanceContext): string[] {
   return out;
 }
 
-/** Why the Extended legs can't run now, from the account state (empty = they can, or there are none). */
-export function extendedBlockers(s: LLMStrategy, ext: ConformanceContext["extended"]): string[] {
+const isExtDeposit = (l: LLMLeg) => /extended/i.test(l.protocol) && /^(deposit|fund)$/i.test(l.side.trim());
+
+/** Why the Extended legs can't run now, from the account state (empty = they can, or there are none). A deposit leg in the plan counts toward the margin. */
+export function extendedBlockers(s: LLMStrategy, ext: ConformanceContext["extended"], walletUsd?: number): string[] {
   const legs = (s.legs ?? []).filter((l) => isPerp(l) && venueOf(l) === "Extended");
-  if (legs.length === 0) return [];
-  if (!ext?.connected) return ["Extended account not connected (Tools → Extended, three wallet signatures), then a USDC deposit on extended.exchange."];
+  const depositLegs = (s.legs ?? []).filter(isExtDeposit);
+  if (legs.length === 0 && depositLegs.length === 0) return [];
+  if (!ext?.connected) return ["Extended account not connected (Tools → Extended, three wallet signatures)."];
   if (ext.network && ext.network !== "mainnet") return [`Extended is connected on ${ext.network} only; real orders need the mainnet account.`];
   if (ext.availableUsd === undefined) return ["Extended balance unknown right now (status unknown): these legs aren't treated as executable."];
+  const planned = depositLegs.reduce((a, l) => a + (l.sizeUsd ?? 0), 0);
+  const deposits = walletUsd === undefined ? planned : Math.min(planned, walletUsd);
+  if (planned > 0 && deposits < planned) return [`The deposit to Extended needs $${Math.ceil(planned)} of USDC on Arbitrum; the wallet holds about $${Math.floor(walletUsd ?? 0)}.`];
   const needed = legs.reduce((a, l) => a + ((l.sizeUsd ?? 0) / Math.max(1, l.leverage ?? 1)) * (1 + SIZING_POLICY.marginBufferPct / 100), 0);
-  if (ext.availableUsd < needed || ext.availableUsd <= SIZING_POLICY.feeReserveUsd) {
-    return [`Extended has $${Math.floor(ext.availableUsd)} free (observed); these legs need ~$${Math.ceil(needed)} of margin. Deposit on extended.exchange.`];
+  if (legs.length > 0 && (ext.availableUsd + deposits < needed || ext.availableUsd + deposits <= SIZING_POLICY.feeReserveUsd)) {
+    return [
+      `Extended has $${Math.floor(ext.availableUsd)} free (observed)${deposits > 0 ? ` plus a $${Math.floor(deposits)} deposit` : ""}; these legs need ~$${Math.ceil(needed)} of margin. Add a deposit from Arbitrum USDC.`,
+    ];
   }
   return [];
 }
@@ -276,7 +284,7 @@ export function enforceConformance(raw: LLMStrategy[], objective: Objective | un
     s.pair = pair;
     s.execution = pair ? executionFor(s, pair.legs) : undefined;
 
-    const blockers = [...extendedBlockers(s, ctx.extended)];
+    const blockers = [...extendedBlockers(s, ctx.extended, ctx.balances?.walletDeployableUsd)];
     if (isVenuePlan(s) && ctx.markets && ctx.balances) {
       const v = computeVenueEconomics(s, pair?.legs, ctx.markets, ctx.balances, holding, ctx.now);
       s.economics = v.economics;

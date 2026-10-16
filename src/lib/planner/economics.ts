@@ -196,7 +196,11 @@ export function computeVenueEconomics(
   const hasExt = legEcon.some((l) => l.venue === "Extended");
   const toAdd = (need: number | null, have: number | null, used: boolean) => (!used ? 0 : need === null || have === null ? null : Math.max(0, need - have));
   const hlToAdd = toAdd(hlCapital, hlAvail, hasHl);
-  const extToAdd = toAdd(extCapital, balances.extendedFreeUsd, hasExt);
+  // A deposit to Extended in the plan (Arbitrum USDC through the Rhino.fi bridge) adds to what is on Extended.
+  const extDeposits = legs.filter((l) => /^(deposit|fund)$/i.test(l.side.trim()) && /extended/i.test(l.protocol)).reduce((a, l) => a + (l.sizeUsd ?? 0), 0);
+  const walletLeft = Math.max(0, balances.walletDeployableUsd - Math.min(deposits, balances.walletDeployableUsd));
+  const extAvail = balances.extendedFreeUsd === null ? null : balances.extendedFreeUsd + Math.min(extDeposits, walletLeft);
+  const extToAdd = toAdd(extCapital, extAvail, hasExt);
   const capitalToAdd = sum([hlToAdd, extToAdd]);
   const capitalAvailable = capitalCommitted === null || capitalToAdd === null ? null : capitalCommitted - capitalToAdd;
   if (hasHl && hlToAdd !== null && hlToAdd > 0.5) blockers.push(`Hyperliquid needs ~$${Math.ceil(hlToAdd)} more free margin than the account and the plan's deposits provide.`);
@@ -204,7 +208,8 @@ export function computeVenueEconomics(
 
   const withdrawals = legs.filter((l) => /^withdraw$/i.test(l.side.trim()) && /hyperliquid/i.test(l.protocol)).length;
   const hasBridge = legs.some((l) => /^bridge$/i.test(l.side.trim()));
-  const transferFees = hasBridge ? null : withdrawals * HL_WITHDRAW_FEE_USD;
+  // The Rhino.fi fee of a deposit to Extended is only known from its quote, just before signing.
+  const transferFees = hasBridge || extDeposits > 0 ? null : withdrawals * HL_WITHDRAW_FEE_USD;
 
   const volume = sum(legEcon.map((l) => (l.notionalUsd === null ? null : l.notionalUsd * 2)));
   const carry = sum(legEcon.map((l) => l.annualizedCarryUsd));

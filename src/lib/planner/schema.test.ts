@@ -78,6 +78,18 @@ describe("planner contract — reference cases", () => {
     expect(out.strategies[0].economics?.capitalToAddUsd).toBeNull();
   });
 
+  it("a deposit leg from Arbitrum USDC funds the Extended margin: the pair becomes executable", () => {
+    const withDeposit = strat("ETH pair with Extended deposit", [{ side: "Deposit", asset: "USDC", protocol: "Extended", chain: "Arbitrum", sizeUsd: 65 }, ...pair().legs]);
+    const empty = { ...funded, extendedFreeUsd: 0, walletDeployableUsd: 100 };
+    const ok = enforceConformance([withDeposit], "farming", ctx({ extended: extendedEmpty, balances: empty })).strategies[0];
+    expect(ok.status).toBe("executable");
+    expect(ok.economics?.capitalToAddUsd).toBe(0);
+    // The wallet can't fund the deposit: blocked, saying so.
+    const poor = enforceConformance([withDeposit], "farming", ctx({ extended: extendedEmpty, balances: { ...empty, walletDeployableUsd: 20 } })).strategies[0];
+    expect(poor.status).toBe("blocked");
+    expect(poor.blockers?.[0]).toMatch(/deposit to Extended needs \$65/);
+  });
+
   it("only Hyperliquid plans for a two-venue request: no recommendation", () => {
     const out = enforceConformance([hlEthNeutral(1)], "farming", ctx({ namedVenues: ["Hyperliquid", "Extended"], extended: { connected: false } }));
     expect(out.strategies[0].kind).toBe("alternative");

@@ -185,7 +185,7 @@ export function explainExtendedReject(reason: string | undefined): string {
     case "NO_LIQUIDITY":
       return "nothing to fill within 1% of the mark price right now, so nothing was bought or sold";
     case "NOT_ENOUGH_FUNDS":
-      return "not enough margin on your Extended account; deposit on extended.exchange first";
+      return "not enough margin on your Extended account; deposit USDC from Arbitrum first";
     case "REDUCE_ONLY_FAILED":
       return "there is no position left to close";
     case "INVALID_LEVERAGE":

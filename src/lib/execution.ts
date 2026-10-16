@@ -5,6 +5,7 @@ import { SWAP_ROUTER02_EXACT_INPUT_SINGLE_ABI, UNISWAP_SWAP_ROUTER02_BY_CHAIN } 
 import { ERC4626_DEPOSIT_ABI, ERC4626_WITHDRAW_ABI } from "./integrations/morpho";
 import { isTrustedVault } from "./protocols/vaults";
 import { hyperliquidDepositProblem, isHyperliquidBridge } from "./integrations/hyperliquidDeposit";
+import { EXTENDED_DEPOSIT_CHAIN_ID, EXTENDED_DEPOSIT_TOKEN, RHINO_ARBITRUM_BRIDGE, RHINO_DEPOSIT_ABI } from "./integrations/extendedBridge";
 import {
   LIDO_CLAIM_WITHDRAWAL_ABI,
   LIDO_REQUEST_WITHDRAWALS_ABI,
@@ -1024,8 +1025,37 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
     // instead of "unknown protocol".
     case "hyperliquid":
       return fail("Hyperliquid perps use EIP-712 signing — use the dedicated Hyperliquid panel instead.");
-    case "extended":
-      return fail("Extended perps use StarkEx signing — use the dedicated Extended panel instead.");
+    case "extended": {
+      // Deposit to Extended: USDC on Arbitrum into Rhino.fi's bridge with the
+      // committed quote id (integrations/extendedBridge.ts). Perps themselves
+      // are StarkEx-signed by the dedicated Extended button.
+      if (order.type !== "supply" && order.type !== "approve") {
+        return fail("Extended perps use StarkEx signing — use the dedicated Extended panel instead.");
+      }
+      if (chainId !== EXTENDED_DEPOSIT_CHAIN_ID) return fail("Deposits to Extended go from native USDC on Arbitrum.");
+      if (!order.token || order.token.toLowerCase() !== EXTENDED_DEPOSIT_TOKEN.toLowerCase()) {
+        return fail("Extended's bridge takes native USDC on Arbitrum only — any other token is not recoverable.");
+      }
+      const amount = normalizeAmount(order.amount, 6);
+      if ("error" in amount) return amount;
+      if (order.type === "approve") {
+        return {
+          chainId, address: order.token, abi: ERC20_APPROVE_ABI, functionName: "approve",
+          args: [RHINO_ARBITRUM_BRIDGE, amount.value],
+          description: `Approve Extended's bridge (Rhino.fi) to take up to ${order.amount} USDC on Arbitrum`,
+          riskNote: "Approval lets the Rhino.fi bridge contract Extended uses take up to this amount of USDC, nothing more.",
+        };
+      }
+      const commitmentId = order.commitmentId;
+      if (typeof commitmentId !== "bigint" || commitmentId <= BigInt(0)) return fail("Extended deposit needs a committed bridge quote — get a new quote.");
+      if (!order.to || order.to.toLowerCase() !== RHINO_ARBITRUM_BRIDGE.toLowerCase()) return fail("Extended deposits go only to the verified Rhino.fi bridge on Arbitrum.");
+      return {
+        chainId, address: RHINO_ARBITRUM_BRIDGE, abi: RHINO_DEPOSIT_ABI, functionName: "depositWithId",
+        args: [order.token, amount.value, commitmentId],
+        description: `Deposit ${order.amount} USDC into your Extended account (Rhino.fi bridge, Arbitrum → Starknet)`,
+        riskNote: "Extended credits the USDC (minus the bridge fee shown) to your Extended account in a few minutes. The deposit uses the quote committed just before signing.",
+      };
+    }
     case "ondo":
     case "lighter":
       return fail(`${assetLabel} perps on ${String(order.protocol)} use the LI.FI relay — use the dedicated perps panel instead.`);

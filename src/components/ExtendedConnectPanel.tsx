@@ -11,6 +11,8 @@ import { useExtendedPerp } from "@/hooks/useExtendedPerp";
 import { useLivePrices } from "@/hooks/useLivePrices";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { fmtUsd } from "@/lib/data";
+import { ExtendedDepositButton } from "@/components/execute/ExtendedDepositButton";
+import { EXTENDED_MIN_DEPOSIT_USD } from "@/lib/integrations/extendedBridge";
 
 function fmtPx(n: number): string {
   if (!Number.isFinite(n) || n === 0) return "-";
@@ -114,6 +116,32 @@ function ExtendedPositions() {
   );
 }
 
+/** Deposit a chosen amount of Arbitrum USDC into the connected Extended account. */
+function ExtendedDepositForm() {
+  const [amount, setAmount] = useState(String(EXTENDED_MIN_DEPOSIT_USD * 2));
+  const [chosen, setChosen] = useState<number | null>(null);
+  if (chosen !== null) {
+    return <ExtendedDepositButton leg={{ side: "Deposit", asset: "USDC", protocol: "Extended", chain: "Arbitrum", sizeUsd: chosen }} />;
+  }
+  const value = Number(amount);
+  return (
+    <div style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
+      <input
+        className="input"
+        inputMode="decimal"
+        aria-label="Amount of USDC to deposit"
+        value={amount}
+        onChange={(e) => setAmount(e.target.value)}
+        style={{ width: 90, fontSize: 12 }}
+      />
+      <span className="text-muted" style={{ fontSize: 11 }}>USDC</span>
+      <button type="button" className="btn btn-primary" style={{ fontSize: 12 }} disabled={!(value >= EXTENDED_MIN_DEPOSIT_USD)} onClick={() => setChosen(value)}>
+        Deposit from Arbitrum
+      </button>
+    </div>
+  );
+}
+
 /** Equity and free margin of the connected Extended account (`/user/balance`; 404 until the first deposit). */
 function ExtendedBalance() {
   const signer = useExtendedAccount();
@@ -126,13 +154,12 @@ function ExtendedBalance() {
   if (!signer || data === undefined) return null;
   if (data === null) {
     return (
-      <p style={{ fontSize: 11, margin: "6px 0 0" }} className="text-muted">
-        No funds yet. Deposit on{" "}
-        <a href="https://app.extended.exchange" target="_blank" rel="noreferrer">
-          extended.exchange
-        </a>{" "}
-        with this same wallet: it opens this same account.
-      </p>
+      <>
+        <p style={{ fontSize: 11, margin: "6px 0 0" }} className="text-muted">
+          No funds yet. Deposit USDC from Arbitrum below (Extended&apos;s Rhino.fi bridge, a few minutes).
+        </p>
+        <ExtendedDepositForm />
+      </>
     );
   }
   return (

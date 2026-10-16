@@ -740,6 +740,9 @@ export function resolveOrderForLeg(
  * no token). The Execute UI runs this first, then the supply.
  */
 export function approveOrderFor(order: Order): Order | null {
+  if (order.protocol === "extended" && order.type === "supply" && order.token) {
+    return { type: "approve", protocol: "extended", token: order.token, symbol: order.symbol, amount: order.amount, chainId: order.chainId, decimals: order.decimals };
+  }
   if (order.protocol === "aave" && (order.type === "supply" || order.type === "repay") && order.token) {
     return {
       type: "approve",
