@@ -162,8 +162,10 @@ export function computeVenueEconomics(
       blockers.push(`${p.l.asset} on ${p.q.venue}: no size (the free amount to size it from is unknown or empty).`);
     } else {
       if (q <= 0 || q < p.q.minQty || (notional ?? 0) < p.q.minNotionalUsd) {
+        const minNotional = Math.max(p.q.minQty * p.q.markUsd, p.q.minNotionalUsd);
+        const minMargin = (minNotional / lev) * (1 + SIZING_POLICY.marginBufferPct / 100) + SIZING_POLICY.feeReserveUsd;
         blockers.push(
-          `${p.l.asset} on ${p.q.venue}: ${q} ${p.q.base} (~$${(notional ?? 0).toFixed(2)}) is under the market minimum (${p.q.minQty ? `${p.q.minQty} ${p.q.base}` : `$${p.q.minNotionalUsd}`}).`,
+          `${p.l.asset} on ${p.q.venue}: ${q} ${p.q.base} (~$${(notional ?? 0).toFixed(2)}) is under the market minimum (${p.q.minQty ? `${p.q.minQty} ${p.q.base}` : `$${p.q.minNotionalUsd}`}); at ${lev}x it needs about $${minMargin.toFixed(2)} free on ${p.q.venue}.`,
         );
       }
     }

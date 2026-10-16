@@ -14,6 +14,7 @@ import { deployableUsd, fitLegsToBudget, freshCapitalUsd, hyperliquidMarginOnlyU
 import { HL_MIN_ORDER_USD } from "@/lib/integrations/hyperliquidTrade";
 import { HL_WITHDRAW_FEE_USD } from "@/lib/integrations/hyperliquidExchange";
 import { UNISWAP_SWAP_ROUTER02_BY_CHAIN } from "@/lib/integrations/uniswap";
+import { marketBase } from "@/lib/perpVenues";
 
 export interface LLMLeg {
   side: string;
@@ -57,8 +58,9 @@ function legUnderlying(leg: LLMLeg): string {
   // Swap format: "USDC → ETH" → "ETH"
   const arrowMatch = raw.match(/→\s*(.+)$/);
   if (arrowMatch) return arrowMatch[1].trim().toUpperCase();
-  // Perp format: "ETH PERP" → "ETH"
-  return raw.replace(/\s*(PERP|perpetual)\s*$/i, "").trim().toUpperCase();
+  // Perps: one name per underlying whatever the venue's naming ("ETH-USD PERP", "xyz:SPCX PERP", "AMD_24_5-USD PERP" → ETH, SPCX, AMD).
+  if (/^(long|short)$/i.test((leg.side ?? "").trim()) || /\s*(PERP|perpetual)\s*$/i.test(raw)) return marketBase(raw.replace(/\s*perpetual\s*$/i, ""));
+  return raw.toUpperCase();
 }
 
 /** Wrapped and liquid-staked versions carry the same price exposure as their base asset. */

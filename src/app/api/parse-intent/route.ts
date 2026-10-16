@@ -7,11 +7,13 @@ import { routingChainNames } from "@/lib/mcp/routerAllowlist";
 import { strategistDoctrine } from "@/lib/planner/strategist";
 import { cleanClarify } from "@/lib/planner/clarify";
 import { capabilitiesSection } from "@/lib/planner/capabilities";
-import { policySection } from "@/lib/planner/policy";
+import { policySection, SIZING_POLICY } from "@/lib/planner/policy";
 import { enforceConformance, namedVenues, type Objective } from "@/lib/planner/schema";
 import type { VenueBalances } from "@/lib/planner/economics";
 import type { MarketSnapshot } from "@/lib/planner/markets";
 import { completionText } from "@/lib/planner/completion";
+import { capitalShare, sizeQuestion } from "@/lib/planner/sizing";
+import { parseAmount } from "@/lib/tradePlan";
 import { EXPLAIN_SYSTEM, explainPayload, mergeExplanations, type Explanation } from "@/lib/planner/explain";
 import { hyperliquidMarginUsd, validateAndFixStrategy } from "@/lib/strategyIntegrity";
 
@@ -319,7 +321,8 @@ async function complete(apiKey: string, model: string, messages: { role: string;
       "HTTP-Referer": "https://meridian-terminal.vercel.app",
       "X-Title": "Meridian Terminal",
     },
-    body: JSON.stringify({ model, max_tokens: maxTokens, temperature: 0.3, messages }),
+    // Reasoning models (Haiku 5.5) otherwise think until max_tokens and return no text: keep the thinking short and out of the answer.
+    body: JSON.stringify({ model, max_tokens: maxTokens, temperature: 0.3, reasoning: { effort: "low", exclude: true }, messages }),
   });
   if (!response.ok) {
     const errText = await response.text().catch(() => "");
@@ -385,7 +388,7 @@ function formatPortfolioContext(portfolio: PortfolioSnapshot | undefined): strin
 
   // Gas budget guidance based on what can be deployed
   if (capital < 50) {
-    lines.push(`⚠️ VERY LOW CAPITAL — only suggest minimal strategies on L2 chains (Base, Arbitrum, Polygon). Ethereum L1 gas would consume most of the balance.`);
+    lines.push(`⚠️ VERY LOW CAPITAL — for on-chain legs, only minimal strategies on L2 chains (Base, Arbitrum, Polygon); Hyperliquid and Extended orders pay no gas. Don't mention chains to the user for a perp-only plan.`);
   } else if (capital < 100) {
     lines.push(`⚠️ LOW CAPITAL — prefer L2 chains (Base, Arbitrum). Ethereum L1 gas ($5-15/tx) would be 5-15% of deployable capital.`);
   } else if (capital < 500) {
@@ -464,8 +467,9 @@ export const maxDuration = 190;
 const MAX_THESIS_CHARS = 2000;
 /** Proposal pass; with the explain pass after it, the whole call stays under maxDuration. */
 const PROPOSE_TIMEOUT_MS = 100_000;
-/** The proposal is structure only (the server computes figures, the explain pass writes the text): ~1-3 plans fit easily. */
-const PROPOSE_MAX_TOKENS = 2048;
+/** The proposal is structure only (~1,500 tokens of JSON); the rest is room for a reasoning model's short thinking. */
+const PROPOSE_MAX_TOKENS = 8192;
+const EXPLAIN_MAX_TOKENS = 4096;
 /** Explain pass: past this the deterministic summaries are used. */
 const EXPLAIN_TIMEOUT_MS = 25_000;
 
@@ -486,6 +490,18 @@ export async function POST(req: NextRequest) {
         { status: 500 },
       );
     }
+
+    // A perp plan with no size: ask how much of the free capital to use before building anything.
+    const snap = portfolio as PortfolioSnapshot | undefined;
+    const asked = snap
+      ? sizeQuestion({
+          thesis,
+          clarified: !!clarified,
+          hyperliquidFreeUsd: snap.hyperliquid ? snap.hyperliquid.freeMarginUsd : null,
+          extendedFreeUsd: snap.extended?.connected ? (snap.extended.availableUsd ?? null) : null,
+        })
+      : null;
+    if (asked && FEATURES.perps) return NextResponse.json({ decision: "clarify", understanding: asked.understanding, clarify: asked.clarify, strategies: [] });
 
     const model = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
     const explainModel = process.env.OPENROUTER_EXPLAIN_MODEL || model;
@@ -591,6 +607,8 @@ export async function POST(req: NextRequest) {
       extended: ext,
       markets: yieldContext.markets,
       balances,
+      // No dollar size: the share the user chose (or the policy's), applied by the server to the free margin.
+      sizeShare: parseAmount(thesis) === undefined && !explicit?.sizeUsd ? (capitalShare(thesis) ?? SIZING_POLICY.maxUtilization) : undefined,
       now: Date.now(),
     });
     if (conformance.notes.length) console.info("[parse-intent] conformance:", conformance.notes.join(" | "));
@@ -612,7 +630,7 @@ export async function POST(req: NextRequest) {
           { role: "system", content: EXPLAIN_SYSTEM },
           { role: "user", content: JSON.stringify(explainPayload(thesis.trim(), understanding, conformance.strategies, conformance.recommended)) },
         ],
-        2048,
+        EXPLAIN_MAX_TOKENS,
         EXPLAIN_TIMEOUT_MS,
       );
       const x = extractJson(explainText) as { understanding?: unknown; plans?: unknown } | null;

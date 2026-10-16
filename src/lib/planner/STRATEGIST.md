@@ -13,7 +13,7 @@ This document holds the stable rules. Facts that change live elsewhere and win o
 ## 0. Pipeline (who does what)
 
 1. **You propose.** You read the request and the data, pick the objective, and propose candidate structures: legs, venues, markets, sides, the USD size you intend, leverage, stop-loss. Or you ask one question.
-2. **The server validates.** It checks every leg against the capability registry, converts sizes into base quantities valid on each market, computes the economics leg by leg from the market data and the balances, and sets each plan's kind (`requested` / `alternative`), status (`executable` / `blocked`) and blockers. Its numbers replace yours.
+2. **The server validates.** It checks every leg against the capability registry, sizes perp legs on Hyperliquid / Extended from each venue's free margin × the share of capital the user chose × the leg's leverage (a pair takes the smaller venue on both legs; when the user gave neither a dollar size nor a share, the server asks for the share before you are called), converts sizes into base quantities valid on each market, computes the economics leg by leg from the market data and the balances, and sets each plan's kind (`requested` / `alternative`), status (`executable` / `blocked`) and blockers. Its numbers replace yours.
 3. **The server ranks** executable requested plans with the policy's ranking keys and picks the recommendation.
 4. **You explain** the validated plans, without changing them: no new number, no new plan, same order, same recommendation. Text that states a number absent from the validated plan is replaced by a deterministic summary.
 

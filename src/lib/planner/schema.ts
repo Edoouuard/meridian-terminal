@@ -16,6 +16,7 @@ import { marketBase } from "@/lib/perpVenues";
 import { EXECUTION_POLICY, SIZING_POLICY } from "@/lib/planner/policy";
 import type { MarketSnapshot } from "@/lib/planner/markets";
 import { computeVenueEconomics, findQuote, isVenuePlan, type Economics, type VenueBalances } from "@/lib/planner/economics";
+import { sizePerpLegs } from "@/lib/planner/sizing";
 
 export type { Economics } from "@/lib/planner/economics";
 
@@ -69,6 +70,8 @@ export interface ConformanceContext {
   markets?: MarketSnapshot;
   /** Free amounts per venue (null = unknown). */
   balances?: VenueBalances;
+  /** Share of the free margin perp legs use (lib/planner/sizing.ts); undefined = the model's sizes stand (the user gave a dollar size). */
+  sizeShare?: number;
   now?: number;
 }
 
@@ -284,6 +287,11 @@ export function enforceConformance(raw: LLMStrategy[], objective: Objective | un
     s.pair = pair;
     s.execution = pair ? executionFor(s, pair.legs) : undefined;
 
+    // Venue plans: the server sizes the perp legs from the free margin, and their return lives in the economics, not in an APY.
+    if (isVenuePlan(s)) {
+      if (ctx.sizeShare !== undefined && ctx.balances) s = sizePerpLegs(s, pair?.legs, ctx.balances, ctx.sizeShare);
+      s.apy = undefined;
+    }
     const blockers = [...extendedBlockers(s, ctx.extended, ctx.balances?.walletDeployableUsd)];
     if (isVenuePlan(s) && ctx.markets && ctx.balances) {
       const v = computeVenueEconomics(s, pair?.legs, ctx.markets, ctx.balances, holding, ctx.now);
