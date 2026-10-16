@@ -279,6 +279,7 @@ Field rules:
 - "apy": blended expected APY in percent from the live data, for yield plans only; omit it for directional trades and pairs (use "economics").
 - "exit": how and how fast the user gets their money back: "Instant", "~1-5 days (Lido withdrawal queue)", "Locked until 26 Mar 2027 (or sell PT at market)".
 - "risks": 2 to 4 short items, specific to the plan. No generic filler.
+- Keep every text field to one short sentence: a second pass writes the final text from the validated plans. Your answer must fit in about 1,500 tokens.
 - Don't set "recommended": the server recommends the best executable requested plan.`;
 
 /** Fetch live yield context from our own aggregator route (server-side internal call): the text for the model, the quotes for the checks. */
@@ -437,6 +438,8 @@ export const maxDuration = 150;
 const MAX_THESIS_CHARS = 2000;
 /** Proposal pass; with the explain pass after it, the whole call stays under maxDuration. */
 const PROPOSE_TIMEOUT_MS = 100_000;
+/** The proposal is structure only (the server computes figures, the explain pass writes the text): ~1-3 plans fit easily. */
+const PROPOSE_MAX_TOKENS = 2048;
 /** Explain pass: past this the deterministic summaries are used. */
 const EXPLAIN_TIMEOUT_MS = 25_000;
 
@@ -491,7 +494,7 @@ export async function POST(req: NextRequest) {
           { role: "system", content: [strategistDoctrine(), capabilitiesSection(), policySection(), FEATURES.perps ? SYSTEM_PROMPT : SYSTEM_PROMPT + PERPS_DISABLED_NOTE].join("\n\n---\n\n") },
           { role: "user", content: userMessage },
         ],
-        4096,
+        PROPOSE_MAX_TOKENS,
         PROPOSE_TIMEOUT_MS,
       );
     } catch (err) {
