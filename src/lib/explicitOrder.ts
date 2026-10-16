@@ -9,6 +9,7 @@
 import { deployableUsd, hyperliquidMarginOnlyUsd, type BudgetAsset } from "@/lib/budgetFit";
 import type { LLMLeg, LLMStrategy } from "@/lib/strategyIntegrity";
 import { marketBase } from "@/lib/perpVenues";
+import { SIZING_POLICY } from "@/lib/planner/policy";
 
 export interface ExplicitPerpOrder {
   side: "Long" | "Short";
@@ -76,7 +77,7 @@ export function strategyForOrder(order: ExplicitPerpOrder, assets?: BudgetAsset[
   const lev = order.leverage ?? 1;
   const capital = deployableUsd(assets) + hyperliquidMarginOnlyUsd(assets);
   // Without a size: most of what the user can put up as margin (the budget fit trims it to the wallet).
-  const notional = Math.max(MIN_NOTIONAL_USD, Math.floor(order.sizeUsd ?? (capital > 0 ? capital * 0.8 * lev : 100)));
+  const notional = Math.max(MIN_NOTIONAL_USD, Math.floor(order.sizeUsd ?? (capital > 0 ? capital * SIZING_POLICY.maxUtilization * lev : 100)));
   // Margin for the notional plus the 2% the order keeps for fees and slippage (and a little rounding).
   const margin = Math.ceil((notional * 1.03) / lev);
   const protection = [order.stopLossPct ? `stop-loss ${order.stopLossPct}%` : "", order.takeProfitPct ? `take-profit ${order.takeProfitPct}%` : ""].filter(Boolean).join(", ");
@@ -107,7 +108,7 @@ export function strategyForOrder(order: ExplicitPerpOrder, assets?: BudgetAsset[
  */
 function extendedOrder(order: ExplicitPerpOrder, freeUsd = 0): LLMStrategy {
   const lev = order.leverage ?? 1;
-  const notional = Math.max(MIN_NOTIONAL_USD, Math.floor(order.sizeUsd ?? (freeUsd > 0 ? freeUsd * 0.9 * lev : 20)));
+  const notional = Math.max(MIN_NOTIONAL_USD, Math.floor(order.sizeUsd ?? (freeUsd > 0 ? freeUsd * SIZING_POLICY.maxUtilization * lev : 20)));
   const protection = [order.stopLossPct ? `stop-loss ${order.stopLossPct}%` : "", order.takeProfitPct ? `take-profit ${order.takeProfitPct}%` : ""].filter(Boolean).join(", ");
   const needs = Math.ceil((notional * 1.03) / lev);
   return {

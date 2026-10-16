@@ -674,7 +674,19 @@ export async function GET() {
   };
   // Build summary with optional Aave MCP enrichment appended
   const aaveMcp = aaveYieldSummary(aaveReserves);
+  // Which sources answered: a missing one is "unavailable", never zero.
+  const status = (ok: boolean) => (ok ? "ok" : "unavailable");
+  const dataStatus = [
+    `\n\n### DATA STATUS (fetched ${ctx.fetchedAt}) — a source marked unavailable has no figures below: never treat it as zero`,
+    `- Hyperliquid funding: ${status(funding.length > 0)}`,
+    `- Hyperliquid stock/index/commodity perps (HIP-3): ${status(hip3.length > 0)}`,
+    `- Extended markets: ${status(extended.length > 0)}`,
+    `- Lending & staking yields (DefiLlama): ${status(defiLlama.lending.length + defiLlama.staking.length > 0)}`,
+    `- Pendle markets: ${status(pendleMarkets.length > 0)}`,
+    `- Aave reserves: ${status(aaveReserves.length > 0)}`,
+  ].join("\n");
   ctx.summary =
+    dataStatus +
     buildSummary(ctx) +
     morphoVaults +
     opportunitiesSummary(defiLlama.pools) +

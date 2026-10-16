@@ -89,9 +89,23 @@ export interface TradePlan {
   fit?: string;
   /** The main risks, two to four short items. */
   risks?: string[];
+  /** Planner contract (lib/planner/schema.ts): answers the request, or changes a hard constraint. */
+  kind?: "requested" | "alternative";
+  /** For an alternative: each hard constraint it changes. */
+  changes?: string[];
+  /** Blocked: something prevents execution now (see blockers). */
+  status?: "executable" | "blocked";
+  blockers?: string[];
+  /** Normalized economics (return computed by the server). */
+  economics?: Economics;
+  /** Key numbers with their provenance. */
+  figures?: Figure[];
+  /** Two legs that must both fill for the position to be neutral. */
+  pair?: { legs: [number, number]; sizing: "equal_base_quantity" };
 }
 
 import type { PlannerClarify } from "@/lib/planner/clarify";
+import type { Economics, Figure } from "@/lib/planner/schema";
 
 /** Augment ThreadItem with an optional parsed plan (keeps data.ts untouched). */
 declare module "@/lib/data" {

@@ -56,6 +56,13 @@ export interface LLMStrategy {
   risks?: string[];
   /** What the server changed to fit the wallet (resized to the free balance…). */
   fundingNotes?: string[];
+  kind?: TradePlan["kind"];
+  changes?: string[];
+  status?: TradePlan["status"];
+  blockers?: string[];
+  economics?: TradePlan["economics"];
+  figures?: TradePlan["figures"];
+  pair?: TradePlan["pair"];
 }
 
 export interface ParseIntentResponse {
@@ -66,6 +73,11 @@ export interface ParseIntentResponse {
   /** Index of the strategy the planner recommends for this user. */
   recommended?: number;
 }
+
+const cleanList = (v: unknown): string[] | undefined => {
+  const out = Array.isArray(v) ? v.filter((x): x is string => typeof x === "string" && !!x.trim()).map((x) => x.trim().slice(0, 200)).slice(0, 6) : [];
+  return out.length ? out : undefined;
+};
 
 const cleanText = (v: unknown, max: number): string | undefined =>
   typeof v === "string" && v.trim() ? v.trim().slice(0, max) : undefined;
@@ -182,6 +194,15 @@ function strategyToTradePlan(strategy: LLMStrategy): TradePlan & { riskTier: LLM
       ? strategy.risks.map((r) => cleanText(r, 120)).filter((r): r is string => !!r).slice(0, 4)
       : undefined,
     fundingNotes: strategy.fundingNotes?.length ? strategy.fundingNotes.slice(0, 4) : undefined,
+    kind: strategy.kind === "alternative" || strategy.kind === "requested" ? strategy.kind : undefined,
+    changes: cleanList(strategy.changes),
+    status: strategy.status === "blocked" || strategy.status === "executable" ? strategy.status : undefined,
+    blockers: cleanList(strategy.blockers),
+    economics: strategy.economics && typeof strategy.economics.capitalCommittedUsd === "number" ? strategy.economics : undefined,
+    figures: Array.isArray(strategy.figures)
+      ? strategy.figures.filter((f) => f && typeof f.label === "string" && typeof f.value === "string" && ["observed", "calculated", "assumption"].includes(f.kind)).slice(0, 10)
+      : undefined,
+    pair: strategy.pair,
   };
 }
 
@@ -217,6 +238,8 @@ export interface PortfolioContext {
   perps: { coin: string; size: number; notional: number; unrealizedPnl: number }[];
   /** Net ETH delta across all venues (spot + perps). */
   netDeltaEthTotal: number | null;
+  /** The user's Hyperliquid account: collateral, margin in use, free margin (null when not read). */
+  hyperliquid?: { unified: boolean; collateralUsd: number; marginUsedUsd: number; freeMarginUsd: number; spotUsdcUsd: number } | null;
   /** The user's Extended account: connected or not, and its USDC when it is. */
   extended?: { connected: boolean; network?: string; equityUsd?: number; availableUsd?: number };
 }
@@ -226,7 +249,7 @@ export interface PortfolioContext {
  * Falls back to the sync regex parser on any error (network, API key missing,
  * malformed response, etc.) — the app never breaks.
  */
-export async function routeThesisAsync(rawText: string, portfolio?: PortfolioContext, opts: { clarified?: boolean } = {}): Promise<ThreadItem> {
+export async function routeThesisAsync(rawText: string, portfolio?: PortfolioContext, opts: { clarified?: boolean; answeredQuestion?: string } = {}): Promise<ThreadItem> {
   const text = (rawText ?? "").trim();
   if (!text) return routeThesis(text);
 
@@ -235,7 +258,7 @@ export async function routeThesisAsync(rawText: string, portfolio?: PortfolioCon
       method: "POST",
       signal: AbortSignal.timeout(60_000),
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ thesis: text, portfolio, clarified: opts.clarified === true }),
+      body: JSON.stringify({ thesis: text, portfolio, clarified: opts.clarified === true, answeredQuestion: opts.answeredQuestion }),
     });
 
     if (!res.ok) {
@@ -268,11 +291,13 @@ export async function routeThesisAsync(rawText: string, portfolio?: PortfolioCon
       typeof data.recommended === "number" && Number.isInteger(data.recommended) && data.recommended >= 0 && data.recommended < variants.length
         ? data.recommended
         : undefined;
+    // With no recommendation the plan shown first is the first one, never an alternative picked by risk tier.
+    const shownIndex = recommendedIndex ?? (variants.some((v) => v.kind) ? 0 : undefined);
 
     return {
       type: threadType,
       text,
-      plan: recommendedIndex !== undefined ? variants[recommendedIndex] : defaultPlan,
+      plan: shownIndex !== undefined ? variants[shownIndex] : defaultPlan,
       variants: variants.length > 1 ? variants : undefined,
       understanding: cleanText(data.understanding, 240),
       recommendedIndex,

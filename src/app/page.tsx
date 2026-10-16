@@ -211,12 +211,13 @@ export default function TerminalApp() {
           lendingPositions: live.aavePositions,
           perps: live.perps,
           netDeltaEthTotal: live.netDeltaEthTotal,
+          hyperliquid: live.hyperliquidAccount,
           extended: await extendedSnapshot(extendedSigner),
         }
       : undefined;
 
     try {
-      const routed = await fundThreadItem(await routeThesisAsync(trimmed, portfolioSnapshot, { clarified: !!answering }));
+      const routed = await fundThreadItem(await routeThesisAsync(trimmed, portfolioSnapshot, { clarified: !!answering, answeredQuestion: answering?.clarify?.question }));
       setThread((cur) => cur.concat([routed]));
     } catch {
       setThread((cur) => cur.concat([{ ...routeThesis(trimmed), notice: "Something went wrong building your plan. Below is a basic plan from local rules, without live rates; ask again in a moment." }]));

@@ -95,6 +95,8 @@ export function strategyView(plan: TradePlan): StrategyView {
 /** The strategy to open first: the planner's pick, else the moderate one, else the first. */
 export function defaultStrategyIndex(plans: TradePlan[], recommendedIndex?: number): number {
   if (recommendedIndex !== undefined && recommendedIndex >= 0 && recommendedIndex < plans.length) return recommendedIndex;
+  // Planner contract: no recommendation means none answers the request — never promote an alternative.
+  if (plans.some((p) => p.kind)) return -1;
   const moderate = plans.findIndex((p) => riskTierOf(p) === "moderate");
   return moderate >= 0 ? moderate : 0;
 }

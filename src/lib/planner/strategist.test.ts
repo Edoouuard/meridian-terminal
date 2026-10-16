@@ -5,7 +5,20 @@ describe("strategist doctrine", () => {
   it("loads, with the rules the planner depends on", () => {
     const md = strategistDoctrine();
     expect(md).toMatch(/^# Meridian Strategist/);
-    for (const rule of ["Read the data first", "When to ask a question", "Funding sign", "Two named venues means both", "Cross-venue delta-neutral pair", "Self-check"]) {
+    for (const rule of [
+      "Hard constraints and alternatives",
+      "Never treat the user's acceptance of that change as implicit",
+      "Decision tree",
+      "Never ask again a question the user already resolved",
+      "No number without provenance",
+      "Funding sign",
+      "annualizedReturnOnCapitalPct",
+      "Equal base quantity",
+      "partially filled",
+      "Return 1 to 3 plans",
+      "Never recommend an alternative",
+      "Reference cases",
+    ]) {
       expect(md).toContain(rule);
     }
   });

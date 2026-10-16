@@ -23,6 +23,7 @@ import {
  * dynamic risk logic (buildLiveSuggestions) as real data.
  */
 const SIMULATED_PORTFOLIO: LivePortfolio = {
+  hyperliquidAccount: null,
   isConnected: true,
   isLoading: false,
   assets: [

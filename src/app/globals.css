@@ -705,6 +705,14 @@ kbd {
   color: var(--color-accent-800);
   background: var(--color-accent-200);
 }
+.scard__badge--muted {
+  color: var(--color-text);
+  background: var(--color-divider);
+}
+.scard__badge--warn {
+  color: var(--risk-warning);
+  background: color-mix(in srgb, var(--risk-warning) 14%, transparent);
+}
 .scard__name {
   font-family: var(--font-heading);
   font-weight: var(--font-heading-weight);

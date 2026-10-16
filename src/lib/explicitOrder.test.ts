@@ -62,6 +62,6 @@ describe("explicit order on Extended (owner's test: \"open short amd sur extende
     // Funded: sized from the Extended margin, no note.
     const [funded] = enforceExplicitOrder([], order, [], 50);
     expect(funded.fundingNotes).toBeUndefined();
-    expect(funded.legs[0].sizeUsd).toBe(45);
+    expect(funded.legs[0].sizeUsd).toBe(40); // 80% of the $50 free margin (sizing policy), 1x
   });
 });

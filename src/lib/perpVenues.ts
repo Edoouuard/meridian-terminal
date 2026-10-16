@@ -141,8 +141,8 @@ export function crossVenueSummary(rows: ReturnType<typeof crossVenueFunding>, li
   const roundTripFeesPct = 2 * (TAKER_FEE.Hyperliquid + TAKER_FEE.Extended) * 100;
   return [
     "\n\n### Same market on Hyperliquid and Extended — funding per venue (annualized) and the delta-neutral pair",
-    `A cross-venue pair is long on one venue and short the same notional on the other: no price exposure, earns the funding difference, and trades the notional on BOTH venues (volume / points on each). Opening and closing both legs costs ~${roundTripFeesPct.toFixed(2)}% of the notional in taker fees.`,
-    "base | Hyperliquid market: funding | Extended market: funding | pair: long on → short on | net funding earned",
+    `A cross-venue pair is long on one venue and short the same base quantity on the other: it targets no price exposure once both legs fill (basis between the two markets remains), earns (or pays, if negative) the funding difference, and trades on BOTH venues: one open + close of notional N per leg is 4N of volume in total, 2N on each venue. Opening and closing both legs costs ${roundTripFeesPct.toFixed(2)}% of N in taker fees (observed fee rates).`,
+    "base | Hyperliquid market: funding | Extended market: funding | pair: long on → short on | funding difference earned by the pair (annualized, on N)",
     ...rows.slice(0, limit).map(
       (r) => `- ${r.base} | ${r.hl}: ${signed(r.hlAprPct)} | ${r.extended}: ${signed(r.extendedAprPct)} | long ${r.longOn} → short ${r.shortOn} | ${signed(r.spreadPct, 2)}/yr`,
     ),

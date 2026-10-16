@@ -38,7 +38,7 @@ export function hlSpotToken(asset: string): string {
  * Meridian trading key. On a non-unified account whose USDC sits in perps,
  * one wallet signature first moves the needed USDC to spot.
  */
-export function HyperliquidSpotBuyButton({ leg }: { leg: TradeLeg }) {
+export function HyperliquidSpotBuyButton({ leg, onFilled }: { leg: TradeLeg; onFilled?: (ref: string) => void }) {
   const { address, isConnected, chainId } = useAccount();
   const { signTypedDataAsync } = useSignTypedData();
   const envName = useSharedHlEnv();
@@ -69,7 +69,8 @@ export function HyperliquidSpotBuyButton({ leg }: { leg: TradeLeg }) {
     if (status !== "confirmed" || recorded.current) return;
     recorded.current = true;
     recordExecution({ type: "buy", label: `Buy ${token} on Hyperliquid`, amount: String(result?.filled?.totalSz ?? ""), asset: token, protocol: "Hyperliquid", status: "confirmed" });
-  }, [status, result, token]);
+    if (result?.filled) onFilled?.(`hyperliquid:${token}:${result.filled.totalSz}@${result.filled.avgPx}`);
+  }, [status, result, token, onFilled]);
 
   if (!isConnected || !address || !chainId) return <p style={muted}>Connect a wallet to buy {token} on Hyperliquid.</p>;
   if (market.isLoading || funds.isLoading) return <p style={muted}>Reading Hyperliquid&apos;s {token} market and your USDC there…</p>;

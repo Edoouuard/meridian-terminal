@@ -52,7 +52,19 @@ export function defaultStopLossPct(leverage: number): number {
   return Math.max(1, Math.min(10, Math.round(50 / Math.max(1, leverage))));
 }
 
-export function PerpExecuteButton({ leg, hedged = false }: { leg: TradeLeg; hedged?: boolean }) {
+export function PerpExecuteButton({
+  leg,
+  hedged = false,
+  onFilled,
+  baseQty,
+}: {
+  leg: TradeLeg;
+  hedged?: boolean;
+  /** Called once when the order fills (records the step in the strategy tracker). */
+  onFilled?: (ref: string) => void;
+  /** Exact base quantity to trade: the other leg of a neutral pair already filled this much. */
+  baseQty?: number;
+}) {
   const { address, isConnected, chainId } = useAccount();
   const { signTypedDataAsync } = useSignTypedData();
   const envName = useSharedHlEnv();
@@ -106,11 +118,12 @@ export function PerpExecuteButton({ leg, hedged = false }: { leg: TradeLeg; hedg
         protocol: "Hyperliquid",
         status: "confirmed",
       });
+      if (result.filled) onFilled?.(`hyperliquid:${symbol}:${result.filled.totalSz}@${result.filled.avgPx}`);
     } else if (status === "error" && recordedRef.current !== "error") {
       recordedRef.current = "error";
       recordExecution({ type: isBuy ? "buy" : "sell", label: `${isBuy ? "Long" : "Short"} ${symbol} (failed)`, asset: symbol, protocol: "Hyperliquid", status: "error" });
     }
-  }, [status, result, isBuy, symbol]);
+  }, [status, result, isBuy, symbol, onFilled]);
 
   const clearBtn = (
     <button onClick={() => { recordedRef.current = null; reset(); }} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 11 }}>
@@ -127,7 +140,8 @@ export function PerpExecuteButton({ leg, hedged = false }: { leg: TradeLeg; hedg
   const funding = fundingAprForSide(m.fundingHourly, isBuy);
   const free = acct.data?.freeMargin ?? 0;
   const position = acct.data?.position ?? 0;
-  const coinQty = sizeUsd / m.mark;
+  // The second leg of a neutral pair matches the quantity the first one filled, not its dollars.
+  const coinQty = baseQty && baseQty > 0 ? baseQty : sizeUsd / m.mark;
   const lowNotional = sizeUsd < HL_MIN_ORDER_USD;
   const shortBy = Math.max(0, needed - free);
   const movable = !acct.data?.unified && (acct.data?.spotUsdc ?? 0) >= shortBy && shortBy > 0;
@@ -411,7 +425,18 @@ export function PerpExecuteButton({ leg, hedged = false }: { leg: TradeLeg; hedg
  * rather than just a wallet connection. Not connected -> an honest NotWired
  * that says exactly what to do, same as every other unwired path here.
  */
-export function ExtendedPerpExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: PriceEntry[] }) {
+export function ExtendedPerpExecuteButton({
+  leg,
+  prices,
+  onFilled,
+  baseQty,
+}: {
+  leg: TradeLeg;
+  prices?: PriceEntry[];
+  onFilled?: (ref: string) => void;
+  /** Exact base quantity: the other leg of a neutral pair already filled this much. */
+  baseQty?: number;
+}) {
   const signer = useExtendedAccount();
   const { status, result, error, execute, reset } = useExtendedPerp();
   const [confirming, setConfirming] = useState(false);
@@ -429,7 +454,7 @@ export function ExtendedPerpExecuteButton({ leg, prices }: { leg: TradeLeg; pric
     staleTime: 15_000,
   });
   const price = extMarket.data?.mark ?? resolvePriceFromList(prices, symbol);
-  const coinQty = price !== null ? sizeUsd / price : undefined;
+  const coinQty = baseQty && baseQty > 0 ? baseQty : price !== null ? sizeUsd / price : undefined;
 
   const recordedRef = useRef<string | null>(null);
   useEffect(() => {
@@ -443,6 +468,7 @@ export function ExtendedPerpExecuteButton({ leg, prices }: { leg: TradeLeg; pric
         protocol: "Extended",
         status: "confirmed",
       });
+      if (result.filledQty) onFilled?.(`extended:${result.market}:${result.filledQty}@${result.avgPrice ?? ""}`);
     } else if (status === "error" && recordedRef.current !== "error") {
       recordedRef.current = "error";
       recordExecution({
@@ -453,7 +479,7 @@ export function ExtendedPerpExecuteButton({ leg, prices }: { leg: TradeLeg; pric
         status: "error",
       });
     }
-  }, [status, result, isBuy, symbol]);
+  }, [status, result, isBuy, symbol, onFilled]);
 
   if (!signer) {
     return (
@@ -527,7 +553,7 @@ export function ExtendedPerpExecuteButton({ leg, prices }: { leg: TradeLeg; pric
         warning={signer.network === "testnet" ? "TESTNET — no real funds." : "Mainnet — real funds. Confirm carefully."}
         onConfirm={() => {
           setConfirming(false);
-          execute({ signer, symbol: leg.asset, isBuy, sizeUsd, prices, leverage: leg.leverage });
+          execute({ signer, symbol: leg.asset, isBuy, sizeUsd, prices, leverage: leg.leverage, qtyOverride: baseQty && baseQty > 0 ? baseQty : undefined });
         }}
         onCancel={() => setConfirming(false)}
       />

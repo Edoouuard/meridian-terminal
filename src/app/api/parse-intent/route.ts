@@ -6,13 +6,19 @@ import { ACTIVE_CHAIN_IDS, CHAIN_LABEL } from "@/lib/onchain";
 import { routingChainNames } from "@/lib/mcp/routerAllowlist";
 import { strategistDoctrine } from "@/lib/planner/strategist";
 import { cleanClarify } from "@/lib/planner/clarify";
+import { capabilitiesSection } from "@/lib/planner/capabilities";
+import { policySection } from "@/lib/planner/policy";
+import { enforceConformance, namedVenues, type Objective } from "@/lib/planner/schema";
 import { dropBelowMinimum, hyperliquidMarginUsd, validateAndFixStrategy } from "@/lib/strategyIntegrity";
+
+const OBJECTIVES = new Set(["explicit_order", "farming", "neutral_carry", "yield", "hedge", "directional", "move"]);
 
 /**
  * POST /api/parse-intent
  *
- * Takes a raw thesis string and returns 3 structured DeFi strategies
- * (conservative / moderate / aggressive) via OpenRouter. This is Meridian's
+ * Takes a raw thesis string and returns 1 to 3 plans (or one clarifying
+ * question) via OpenRouter, checked against the planner contract
+ * (lib/planner: doctrine, capabilities, policy, schema). This is Meridian's
  * "brain" — the agentic layer that understands free-form intent and maps
  * it to executable, multi-leg strategies across all wired protocols.
  *
@@ -103,15 +109,15 @@ Use these when user wants passive yield with protocol exposure.
 
 ## Composed strategies (REQUIRED when the goal allows)
 
-Users want more than "supply X on Y". When the goal is yield, income, a hedge or neutrality, at least ONE of the 3 strategies (usually the moderate or aggressive one) MUST be a composed, multi-leg strategy that combines protocols, built only from the executable venues and live rates below. Recipes:
+When the goal is yield, income, a hedge or neutrality and the user did not fix the mechanism, consider composed, multi-leg strategies built only from the executable venues and live rates below, and include one when it beats a plain deposit by a margin the numbers show. Recipes:
 - **Beta-neutral ETH carry (spot only, executable now)**: Supply USDC on Aave → Borrow WETH on Aave → Swap "WETH → <LST>" on Uniswap → Supply <LST> on Aave. The WETH debt (short ETH) offsets the LST (long ETH), so the value barely moves with ETH; it earns the USDC rate plus staking minus the WETH borrow rate on the borrowed part. Use ONLY a chain and LST listed under "Beta-neutral ETH carry" in the live data, its exact sizes (borrow share of the USDC) and its exact net APY. If its row says NOT worth it now, don't propose it, or say so.
 - **LST + short perp (when perps are available, only if ETH funding in the live data is positive)**: all spot legs on Arbitrum. (1) Deposit USDC on Hyperliquid (chain "Arbitrum") — the margin, sizeUsd = N / L; (2) Swap "USDC → wstETH" (or weETH) on Uniswap, chain "Arbitrum" — size N; (3) Short "ETH PERP" on Hyperliquid, size N, leverage L (1-3). With capital C: N = C × L / (L + 1) (e.g. C $3,000 at 2x → $1,000 margin, $2,000 wstETH, $2,000 short). It earns the LST staking yield plus the funding rate on N, ETH-neutral. Never use Lido (Ethereum only) or a different chain for the long side of this recipe.
-- **Neutral on Hyperliquid with the money already there (when the portfolio shows a HYPERLIQUID ACCOUNT balance and the wallet holds less)**: two legs, nothing leaves the account. (1) Buy the spot asset on Hyperliquid: side "Buy", asset "UETH" (ETH) or "UBTC" (BTC), protocol "Hyperliquid", chain "Arbitrum", size N; (2) Short "ETH PERP" (or "BTC PERP") on Hyperliquid, size N, leverage L (1-3). With the account balance C: N = C × L / (L + 1) minus ~3% for fees (e.g. $66 at 1x → ~$31 UETH + ~$31 short). It earns the funding rate on N, ETH-neutral (UETH earns no staking yield). Every Hyperliquid order is at least $10. Prefer this over any recipe that needs wallet funds the user doesn't have.
+- **Neutral on Hyperliquid with the money already there (when the portfolio shows a HYPERLIQUID ACCOUNT balance and the wallet holds less)**: two legs, nothing leaves the account. (1) Buy the spot asset on Hyperliquid: side "Buy", asset "UETH" (ETH) or "UBTC" (BTC), protocol "Hyperliquid", chain "Arbitrum", size N; (2) Short "ETH PERP" (or "BTC PERP") on Hyperliquid, size N, leverage L (1-3). Sizing: on a unified account the spot USDC IS the perp collateral, so with free USDC C: N = C × L / (L + 1) reduced by the policy buffer and reserve; on a non-unified account, spot and perps balances are separate: N is capped by each. It earns the funding rate on N, ETH-neutral (UETH earns no staking yield). Every Hyperliquid order is at least $10. Prefer this over any recipe that needs wallet funds the user doesn't have.
 - **Fixed + variable barbell**: part in a Pendle PT (fixed rate locked to expiry), part in an instant-exit vault (Fluid, Spark Savings, Morpho) for liquidity.
 - **Restaking stack**: Stake ETH on Lido → Restake the stETH on EigenLayer (Ethereum).
 - **Diversified stable basket**: split stables across 2-3 executable venues/chains from the live list to spread protocol risk.
 Each composed strategy states in "summary" how the legs fit together and the blended APY computed from the live rates.
-The 3 strategies use 3 DIFFERENT mechanisms: never the same recipe twice on two chains or two LSTs. For a neutral or hedge goal with perps available, one strategy is the perp hedge and one is the spot-only carry.
+When you return several plans, they differ in mechanism unless the user fixed it: never the same recipe twice on two chains or two LSTs.
 Never add Bridge legs or stablecoin swaps to move or convert the user's funds (Meridian adds them itself), and never swap before a Pendle leg (Pendle buys with USDC or WETH directly).
 
 ## CRITICAL: Strategy Structural Integrity Rules
@@ -176,15 +182,15 @@ RULES:
 ### Rule 6: Leverage coherence
 - Spot positions (Supply, Stake, Buy, Swap) NEVER have leverage — omit the field.
 - Only Long/Short perp legs have leverage.
-- Conservative: 1-2x. Moderate: 2-5x. Aggressive: 5-15x.
+- No leverage given: the sizing policy default; the user's leverage is a hard constraint.
 - 1x leverage on a perp is valid and common for basis trades.
 
 ## Strategy Design
 
-1. **3 strategies** — different mechanisms when the goal allows; when the user fixed the mechanism (an explicit order, two named venues), vary size, leverage or market instead (doctrine section 7).
+1. **1 to 3 plans** — only plans that differ in a way the user allowed (doctrine section 6); a single exact plan beats artificial variations.
 2. **Protocol selection from live data**: pick the protocol that currently offers the best rate for the user's goal. If Morpho has higher APY than Aave for USDC right now, say so. If a vault has exceptional yield, include it.
 3. **Multi-leg composition**: 1-5 legs per strategy. Each leg = one on-chain action. Verify structural integrity rules above.
-4. **Size**: use user's amount if given, otherwise $10,000.
+4. **Size**: the user's amount if given; otherwise the sizing policy applied to the free amount (wallet not connected: a $10,000 hypothetical, said so).
 5. **Leverage**: see Rule 6 above.
 6. **summary**: 2-3 sentences with EXACT rates from live data. Why this approach, what's the expected outcome.
 7. **variantNote**: name the specific risk (liquidation price, funding rate direction, smart contract risk, rate variability, etc.).
@@ -200,7 +206,7 @@ Before returning your JSON, verify each strategy against this checklist:
 - [ ] Are spot legs (Supply/Stake/Swap/Buy) free of leverage fields?
 - [ ] Does every summary quote exact rates from the live data?
 - [ ] Does each strategy's "apy" match the rates in its leg notes, and is "exit" honest about lock-ups and queues?
-- [ ] Unless the user fixed the mechanism, do the 3 strategies use 3 DIFFERENT mechanisms? The same legs on another chain or with another LST is the SAME mechanism: replace it.
+- [ ] Several plans: do they differ in a way the user allowed (not the same recipe on another chain or LST)?
 
 ## Leg Format (STRICT)
 
@@ -218,47 +224,58 @@ Every leg MUST set "chain" to the chain where that leg executes, using one of: $
 
 ## Output Format
 
-Return ONLY valid JSON (no markdown, no text before/after).
+Return ONLY valid JSON (no markdown, no text before/after). "decision" is "clarify" or "build" (doctrine section 2).
 
-When you need ONE answer from the user before planning (doctrine section 3), return this instead, with "strategies" empty:
+Clarify (one question, strategies empty):
 {
-  "understanding": "One sentence restating the goal, and what is missing.",
-  "clarify": {
-    "question": "Short question in the user's language",
-    "why": "One line: what in the data makes it necessary",
-    "options": ["Recommended complete answer", "Other complete answer", "…"]
-  },
+  "decision": "clarify",
+  "objective": "farming",
+  "understanding": "The goal with its hard constraints, and what is missing.",
+  "clarify": { "question": "Short question in the user's language", "why": "What in the data makes it necessary", "options": ["Answer that keeps the request", "Other complete answer"] },
   "strategies": []
 }
 
-Otherwise:
+Build (1 to 3 plans):
 {
-  "understanding": "One sentence restating the user's goal in their terms, with the amount and asset (e.g. 'You want the best yield on your 5,000 USDC, moving chains only when it pays.')",
-  "recommended": 1,
+  "decision": "build",
+  "objective": "explicit_order | farming | neutral_carry | yield | hedge | directional | move",
+  "understanding": "The goal in the user's terms with every hard constraint; what blocks it, if anything.",
   "strategies": [
     {
-      "name": "Short name, max 4 words (e.g. 'Aave USDC on Base')",
-      "risk": "conservative",
+      "kind": "requested",
+      "status": "executable",
+      "blockers": [],
+      "changes": [],
+      "name": "Short name, max 4 words",
+      "risk": "conservative | moderate | aggressive",
       "apy": 4.8,
       "exit": "Instant",
-      "fit": "One line: who this suits (e.g. 'You want a blue-chip lender and to withdraw any time.')",
+      "fit": "One line: who this suits",
       "risks": ["Short risk 1", "Short risk 2"],
-      "variantNote": "The single most important caveat of this strategy",
-      "summary": "2-3 sentences with exact live rates and the expected outcome in dollars per year.",
+      "variantNote": "The single most important caveat",
+      "summary": "What it does, the figures that justify it now, the yearly result in dollars as a projection.",
+      "economics": { "capitalCommittedUsd": 66, "notionalPerLegUsd": 31, "volumeUsd": 124, "annualizedGrossCarryUsd": 3.4, "entryExitCostUsd": 0.12, "holdingDays": 30 },
+      "figures": [
+        { "label": "ETH funding (Hyperliquid)", "value": "+11.0%/yr", "kind": "observed", "source": "Perp Funding Rates: ETH" },
+        { "label": "Notional per leg", "value": "$31", "kind": "calculated", "source": "66 × 1/(1+1) × (1 − 3% buffer), rounded" },
+        { "label": "Holding period", "value": "30 days", "kind": "assumption", "source": "sizing policy default (carry)" }
+      ],
       "legs": [
-        { "side": "Supply", "asset": "USDC", "protocol": "Aave", "chain": "Ethereum", "sizeUsd": 10000, "note": "Currently X.XX% APY on Ethereum" }
+        { "side": "Buy", "asset": "UETH", "protocol": "Hyperliquid", "chain": "Arbitrum", "sizeUsd": 31, "note": "…" }
       ]
-    },
-    { "name": "...", "risk": "moderate", "apy": 0, "exit": "...", "fit": "...", "risks": ["..."], "variantNote": "...", "summary": "...", "legs": [...] },
-    { "name": "...", "risk": "aggressive", "apy": 0, "exit": "...", "fit": "...", "risks": ["..."], "variantNote": "...", "summary": "...", "legs": [...] }
+    }
   ]
 }
 
 Field rules:
-- "apy": the strategy's blended expected APY in percent as a number (size-weighted over the legs that earn), computed ONLY from rates in the live data; omit it when the strategy has no yield (a swap, a hedge).
-- "exit": how and how fast the user gets their money back: "Instant", "~1-5 days (Lido withdrawal queue)", "Locked until 26 Mar 2027 (or sell PT at market)", "~14 days (EigenLayer queue)".
-- "risks": 2 to 4 short items, each under 8 words, specific to this strategy (protocol, depeg, curator, lock-up, bridge, variable rate). No generic filler.
-- "recommended": index (0-based) of the strategy that best fits THIS user's goal and wallet; when unsure, the moderate one.`;
+- "kind": "requested" when every hard constraint is met, else "alternative" with every change in "changes" ("venue: Extended → Hyperliquid"). The server re-checks this against the request and reclassifies a plan that breaks a constraint.
+- "status": "blocked" when something prevents execution now, with each reason in "blockers"; the server also blocks Extended legs from the Extended account state.
+- "economics": fill it for any plan with a carry, a yield or fees worth stating (doctrine section 4). Don't fill "annualizedReturnOnCapitalPct": the server computes it.
+- "figures": the key numbers, each "observed", "calculated" or "assumption" with its source or formula.
+- "apy": blended expected APY in percent from the live data, for yield plans only; omit it for directional trades and pairs (use "economics").
+- "exit": how and how fast the user gets their money back: "Instant", "~1-5 days (Lido withdrawal queue)", "Locked until 26 Mar 2027 (or sell PT at market)".
+- "risks": 2 to 4 short items, specific to the plan. No generic filler.
+- Don't set "recommended": the server recommends the best executable requested plan.`;
 
 /** Fetch live yield context from our own aggregator route (server-side internal call). */
 async function fetchYieldContext(baseUrl: string, cookie: string | null): Promise<string> {
@@ -322,6 +339,14 @@ function formatPortfolioContext(portfolio: PortfolioSnapshot | undefined): strin
     lines.push(`HYPERLIQUID ACCOUNT: $${Math.round(hlMargin).toLocaleString()} of stablecoins already in the user's Hyperliquid account, usable right now as perp margin and to buy UETH/UBTC on Hyperliquid spot (the long side of a neutral position there, see the recipe). A Long/Short on Hyperliquid needs NO Deposit leg up to that margin; add a Deposit only for margin beyond it. To use it anywhere else (lending, vaults, another chain), the FIRST leg is a withdrawal: side "Withdraw", protocol "Hyperliquid", asset "USDC", chain "Arbitrum", sizeUsd ≤ that amount — it lands as USDC on Arbitrum in ~5 min minus a $1 fee; Meridian adds any bridge after it. Never plan a leg elsewhere that spends this USDC without that withdrawal.`);
   }
 
+  if (portfolio.hyperliquid) {
+    const h = portfolio.hyperliquid;
+    lines.push(
+      `HYPERLIQUID ACCOUNT BALANCES (observed): collateral $${h.collateralUsd.toFixed(2)}, margin in use $${h.marginUsedUsd.toFixed(2)}, FREE MARGIN $${h.freeMarginUsd.toFixed(2)} (what new positions and spot buys can use), ${h.unified ? "unified account (spot USDC is the perp collateral)" : `standard account (spot USDC $${h.spotUsdcUsd.toFixed(2)} is separate from perps)`}.`,
+    );
+  } else {
+    lines.push("HYPERLIQUID ACCOUNT BALANCES: unknown (not read) — don't size Hyperliquid legs from a guess.");
+  }
   lines.push(extendedAccountLine(portfolio.extended));
 
   if (portfolio.assets && portfolio.assets.length > 0) {
@@ -366,6 +391,7 @@ interface PortfolioSnapshot {
   perps?: { coin: string; size: number; notional: number; unrealizedPnl: number }[];
   netDeltaEthTotal?: number | null;
   extended?: { connected: boolean; network?: string; equityUsd?: number; availableUsd?: number };
+  hyperliquid?: { unified: boolean; collateralUsd: number; marginUsedUsd: number; freeMarginUsd: number; spotUsdcUsd: number } | null;
 }
 
 /** The planner call can take ~30s; give the function room past the default limit. */
@@ -377,7 +403,7 @@ const PLANNER_TIMEOUT_MS = 50_000;
 
 export async function POST(req: NextRequest) {
   try {
-    const { thesis, portfolio, clarified } = await req.json();
+    const { thesis, portfolio, clarified, answeredQuestion } = await req.json();
     if (!thesis || typeof thesis !== "string" || thesis.trim().length === 0) {
       return NextResponse.json({ error: "thesis is required" }, { status: 400 });
     }
@@ -408,7 +434,11 @@ export async function POST(req: NextRequest) {
     if (yieldContext) sections.push(yieldContext);
     else sections.push("## LIVE DATA UNAVAILABLE\nThe live rates could not be loaded for this request. Do not quote any APY or rate: omit \"apy\", and say in each summary that rates will be shown live before signing.");
     sections.push(`User thesis: ${thesis.trim()}`);
-    if (clarified) sections.push("The user has just answered your clarifying question (their answer is at the end of the thesis). Do not ask another question: return strategies.");
+    if (clarified) {
+      sections.push(
+        `The user answered your question${typeof answeredQuestion === "string" ? ` ("${answeredQuestion.slice(0, 300)}")` : ""}; their answer ends the thesis. That question is resolved: never ask it again. Build, unless the answer reveals a different blocker that needs a different question.`,
+      );
+    }
     const userMessage = sections.join("\n\n---\n\n");
 
     const response = await fetch(OPENROUTER_URL, {
@@ -425,7 +455,10 @@ export async function POST(req: NextRequest) {
         max_tokens: 4096,
         temperature: 0.4,
         messages: [
-          { role: "system", content: `${strategistDoctrine()}\n\n---\n\n${FEATURES.perps ? SYSTEM_PROMPT : SYSTEM_PROMPT + PERPS_DISABLED_NOTE}` },
+          {
+            role: "system",
+            content: [strategistDoctrine(), capabilitiesSection(), policySection(), FEATURES.perps ? SYSTEM_PROMPT : SYSTEM_PROMPT + PERPS_DISABLED_NOTE].join("\n\n---\n\n"),
+          },
           { role: "user", content: userMessage },
         ],
       }),
@@ -461,26 +494,41 @@ export async function POST(req: NextRequest) {
     const explicit = FEATURES.perps ? parseExplicitPerpOrder(thesis) : null;
     if (!Array.isArray(parsed.strategies)) parsed.strategies = [];
 
-    // One clarifying question instead of plans (doctrine section 3) — never
-    // after the user already answered one, and never over an explicit order.
+    // One clarifying question instead of plans (doctrine section 2) — never
+    // over an explicit order, and never the question the user just resolved.
     const clarify = cleanClarify(parsed.clarify);
-    if (clarify && parsed.strategies.length === 0 && !clarified && !explicit) {
-      return NextResponse.json({ understanding: typeof parsed.understanding === "string" ? parsed.understanding : "", clarify, strategies: [] });
+    const sameQuestion = (q: string) => typeof answeredQuestion === "string" && q.trim().toLowerCase() === answeredQuestion.trim().toLowerCase();
+    if (clarify && parsed.strategies.length === 0 && !explicit && !sameQuestion(clarify.question)) {
+      return NextResponse.json({ decision: "clarify", understanding: typeof parsed.understanding === "string" ? parsed.understanding : "", clarify, strategies: [] });
     }
     if (parsed.strategies.length === 0 && !explicit) {
       return NextResponse.json({ error: "No strategies in response" }, { status: 500 });
     }
 
-    // Post-LLM structural validation: catch strategies that are logically
-    // incoherent (e.g. labeled "neutral" but only have one directional leg).
-    const wallet = { assets: (portfolio as PortfolioSnapshot | undefined)?.assets };
-    parsed.strategies = enforceExplicitOrder(parsed.strategies, explicit, wallet.assets, (portfolio as PortfolioSnapshot | undefined)?.extended?.availableUsd);
-    parsed.strategies = dropBelowMinimum(
-      parsed.strategies.map((st: Parameters<typeof validateAndFixStrategy>[0]) => validateAndFixStrategy(st, wallet)),
+    // Deterministic checks on what the model proposed: the user's order first,
+    // structure and budget, venue minimums, then the planner contract
+    // (requested vs alternative, blocked, economics, recommendation).
+    const snapshot = portfolio as PortfolioSnapshot | undefined;
+    const wallet = { assets: snapshot?.assets };
+    let strategies = enforceExplicitOrder(parsed.strategies, explicit, wallet.assets, snapshot?.extended?.availableUsd);
+    strategies = dropBelowMinimum(
+      strategies.map((st: Parameters<typeof validateAndFixStrategy>[0]) => validateAndFixStrategy(st, wallet)),
       explicit !== null,
     );
+    const objective = OBJECTIVES.has(parsed.objective) ? (parsed.objective as Objective) : explicit ? "explicit_order" : undefined;
+    const conformance = enforceConformance(strategies, objective, { order: explicit, namedVenues: namedVenues(thesis), extended: snapshot?.extended });
+    if (conformance.notes.length) console.info("[parse-intent] conformance:", conformance.notes.join(" | "));
+    if (conformance.strategies.length === 0) {
+      return NextResponse.json({ error: "No plan met the request's constraints" }, { status: 500 });
+    }
 
-    return NextResponse.json(parsed);
+    return NextResponse.json({
+      decision: "build",
+      objective,
+      understanding: parsed.understanding,
+      strategies: conformance.strategies,
+      recommended: conformance.recommended,
+    });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("[parse-intent] error:", message);

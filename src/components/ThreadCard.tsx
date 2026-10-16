@@ -70,6 +70,8 @@ function CompareCard({ plan, isActive, isRecommended, onSelect }: {
       <span className="scard__top">
         <RiskTag tier={view.tier} />
         {isRecommended && <span className="scard__badge">Recommended</span>}
+        {plan.kind === "alternative" && <span className="scard__badge scard__badge--muted">Alternative</span>}
+        {plan.status === "blocked" && <span className="scard__badge scard__badge--warn">Blocked</span>}
       </span>
       <span className="scard__name">{plan.variantLabel || "Strategy"}</span>
       <ApyFigure view={view} />
@@ -91,6 +93,40 @@ function CompareCard({ plan, isActive, isRecommended, onSelect }: {
   );
 }
 
+const FIGURE_KIND: Record<"observed" | "calculated" | "assumption", string> = {
+  observed: "observed",
+  calculated: "calculated",
+  assumption: "assumption",
+};
+
+const usd = (n: number) => `${n < 0 ? "−" : ""}$${Math.abs(n).toLocaleString("en-US", { maximumFractionDigits: Math.abs(n) < 100 ? 2 : 0 })}`;
+
+/** The plan's economics, one meaning per line (lib/planner/schema.ts). */
+function EconomicsBlock({ e }: { e: NonNullable<TradePlan["economics"]> }) {
+  const rows: [string, string][] = [["Capital committed", usd(e.capitalCommittedUsd)]];
+  if (e.notionalPerLegUsd !== undefined) rows.push(["Position per leg", usd(e.notionalPerLegUsd)]);
+  if (e.volumeUsd !== undefined) rows.push(["Volume per open + close", usd(e.volumeUsd)]);
+  if (e.annualizedGrossCarryUsd !== undefined) rows.push(["Carry per year at today's rates", usd(e.annualizedGrossCarryUsd)]);
+  if (e.entryExitCostUsd !== undefined) rows.push(["Fees to enter and exit", usd(e.entryExitCostUsd)]);
+  rows.push(["Holding period", `${e.holdingDays} days`]);
+  if (e.annualizedReturnOnCapitalPct !== undefined) rows.push(["Net return on capital (projection, per year)", `${e.annualizedReturnOnCapitalPct.toFixed(2)}%`]);
+  return (
+    <div className="sdetail__block" style={{ marginBottom: "var(--space-3)" }}>
+      <h6>Economics</h6>
+      <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+        <tbody>
+          {rows.map(([k, v]) => (
+            <tr key={k}>
+              <td className="text-muted" style={{ padding: "2px 0" }}>{k}</td>
+              <td style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{v}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /** Everything about the chosen strategy: why, risks, then the steps to sign. */
 function StrategyDetail({ plan, isRecommended, single }: { plan: TradePlan; isRecommended: boolean; single: boolean }) {
   const view = strategyView(plan);
@@ -101,7 +137,19 @@ function StrategyDetail({ plan, isRecommended, single }: { plan: TradePlan; isRe
       <header className="sdetail__head">
         <div className="sdetail__title">
           <span className="sdetail__kicker">
-            {single ? "Strategy" : isRecommended ? "Recommended for you" : "Selected strategy"}
+            {plan.kind === "alternative"
+              ? "Alternative — changes your request"
+              : plan.kind === "requested"
+                ? plan.status === "blocked"
+                  ? "Your request — blocked for now"
+                  : isRecommended
+                    ? "Your request · recommended"
+                    : "Your request"
+                : single
+                  ? "Strategy"
+                  : isRecommended
+                    ? "Recommended for you"
+                    : "Selected strategy"}
           </span>
           <h4 className="sdetail__name">{plan.variantLabel || intentLabel(plan.intent)}</h4>
           <span className="sdetail__sub">
@@ -115,7 +163,39 @@ function StrategyDetail({ plan, isRecommended, single }: { plan: TradePlan; isRe
         </div>
       </header>
 
+      {plan.changes && plan.changes.length > 0 && (
+        <div className="risk-note" role="note" style={{ border: "1px solid var(--color-divider)" }}>
+          <div className="risk-note__label">Changes your request</div>
+          <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+            {plan.changes.map((c) => <li key={c}>{c}</li>)}
+          </ul>
+          <span className="text-muted" style={{ fontSize: 12 }}>Signing it means you accept these changes.</span>
+        </div>
+      )}
+      {plan.status === "blocked" && plan.blockers && (
+        <div className="risk-note" role="status" style={{ border: "1px solid var(--risk-warning)" }}>
+          <div className="risk-note__label" style={{ color: "var(--risk-warning)" }}>Blocked for now</div>
+          <ul style={{ margin: "4px 0 0", paddingLeft: 18 }}>
+            {plan.blockers.map((b) => <li key={b}>{b}</li>)}
+          </ul>
+        </div>
+      )}
+
       <p className="sdetail__summary">{plan.summary}</p>
+
+      {plan.economics && <EconomicsBlock e={plan.economics} />}
+      {plan.figures && plan.figures.length > 0 && (
+        <details className="how-computed">
+          <summary>Where the numbers come from</summary>
+          <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 12 }}>
+            {plan.figures.map((f, k) => (
+              <li key={k}>
+                <strong>{f.label}</strong> {f.value} · <span className="text-muted">{FIGURE_KIND[f.kind]}: {f.source}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
 
       {(view.fit || risks.length > 0 || view.exit) && (
         <div className="sdetail__grid">
@@ -148,6 +228,12 @@ function StrategyDetail({ plan, isRecommended, single }: { plan: TradePlan; isRe
 
       <div className="sdetail__steps">
         <h6>{plan.legs.length > 1 ? `How it runs · ${plan.legs.length} steps` : "How it runs"}</h6>
+        {plan.pair && (
+          <p className="text-muted" style={{ fontSize: 12, margin: "0 0 var(--space-2)" }}>
+            Steps {plan.pair.legs[0] + 1} and {plan.pair.legs[1] + 1} form one neutral position, sized to the same quantity of the asset. It is neutral
+            only once both are filled: if the second fails, close the first (Risk → Perp positions) or retry it right away.
+          </p>
+        )}
         <StrategyLegs plan={plan} />
         {plan.legs.length > 1 && <ExecuteStrategyButton plan={plan} />}
       </div>
