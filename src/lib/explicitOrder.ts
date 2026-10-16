@@ -10,6 +10,7 @@ import { deployableUsd, hyperliquidMarginOnlyUsd, type BudgetAsset } from "@/lib
 import type { LLMLeg, LLMStrategy } from "@/lib/strategyIntegrity";
 import { marketBase } from "@/lib/perpVenues";
 import { SIZING_POLICY } from "@/lib/planner/policy";
+import { EXTENDED_MIN_DEPOSIT_USD } from "@/lib/integrations/extendedBridge";
 
 export interface ExplicitPerpOrder {
   side: "Long" | "Short";
@@ -95,7 +96,7 @@ const MIN_NOTIONAL_USD = 11;
 
 /** The order as Meridian executes it: margin deposited on Hyperliquid when needed, then the position. */
 export function strategyForOrder(order: ExplicitPerpOrder, assets?: BudgetAsset[], extendedFreeUsd?: number): LLMStrategy {
-  if (order.venue === "Extended") return extendedOrder(order, extendedFreeUsd);
+  if (order.venue === "Extended") return extendedOrder(order, extendedFreeUsd, arbitrumUsdcUsd(assets));
   const lev = order.leverage ?? SIZING_POLICY.defaultLeverage.directional;
   const capital = deployableUsd(assets) + hyperliquidMarginOnlyUsd(assets);
   // Without a size: most of what the user can put up as margin (the budget fit trims it to the wallet).
@@ -123,50 +124,64 @@ export function strategyForOrder(order: ExplicitPerpOrder, assets?: BudgetAsset[
   };
 }
 
+/** Native USDC in the wallet on Arbitrum: what a deposit to Extended can spend (Rhino.fi bridge). */
+export function arbitrumUsdcUsd(assets: BudgetAsset[] | undefined): number {
+  return (assets ?? []).filter((a) => /^wallet$/i.test(a.venue) && /arbitrum/i.test(a.chain) && a.symbol.toUpperCase() === "USDC").reduce((t, a) => t + a.usd, 0);
+}
+
 /**
- * The order on Extended: no deposit leg (Meridian can't deposit there), sized
- * from the Extended account's free margin when the user gave no size. With no
- * margin there, it says so rather than moving the order to another venue.
+ * The order on Extended, sized from the Extended account's free margin (plus
+ * Arbitrum USDC the wallet can deposit) when the user gave no size. When the
+ * account lacks margin and the wallet holds enough USDC on Arbitrum, a
+ * deposit step (Rhino.fi bridge) comes first; otherwise the plan says what's
+ * missing rather than moving the order to another venue.
  */
-function extendedOrder(order: ExplicitPerpOrder, freeUsd: number | undefined): LLMStrategy {
+function extendedOrder(order: ExplicitPerpOrder, freeUsd: number | undefined, arbUsdc: number): LLMStrategy {
   const lev = order.leverage ?? SIZING_POLICY.defaultLeverage.directional;
-  // No size given and the Extended balance unknown or empty: the size stays unknown (the plan is blocked), never invented.
+  const reserve = SIZING_POLICY.feeReserveUsd;
+  // A deposit is only possible from a known (connected) account; its bridge fee is covered by the reserve.
+  const depositable = freeUsd !== undefined && arbUsdc >= EXTENDED_MIN_DEPOSIT_USD + reserve ? arbUsdc - reserve : 0;
+  // No size given and nothing known to size from: the size stays unknown (the plan is blocked), never invented.
+  const sizingFrom = freeUsd === undefined ? 0 : Math.max(0, freeUsd - reserve) + depositable;
   const notional =
     order.sizeUsd !== undefined
       ? Math.max(MIN_NOTIONAL_USD, Math.floor(order.sizeUsd))
-      : freeUsd !== undefined && freeUsd > SIZING_POLICY.feeReserveUsd
-        ? Math.max(MIN_NOTIONAL_USD, Math.floor((freeUsd - SIZING_POLICY.feeReserveUsd) * SIZING_POLICY.maxUtilization * lev))
+      : sizingFrom > 0
+        ? Math.max(MIN_NOTIONAL_USD, Math.floor(sizingFrom * SIZING_POLICY.maxUtilization * lev))
         : undefined;
   const protection = protectionText(order, lev);
   const needs = notional === undefined ? undefined : Math.ceil((notional * (1 + SIZING_POLICY.marginBufferPct / 100)) / lev);
+  const shortfall = needs !== undefined && freeUsd !== undefined ? needs - freeUsd : 0;
+  const deposit = shortfall > 0 && depositable >= shortfall ? Math.min(depositable, Math.max(EXTENDED_MIN_DEPOSIT_USD, Math.ceil(shortfall + reserve))) : 0;
+  const covered = needs !== undefined && freeUsd !== undefined && freeUsd + deposit >= needs;
+  const perp: LLMLeg = {
+    side: order.side,
+    asset: `${order.asset} PERP`,
+    protocol: "Extended",
+    chain: "Arbitrum",
+    sizeUsd: notional,
+    leverage: lev,
+    stopLossPct: order.stopLossPct,
+    takeProfitPct: order.takeProfitPct,
+    note: `${order.side} ${order.asset} on Extended at ${lev}x${protection ? `, ${protection}` : ""}, as you asked.`,
+  };
   return {
     name: `${order.side} ${order.asset} ${lev}x (Extended)`,
     risk: "aggressive",
     summary: `Your order: ${order.side.toLowerCase()} ${order.asset} on Extended, ${lev}x${protection ? `, ${protection}` : ""}.`,
     variantNote: `Directional ${order.side.toLowerCase()}: a ${(100 / lev).toFixed(0)}% move against you approaches liquidation; funding is paid or earned every hour.`,
-    fundingNotes:
-      needs !== undefined && freeUsd !== undefined && freeUsd >= needs
-        ? undefined
-        : [
-            freeUsd === undefined
-              ? "Your Extended balance is unknown right now, so the size isn't set: connect or reload Extended, or give a size."
-              : needs === undefined
-                ? `Your Extended account has $${Math.floor(freeUsd)} free: deposit USDC on extended.exchange with this wallet, or give a size.`
-                : `Your Extended account has $${Math.floor(freeUsd)} free; this order needs ~$${needs} of margin there. Deposit USDC on extended.exchange with this wallet, then sign.`,
-          ],
-    legs: [
-      {
-        side: order.side,
-        asset: `${order.asset} PERP`,
-        protocol: "Extended",
-        chain: "Arbitrum",
-        sizeUsd: notional,
-        leverage: lev,
-        stopLossPct: order.stopLossPct,
-        takeProfitPct: order.takeProfitPct,
-        note: `${order.side} ${order.asset} on Extended at ${lev}x${protection ? `, ${protection}` : ""}, as you asked.`,
-      },
-    ],
+    fundingNotes: covered
+      ? undefined
+      : [
+          freeUsd === undefined
+            ? "Your Extended balance is unknown right now, so the size isn't set: connect or reload Extended, or give a size."
+            : needs === undefined
+              ? `Your Extended account has $${Math.floor(freeUsd)} free and the wallet has no USDC on Arbitrum to deposit: add USDC on Arbitrum, or give a size.`
+              : `Your Extended account has $${Math.floor(freeUsd)} free; this order needs ~$${needs} of margin there and the wallet holds $${Math.floor(arbUsdc)} USDC on Arbitrum to deposit.`,
+        ],
+    legs: deposit > 0
+      ? [{ side: "Deposit", asset: "USDC", protocol: "Extended", chain: "Arbitrum", sizeUsd: deposit, note: "Margin for the order: USDC from Arbitrum to your Extended account (Rhino.fi bridge, a few minutes)." }, perp]
+      : [perp],
   };
 }
 

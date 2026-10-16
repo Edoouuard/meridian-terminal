@@ -135,7 +135,8 @@ The convention is in the product policy: "SL X%" is an adverse **price** move of
 
 | Request and state | Expected |
 |---|---|
-| "ouvre du beta neutral pour optimiser le volume entre Extended et Hyperliquid"; Hyperliquid free margin $200 (status ok); Extended connected, balance $0 (status ok) | `decision: build`: requested pair `blocked` by the Extended deposit; Hyperliquid-only plans as alternatives with `changes: ["venue: Extended not used (you named it)"]`; recommended: the requested pair. |
+| "ouvre du beta neutral pour optimiser le volume entre Extended et Hyperliquid"; Hyperliquid free margin $200 (status ok); Extended connected, balance $0 (status ok); no USDC on Arbitrum | `decision: build`: requested pair `blocked` by the missing Extended margin; Hyperliquid-only plans as alternatives with `changes: ["venue: Extended not used (you named it)"]`; recommended: the requested pair. |
+| Same request; Extended balance $0 (status ok); $100 native USDC in the wallet on Arbitrum | The requested pair starts with a Deposit leg to Extended (from Arbitrum USDC) covering its margin, and is executable. |
 | Same request; Extended connected, balance status unknown | Requested pair `blocked` ("balance unknown"); `capitalToAddUsd` null. Unknown is neither zero nor usable. |
 | "open short amd sur extended"; Extended balance $0 (status ok); Hyperliquid free margin $200 | Requested: short AMD on Extended, `blocked`, base quantity null (no size invented). Alternative: short `xyz:AMD` on Hyperliquid with `changes: ["venue: Extended → Hyperliquid"]`. No other asset. Recommended: the requested plan. |
 | "short ETH levier 2, SL 20%"; Hyperliquid free margin $200 | One requested plan: short ETH 2x, stop-loss at a 20% adverse price move. A 3x variant is an alternative, never requested. |

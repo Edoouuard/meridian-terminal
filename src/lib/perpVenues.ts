@@ -7,8 +7,12 @@
  * a short EARNS it and a long PAYS it. Both venues settle funding hourly.
  */
 
-/** Taker fee per side (Hyperliquid base tier; Extended `DEFAULT_TAKER_FEE`), as a fraction of notional. */
-export const TAKER_FEE = { Hyperliquid: 0.00045, Extended: 0.0005 } as const;
+/**
+ * Taker fee charged per side (Hyperliquid base tier; Extended's flat schedule
+ * per its API docs, "Get fees": taker 0.025%), as a fraction of notional.
+ * Extended orders still sign the SDK's DEFAULT_TAKER_FEE as the maximum fee.
+ */
+export const TAKER_FEE = { Hyperliquid: 0.00045, Extended: 0.00025 } as const;
 
 /** Hyperliquid spot taker fee (base tier), as a fraction of notional. */
 export const HL_SPOT_TAKER_FEE = 0.0007;

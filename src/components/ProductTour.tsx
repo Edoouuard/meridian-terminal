@@ -72,7 +72,7 @@ const ALL_STEPS: TourStep[] = [
     tab: "venues",
     perps: true,
     title: "Trade on Extended",
-    body: "Stocks, indices and crypto perps on Extended. Connect with three wallet signatures (no keys to paste), deposit USDC on extended.exchange, then ask Meridian: it compares funding with Hyperliquid and builds pairs across both venues.",
+    body: "Stocks, indices and crypto perps on Extended. Connect with three wallet signatures (no keys to paste), then ask Meridian: it deposits USDC from Arbitrum when the account is empty, compares funding with Hyperliquid and builds pairs across both venues.",
   },
   {
     target: "tabs",

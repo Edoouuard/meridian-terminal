@@ -7,6 +7,7 @@
 import { HL_MIN_ORDER_USD } from "@/lib/integrations/hyperliquidTrade";
 import { HL_WITHDRAW_FEE_USD } from "@/lib/integrations/hyperliquidExchange";
 import { HL_SPOT_TAKER_FEE, TAKER_FEE } from "@/lib/perpVenues";
+import { EXTENDED_MIN_DEPOSIT_USD } from "@/lib/integrations/extendedBridge";
 
 export interface Capability {
   venue: string;
@@ -40,8 +41,14 @@ export const CAPABILITIES: Capability[] = [
   {
     venue: "Extended",
     operation: "Perp market order (crypto; RWA: stocks, indices, commodities)",
-    requires: "Extended account connected AND funded on mainnet (see EXTENDED ACCOUNT); state unknown = not usable",
-    constraints: `Market minimums vary (read the market). Taker fee ${pct(TAKER_FEE.Extended)} per side. Meridian cannot deposit to Extended: the user deposits on extended.exchange.`,
+    requires: "Extended account connected on mainnet (see EXTENDED ACCOUNT) with free margin, or a Deposit leg to Extended before it; state unknown = not usable",
+    constraints: `Market minimums vary (read the market). Taker fee ${pct(TAKER_FEE.Extended)} per side.`,
+  },
+  {
+    venue: "Extended",
+    operation: "Deposit USDC (side \"Deposit\", protocol \"Extended\", asset \"USDC\", chain \"Arbitrum\")",
+    requires: "Extended account connected on mainnet, native USDC in the wallet on Arbitrum",
+    constraints: `Minimum $${EXTENDED_MIN_DEPOSIT_USD}. Through Extended's bridge (Rhino.fi): a bridge fee shown on the quote before signing, credited in a few minutes. Put it before the Extended legs it funds.`,
   },
   {
     venue: "Spot DeFi",

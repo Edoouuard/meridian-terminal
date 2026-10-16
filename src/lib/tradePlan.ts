@@ -657,7 +657,7 @@ const BETA_NEUTRAL_VENUES = ["Extended", "Lighter", "Ondo"] as const;
 
 /** Honest, factual one-liner per venue — never a fabricated risk score. */
 const BETA_NEUTRAL_VENUE_NOTE: Record<string, string> = {
-  Extended: "Starknet perp venue — connect it in Tools → Extended (three wallet signatures) and deposit USDC on extended.exchange first.",
+  Extended: "Starknet perp venue — connect it in Tools → Extended (three wallet signatures); Meridian deposits USDC from Arbitrum when the account is empty.",
   Lighter: "zk-rollup perp venue, routed through LI.FI — needs the Lighter panel connected and funded.",
   Ondo: "Perp venue routed through LI.FI — needs the Ondo panel connected and funded (a sandbox is available for testing).",
 };
