@@ -4,6 +4,9 @@ import { parseOpenOrders } from "@/lib/integrations/hyperliquid-live";
 import {
   cancelPerpOrder,
   fetchPerpAccount,
+  fetchPerpMarket,
+  hip3AssetId,
+  splitDexCoin,
   fundingAprForSide,
   hyperliquidEnv,
   marginNeededUsd,
@@ -179,5 +182,76 @@ describe("perps: limit orders, cancel, open orders", () => {
     ]);
     expect(sl).toMatchObject({ orderType: "Stop Market", triggerPx: 1800, reduceOnly: true });
     expect(lim).toMatchObject({ orderType: "Limit", triggerPx: 0, limitPx: 1950 });
+  });
+});
+
+describe("HIP-3 markets (stocks, indices, commodities)", () => {
+  const key = "0x0123456789012345678901234567890123456789012345678901234567890123" as const;
+  const metas: Record<string, unknown> = {
+    "": { universe: [{ name: "BTC", szDecimals: 5, maxLeverage: 40 }, { name: "ETH", szDecimals: 4, maxLeverage: 25 }] },
+    usdh: { collateralToken: 360, universe: [{ name: "usdh:TSLA", szDecimals: 3, maxLeverage: 20 }] },
+    xyz: {
+      collateralToken: 0,
+      universe: [
+        { name: "xyz:XYZ100", szDecimals: 4, maxLeverage: 30 },
+        { name: "xyz:TSLA", szDecimals: 3, maxLeverage: 20 },
+        { name: "xyz:SP500", szDecimals: 3, maxLeverage: 50 },
+        { name: "xyz:AMD", szDecimals: 3, maxLeverage: 10, onlyIsolated: true },
+      ],
+    },
+  };
+
+  function mockHip3(state: { abstraction?: string | null; dexAbstraction?: boolean } = {}) {
+    const sent: { type: string; [k: string]: unknown }[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      const body = JSON.parse(init.body);
+      const json = (v: unknown) => ({ ok: true, status: 200, json: async () => v });
+      if (url.endsWith("/exchange")) {
+        sent.push(body.action);
+        return json(body.action.type === "order"
+          ? { status: "ok", response: { type: "order", data: { statuses: [{ filled: { totalSz: "0.265", avgPx: "377" } }] } } }
+          : { status: "ok", response: { type: "default" } });
+      }
+      if (body.type === "perpDexs") return json([null, { name: "usdh" }, { name: "xyz" }]);
+      if (body.type === "meta") return json(metas[body.dex ?? ""]);
+      if (body.type === "allMids") return json(body.dex === "xyz" ? { "xyz:TSLA": "377", "xyz:AMD": "555" } : { ETH: "2000" });
+      if (body.type === "userAbstraction") return json(state.abstraction ?? null);
+      if (body.type === "userDexAbstraction") return json(state.dexAbstraction ?? false);
+      return json(null);
+    }));
+    return sent;
+  }
+
+  it("numbers HIP-3 assets like the SDK: 110000 + (dex slot − 1) × 10000 + index", () => {
+    expect(hip3AssetId(1, 0)).toBe(110000);
+    expect(hip3AssetId(2, 3)).toBe(120003);
+  });
+
+  it("splits an explicit dex market and strips PERP", () => {
+    expect(splitDexCoin("xyz:TSLA PERP")).toEqual({ dex: "xyz", name: "TSLA" });
+    expect(splitDexCoin("ETH-PERP")).toEqual({ name: "ETH" });
+  });
+
+  it("finds a stock on the USDC-collateral dex, skipping a dex funded in another stablecoin", async () => {
+    mockHip3();
+    expect(await fetchPerpMarket(env, "TSLA")).toMatchObject({ coin: "xyz:TSLA", dex: "xyz", asset: 120001, index: 1 });
+    expect(await fetchPerpMarket(env, "S&P 500")).toMatchObject({ coin: "xyz:SP500", asset: 120002 });
+    expect(await fetchPerpMarket(env, "ETH PERP")).toMatchObject({ coin: "ETH", dex: "", asset: 1 });
+    expect(await fetchPerpMarket(env, "usdh:TSLA")).toBeNull();
+  });
+
+  it("links the main balance to HIP-3 once (agent action), sets isolated leverage, then orders at the HIP-3 asset id", async () => {
+    const sent = mockHip3();
+    const out = await perpMarketOrder(env, key, { coin: "AMD", isBuy: true, sizeUsd: 100, leverage: 3, user: wallet.address });
+    expect(out.ok).toBe(true);
+    expect(sent.map((a) => a.type)).toEqual(["agentEnableDexAbstraction", "updateLeverage", "order"]);
+    expect(sent[1]).toEqual({ type: "updateLeverage", asset: 120003, isCross: false, leverage: 3 });
+    expect((sent[2].orders as { a: number }[])[0].a).toBe(120003);
+  });
+
+  it("skips the abstraction step for a unified account", async () => {
+    const sent = mockHip3({ abstraction: "unifiedAccount" });
+    await perpMarketOrder(env, key, { coin: "xyz:TSLA", isBuy: false, sizeUsd: 100, user: "0x00000000000000000000000000000000000000aa" });
+    expect(sent.map((a) => a.type)).toEqual(["order"]);
   });
 });

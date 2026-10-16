@@ -62,6 +62,16 @@ describe("hyperliquidExchange — signatures match the official SDK", () => {
     expect(BigInt(modify.s)).toBe(BigInt("0xfe118072252a49846ab5efa8909a1f82fe4ad1f6c20f9dd85edbfeec7fc9e69"));
   });
 
+  it("signs HIP-3 actions like the SDK: dex abstraction, an order at asset 110001, isolated leverage", async () => {
+    const abs = await l1({ type: "agentEnableDexAbstraction" }, 1700000000123, true);
+    expect(BigInt(abs.r)).toBe(BigInt("0x49d447744c748dc3703acbaa12a5aa8b57b207b80c24e8cb184c86e23c0d55ef"));
+    expect(abs.v).toBe(28);
+    const order = await l1(orderAction([orderWire({ asset: 110001, isBuy: false, px: 358, sz: 0.265, tif: "Ioc" })]), 1700000000123, true);
+    expect(BigInt(order.r)).toBe(BigInt("0xf5310de57aac438b96039166ee2776a672a5eab47d3fc0471e39c3a6043a8bbe"));
+    const lev = await l1(updateLeverageAction(110005, 3, false), 1700000000123, true);
+    expect(BigInt(lev.r)).toBe(BigInt("0x81b8b060e94a5808007aef537f8e5cdb11dbcdd7a360019240d66f0917c3388b"));
+  });
+
   it("reads a resting limit order's id", () => {
     expect(parseExchangeResponse({ status: "ok", response: { type: "order", data: { statuses: [{ resting: { oid: 77 } }] } } })).toEqual({ ok: true, resting: { oid: 77 } });
   });

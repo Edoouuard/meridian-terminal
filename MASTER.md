@@ -211,8 +211,9 @@ Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenis�
 - [x] [moi] Ordres limite (GTC, post-only ALO) depuis l'étape perp ; ordres ouverts (limite, stop-loss, take-profit) listés dans le panneau Hyperliquid avec annulation et déplacement du prix. *Preuve : signatures cancel / batchModify identiques au SDK, tests `hyperliquidTrade` (limite au repos, minimum 10 $, annulation, lecture des triggers).*
 
 **P2 Perps HIP-3 sur Hyperliquid (actions, indices, matières premières)**
-- [ ] [moi] Marchés des dex HIP-3 (`perpDexs`, ex. `xyz:TSLA`, `xyz:NVDA`, `xyz:GOLD`, `xyz:XYZ100`) : identifiant d'actif `110000 + i × 10000 + index`, prix et funding par dex, collatéral du dex. *Preuve : vecteur de signature SDK + test des identifiants.*
-- [ ] [moi] Le planner les propose (« short Tesla », « long or ») et le bouton perp les exécute, marge du dex incluse.
+- [x] [moi] Marchés des dex HIP-3 collatéralisés en USDC (`xyz` : 115 marchés — S&P 500, XYZ100, Nvidia, Tesla, or, pétrole… ; `para`, `io`) : identifiant d'actif `110000 + (slot − 1) × 10000 + index`, prix et funding par dex, levier isolé quand le marché l'impose, alias (SPX, NASDAQ, OIL, BRENT, XAU). Dex en USDH / USDe / USDT0 ignorés. *Preuve : vecteurs SDK (ordre à l'actif 110001, levier isolé, `agentEnableDexAbstraction`), tests de résolution et d'identifiants.*
+- [x] [moi] Le planner reçoit les 40 marchés HIP-3 les plus échangés (prix, funding, levier max) et les propose (« short Tesla », « long or ») ; le bouton perp les exécute depuis le solde USDC principal (abstraction de dex activée une fois par la clé de trading, rien à faire pour un compte unifié) ; positions et ordres HIP-3 visibles dans le panneau Hyperliquid. *Preuve : tests `hyperliquidTrade` HIP-3, liste en direct vérifiée sur mainnet.*
+- [ ] [toi] Ouvrir puis fermer un short `xyz:TSLA` de 10-15 $ (marge isolée 1-2x). *Preuve : fill affiché + position visible dans le panneau.*
 
 **P3 Plus de protocoles exécutables**
 - [ ] [moi] Vaults ERC-4626 vérifiés on-chain : Euler v2, Morpho (coffres supplémentaires), Yearn v3, Silo v2 — une ligne par vault dans `vaults.ts`, dépôt prouvé sur fork.
@@ -390,6 +391,7 @@ Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenis�
 
 | Date | Fait | Preuve |
 |---|---|---|
+| 2026-10-16 | Perps HIP-3 (actions, indices, matières premières) : résolution des marchés, identifiants d'actif, levier isolé, abstraction de dex, liste live dans le planner, positions et ordres dans le panneau | tests `hyperliquidExchange` (vecteurs SDK), `hyperliquidTrade` (HIP-3) |
 | 2026-10-16 | Ordres limite Hyperliquid (GTC / post-only), annulation et déplacement des ordres ouverts, stop-loss / take-profit visibles dans le panneau | tests `hyperliquidExchange` (vecteurs SDK cancel, batchModify), `hyperliquidTrade` |
 | 2026-10-15 | Perps Hyperliquid : marge et funding avant signature, attente du dépôt, transfert spot → perps, stop-loss / take-profit (ordres trigger) après le fill, fermeture depuis l'étape ; retrait Hyperliquid pour comptes unifiés (PR #38) | tests `hyperliquidExchange` (vecteur SDK trigger), `hyperliquidTrade`, `hedgesSpot` |
 | 2026-10-15 | Retrait Hyperliquid → Arbitrum (withdraw3 signé par le wallet, vecteurs SDK) inséré automatiquement quand une stratégie hors perps a besoin des USDC du compte Hyperliquid ; bridge et dépôt suivants attendent l'arrivée | tests `hyperliquidExchange`, `budgetFit`, `fundingPlanner` |

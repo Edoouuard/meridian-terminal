@@ -140,9 +140,10 @@ export function useHyperliquid(): UseHyperliquidResult {
           reduceOnly: p.reduceOnly,
           stopLossPct: p.stopLossPct,
           takeProfitPct: p.takeProfitPct,
+          user: address,
         }),
       ),
-    [run],
+    [run, address],
   );
 
   const sellSpot = useCallback<UseHyperliquidResult["sellSpot"]>(
@@ -154,10 +155,10 @@ export function useHyperliquid(): UseHyperliquidResult {
     (p) =>
       run(
         p.testnet,
-        (env, key) => perpLimitOrder(env, key, { coin: p.symbol, isBuy: p.isBuy, px: p.px, sizeUsd: p.sizeUsd, leverage: p.leverage, postOnly: p.postOnly }),
+        (env, key) => perpLimitOrder(env, key, { coin: p.symbol, isBuy: p.isBuy, px: p.px, sizeUsd: p.sizeUsd, leverage: p.leverage, postOnly: p.postOnly, user: address }),
         false,
       ),
-    [run],
+    [run, address],
   );
 
   const cancelOrder = useCallback<UseHyperliquidResult["cancelOrder"]>(

@@ -10,7 +10,9 @@ import { setSharedHlEnv, useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
 import {
   fetchClearinghouseState,
   fetchOpenOrders,
+  HIP3_MAIN_DEX,
   hyperliquidEnv,
+  type HlAccount,
   type HlOpenOrder,
 } from "@/lib/integrations/hyperliquid-live";
 
@@ -29,6 +31,8 @@ export function HyperliquidPanel() {
   const env = useSharedHlEnv();
   const account = useSharedHlAccount();
   const [orders, setOrders] = useState<HlOpenOrder[]>([]);
+  // Stock / commodity positions live on the HIP-3 dex, outside the main account the portfolio reads.
+  const [hip3Positions, setHip3Positions] = useState<HlAccount["positions"]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -43,13 +47,16 @@ export function HyperliquidPanel() {
     setError(null);
     try {
       const e = hyperliquidEnv(env === "testnet");
-      const [acc, ord] = await Promise.all([
+      const [acc, ord, hip3Acc, hip3Ord] = await Promise.all([
         fetchClearinghouseState(address, e),
         fetchOpenOrders(address, e),
+        fetchClearinghouseState(address, e, HIP3_MAIN_DEX).catch(() => null),
+        fetchOpenOrders(address, e, HIP3_MAIN_DEX).catch(() => [] as HlOpenOrder[]),
       ]);
       // Push into the shared store so the portfolio and this panel agree.
       setSharedHlAccount(acc);
-      setOrders(ord);
+      setHip3Positions(hip3Acc?.positions ?? []);
+      setOrders([...ord, ...hip3Ord]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -133,13 +140,13 @@ export function HyperliquidPanel() {
             <span style={{ fontVariantNumeric: "tabular-nums" }}>{fmtUsd(account.totalMarginUsed)}</span>
           </div>
 
-          {account.positions.length === 0 && (
+          {account.positions.length === 0 && hip3Positions.length === 0 && (
             <p style={{ fontSize: 11, margin: "4px 0 0" }} className="text-muted">
               No open positions on {env === "testnet" ? "Hyperliquid testnet" : "Hyperliquid"}.
             </p>
           )}
 
-          {account.positions.map((p) => {
+          {[...account.positions, ...hip3Positions].map((p) => {
             const ok = p.unrealizedPnl >= 0;
             return (
               <div

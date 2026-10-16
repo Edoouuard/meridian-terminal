@@ -57,18 +57,92 @@ async function postExchange(env: HyperliquidEnv, payload: object): Promise<unkno
 /* ─── Markets ────────────────────────────────────────────────────────── */
 
 export interface PerpMarket {
+  /** Order asset id: the universe index on the main dex, 110000 + dex slot × 10000 + index on a HIP-3 dex. */
   asset: number;
   szDecimals: number;
   maxLeverage: number;
+  /** Market name as Hyperliquid lists it ("ETH", "xyz:TSLA"). */
+  coin: string;
+  /** "" for the main perp dex, else the HIP-3 dex name ("xyz"). */
+  dex: string;
+  /** Index in the dex's own universe (where its asset contexts sit). */
+  index: number;
+  /** Isolated margin only (many HIP-3 stock markets). */
+  onlyIsolated: boolean;
 }
 
+type RawPerpMeta = { universe?: { name: string; szDecimals: number; maxLeverage: number; onlyIsolated?: boolean; isDelisted?: boolean }[]; collateralToken?: number };
+
+/** Builder-deployed (HIP-3) perp dexes: the n-th one after the main dex starts at asset 110000 + (n − 1) × 10000. */
+export function hip3AssetId(dexSlot: number, index: number): number {
+  return 110000 + (dexSlot - 1) * 10000 + index;
+}
+
+/** "xyz:TSLA PERP" → { dex: "xyz", name: "TSLA" }; "ETH PERP" → { dex: undefined, name: "ETH" }. */
+export function splitDexCoin(coin: string): { dex?: string; name: string } {
+  const clean = coin.trim().replace(/[-\s]?PERP(ETUAL)?$/i, "").trim();
+  const i = clean.indexOf(":");
+  return i > 0 ? { dex: clean.slice(0, i).toLowerCase(), name: clean.slice(i + 1).toUpperCase() } : { name: clean.toUpperCase() };
+}
+
+/** Common names for HIP-3 stock, index and commodity markets. */
+const HIP3_ALIASES: Record<string, string> = {
+  SPX: "SP500", "S&P500": "SP500", "S&P 500": "SP500", SPY: "SP500",
+  NASDAQ: "XYZ100", NDX: "XYZ100", QQQ: "XYZ100",
+  OIL: "CL", WTI: "CL", CRUDE: "CL", BRENT: "BRENTOIL",
+  XAU: "GOLD", XAG: "SILVER", GOOG: "GOOGL",
+};
+
+const perpDexCache = new Map<string, { at: number; names: (string | null)[] }>();
+
+/** Perp dex names in Hyperliquid's order (slot 0 is the main dex), cached 5 minutes. */
+export async function fetchPerpDexNames(env: HyperliquidEnv): Promise<(string | null)[]> {
+  const hit = perpDexCache.get(env.infoUrl);
+  if (hit && Date.now() - hit.at < 300_000) return hit.names;
+  const raw = await infoPost<({ name: string } | null)[]>(env, { type: "perpDexs" }).catch(() => [null]);
+  const names = (raw ?? [null]).map((d) => (d ? d.name : null));
+  perpDexCache.set(env.infoUrl, { at: Date.now(), names });
+  return names;
+}
+
+function marketFrom(meta: RawPerpMeta, wanted: string, dex: string, dexSlot: number): PerpMarket | null {
+  const index = (meta.universe ?? []).findIndex((u) => u.name.toUpperCase() === wanted.toUpperCase() && !u.isDelisted);
+  if (index < 0) return null;
+  const u = meta.universe![index];
+  return {
+    asset: dex ? hip3AssetId(dexSlot, index) : index,
+    szDecimals: u.szDecimals,
+    maxLeverage: u.maxLeverage,
+    coin: u.name,
+    dex,
+    index,
+    onlyIsolated: !!u.onlyIsolated,
+  };
+}
+
+/**
+ * Resolve a perp market: the main dex first, then HIP-3 dexes collateralised
+ * in USDC (stocks, indices, commodities: "TSLA", "SP500", "GOLD" or an
+ * explicit "xyz:TSLA"). Dexes with another collateral (USDH, USDE, USDT0) are
+ * skipped: Meridian funds perps with USDC.
+ */
 export async function fetchPerpMarket(env: HyperliquidEnv, coin: string): Promise<PerpMarket | null> {
-  const meta = await infoPost<{ universe?: { name: string; szDecimals: number; maxLeverage: number }[] }>(env, { type: "meta" });
-  const name = coin.toUpperCase().replace(/[-\s]?PERP$/, "");
-  const asset = (meta.universe ?? []).findIndex((u) => u.name.toUpperCase() === name);
-  if (asset < 0) return null;
-  const u = meta.universe![asset];
-  return { asset, szDecimals: u.szDecimals, maxLeverage: u.maxLeverage };
+  const { dex, name } = splitDexCoin(coin);
+  if (!dex) {
+    const main = marketFrom(await infoPost<RawPerpMeta>(env, { type: "meta" }), name, "", 0);
+    if (main) return main;
+  }
+  const names = await fetchPerpDexNames(env);
+  const target = HIP3_ALIASES[name] ?? name;
+  for (let slot = 1; slot < names.length; slot++) {
+    const d = names[slot];
+    if (!d || (dex && d !== dex)) continue;
+    const meta = await infoPost<RawPerpMeta>(env, { type: "meta", dex: d }).catch(() => null);
+    if (!meta || (meta.collateralToken ?? 0) !== 0) continue;
+    const m = marketFrom(meta, `${d}:${target}`, d, slot);
+    if (m) return m;
+  }
+  return null;
 }
 
 export interface SpotMarket {
@@ -107,8 +181,8 @@ export async function fetchSpotMarket(env: HyperliquidEnv, base: string): Promis
   return spotMarketFrom(await infoPost<SpotMetaRaw>(env, { type: "spotMeta" }), base);
 }
 
-export async function fetchMid(env: HyperliquidEnv, coin: string): Promise<number | null> {
-  const mids = await infoPost<Record<string, string>>(env, { type: "allMids" });
+export async function fetchMid(env: HyperliquidEnv, coin: string, dex = ""): Promise<number | null> {
+  const mids = await infoPost<Record<string, string>>(env, dex ? { type: "allMids", dex } : { type: "allMids" });
   const v = Number(mids[coin]);
   return Number.isFinite(v) && v > 0 ? v : null;
 }
@@ -224,19 +298,63 @@ export interface MarketOrderResult extends ExchangeOutcome {
   protection?: { ok: boolean; error?: string; sl?: number; tp?: number };
 }
 
+/** Set leverage, cross unless the market is isolated-only. */
+async function setLeverage(env: HyperliquidEnv, agentKey: Hex, market: PerpMarket, leverage: number): Promise<ExchangeOutcome> {
+  const lev = Math.min(Math.max(1, Math.round(leverage)), market.maxLeverage);
+  return sendL1(env, agentKey, updateLeverageAction(market.asset, lev, !market.onlyIsolated));
+}
+
+const dexAbstractionReady = new Set<string>();
+
+/**
+ * HIP-3 markets keep their own margin. Dex abstraction lets them draw on the
+ * account's main USDC balance, so a stock perp trades from the same money as
+ * ETH. Unified accounts already share it; otherwise the trading key turns it
+ * on once (an agent action: no wallet popup).
+ */
+export async function ensureDexAbstraction(env: HyperliquidEnv, agentKey: Hex, user: Address): Promise<ExchangeOutcome> {
+  const id = `${env.infoUrl}:${user.toLowerCase()}`;
+  if (dexAbstractionReady.has(id)) return { ok: true };
+  const [abstraction, enabled] = await Promise.all([
+    infoPost<unknown>(env, { type: "userAbstraction", user }).catch(() => null),
+    infoPost<unknown>(env, { type: "userDexAbstraction", user }).catch(() => null),
+  ]);
+  if (isUnifiedAbstraction(abstraction) || enabled === true) {
+    dexAbstractionReady.add(id);
+    return { ok: true };
+  }
+  const out = await sendL1(env, agentKey, { type: "agentEnableDexAbstraction" });
+  if (out.ok) dexAbstractionReady.add(id);
+  return out.ok ? out : { ok: false, error: `Couldn't link your Hyperliquid balance to stock and commodity markets: ${out.error}` };
+}
+
 /** Perp market order (IOC through the mid), with the leverage set first when asked. */
 export async function perpMarketOrder(
   env: HyperliquidEnv,
   agentKey: Hex,
-  o: { coin: string; isBuy: boolean; sizeUsd?: number; coinQty?: number; leverage?: number; reduceOnly?: boolean; stopLossPct?: number; takeProfitPct?: number },
+  o: {
+    coin: string;
+    isBuy: boolean;
+    sizeUsd?: number;
+    coinQty?: number;
+    leverage?: number;
+    reduceOnly?: boolean;
+    stopLossPct?: number;
+    takeProfitPct?: number;
+    /** The account trading: needed to prepare a HIP-3 market's margin. */
+    user?: Address;
+  },
 ): Promise<MarketOrderResult> {
   const market = await fetchPerpMarket(env, o.coin);
   if (!market) return { ok: false, error: `${o.coin} isn't listed on Hyperliquid.` };
-  const mid = await fetchMid(env, o.coin.toUpperCase().replace(/[-\s]?PERP$/, ""));
+  const mid = await fetchMid(env, market.coin, market.dex);
   if (!mid) return { ok: false, error: `No live price for ${o.coin} on Hyperliquid.` };
-  if (o.leverage && !o.reduceOnly) {
-    const lev = Math.min(Math.max(1, Math.round(o.leverage)), market.maxLeverage);
-    const set = await sendL1(env, agentKey, updateLeverageAction(market.asset, lev));
+  if (market.dex && o.user) {
+    const ready = await ensureDexAbstraction(env, agentKey, o.user);
+    if (!ready.ok) return { ...ready, mid };
+  }
+  if (!o.reduceOnly && (o.leverage || market.onlyIsolated)) {
+    const set = await setLeverage(env, agentKey, market, o.leverage ?? 1);
     if (!set.ok) return { ...set, mid };
   }
   const size = roundSize(o.coinQty && o.coinQty > 0 ? o.coinQty : (o.sizeUsd ?? 0) / mid, market.szDecimals);
@@ -257,14 +375,17 @@ export async function perpMarketOrder(
 export async function perpLimitOrder(
   env: HyperliquidEnv,
   agentKey: Hex,
-  o: { coin: string; isBuy: boolean; px: number; sizeUsd?: number; coinQty?: number; leverage?: number; reduceOnly?: boolean; postOnly?: boolean },
+  o: { coin: string; isBuy: boolean; px: number; sizeUsd?: number; coinQty?: number; leverage?: number; reduceOnly?: boolean; postOnly?: boolean; user?: Address },
 ): Promise<MarketOrderResult> {
   const market = await fetchPerpMarket(env, o.coin);
   if (!market) return { ok: false, error: `${o.coin} isn't listed on Hyperliquid.` };
   if (!(o.px > 0)) return { ok: false, error: "Set a limit price." };
-  if (o.leverage && !o.reduceOnly) {
-    const lev = Math.min(Math.max(1, Math.round(o.leverage)), market.maxLeverage);
-    const set = await sendL1(env, agentKey, updateLeverageAction(market.asset, lev));
+  if (market.dex && o.user) {
+    const ready = await ensureDexAbstraction(env, agentKey, o.user);
+    if (!ready.ok) return ready;
+  }
+  if (!o.reduceOnly && (o.leverage || market.onlyIsolated)) {
+    const set = await setLeverage(env, agentKey, market, o.leverage ?? 1);
     if (!set.ok) return set;
   }
   const px = roundPrice(o.px, market.szDecimals, false);
@@ -313,24 +434,22 @@ export async function spotMarketSell(env: HyperliquidEnv, agentKey: Hex, o: { us
 /* ─── Perp context, margin and protection ────────────────────────────── */
 
 export interface PerpContext extends PerpMarket {
-  coin: string;
   mark: number;
   /** Hourly funding rate (positive: longs pay shorts). */
   fundingHourly: number;
 }
 
-/** A perp's market, mark price and funding, in one read. */
+/** A perp's market, mark price and funding, in one read (main dex or HIP-3). */
 export async function fetchPerpContext(env: HyperliquidEnv, coin: string): Promise<PerpContext | null> {
-  const [meta, ctxs] = await infoPost<[{ universe?: { name: string; szDecimals: number; maxLeverage: number }[] }, { markPx?: string; midPx?: string | null; funding?: string }[]]>(env, {
-    type: "metaAndAssetCtxs",
-  });
-  const name = coin.toUpperCase().replace(/[-\s]?PERP$/, "").trim();
-  const asset = (meta.universe ?? []).findIndex((u) => u.name.toUpperCase() === name);
-  if (asset < 0) return null;
-  const u = meta.universe![asset];
-  const c = ctxs[asset] ?? {};
+  const market = await fetchPerpMarket(env, coin);
+  if (!market) return null;
+  const [, ctxs] = await infoPost<[unknown, { markPx?: string; midPx?: string | null; funding?: string }[]]>(
+    env,
+    market.dex ? { type: "metaAndAssetCtxs", dex: market.dex } : { type: "metaAndAssetCtxs" },
+  );
+  const c = ctxs?.[market.index] ?? {};
   const mark = Number(c.midPx ?? c.markPx);
-  return { asset, coin: u.name, szDecimals: u.szDecimals, maxLeverage: u.maxLeverage, mark: Number.isFinite(mark) ? mark : 0, fundingHourly: Number(c.funding ?? 0) || 0 };
+  return { ...market, mark: Number.isFinite(mark) ? mark : 0, fundingHourly: Number(c.funding ?? 0) || 0 };
 }
 
 /** Funding an open position earns (+) or pays (−) per year, in % of notional. */
@@ -350,16 +469,23 @@ export interface PerpAccount {
 }
 
 export async function fetchPerpAccount(env: HyperliquidEnv, user: Address, coin: string): Promise<PerpAccount> {
-  const [ch, spotUsdc, abstraction] = await Promise.all([
-    infoPost<{ withdrawable?: string; assetPositions?: { position?: { coin?: string; szi?: string } }[] }>(env, { type: "clearinghouseState", user }),
+  const market = await fetchPerpMarket(env, coin).catch(() => null);
+  const dex = market?.dex ?? "";
+  type Ch = { withdrawable?: string; assetPositions?: { position?: { coin?: string; szi?: string } }[] };
+  const [ch, dexCh, spotUsdc, abstraction] = await Promise.all([
+    infoPost<Ch>(env, { type: "clearinghouseState", user }),
+    dex ? infoPost<Ch>(env, { type: "clearinghouseState", user, dex }).catch(() => ({}) as Ch) : Promise.resolve(null),
     fetchSpotBalance(env, user, "USDC"),
     infoPost<unknown>(env, { type: "userAbstraction", user }).catch(() => null),
   ]);
   const unified = isUnifiedAbstraction(abstraction);
   const perps = Math.max(0, Number(ch.withdrawable ?? 0));
-  const name = coin.toUpperCase().replace(/[-\s]?PERP$/, "").trim();
-  const pos = (ch.assetPositions ?? []).find((p) => p.position?.coin?.toUpperCase() === name);
-  return { freeMargin: unified ? Math.max(perps, spotUsdc) : perps, spotUsdc, unified, position: Number(pos?.position?.szi ?? 0) || 0 };
+  const main = unified ? Math.max(perps, spotUsdc) : perps;
+  // A HIP-3 market draws on the main balance (dex abstraction) plus what already sits on its dex.
+  const freeMargin = dexCh ? main + Math.max(0, Number(dexCh.withdrawable ?? 0)) : main;
+  const name = (market?.coin ?? splitDexCoin(coin).name).toUpperCase();
+  const pos = ((dexCh ?? ch).assetPositions ?? []).find((p) => p.position?.coin?.toUpperCase() === name);
+  return { freeMargin, spotUsdc, unified, position: Number(pos?.position?.szi ?? 0) || 0 };
 }
 
 /** Margin an order needs: notional / leverage, plus 2% for the fill's slippage and fees. */
