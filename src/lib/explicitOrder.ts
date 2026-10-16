@@ -41,12 +41,18 @@ const NAMED: Record<string, string> = {
 };
 
 /** Words that follow "short"/"long" without naming a market ("short term", "long position"). */
-const NOT_A_MARKET = new Set(["TERM", "POSITION", "POSITIONS", "SUR", "ON", "THE", "A", "UN", "UNE", "MY", "MES", "MA", "MON", "DE", "DU", "LE", "LA", "AND", "ET", "WITH", "AVEC", "AT", "X", "LEVIER", "LEVERAGE"]);
+const NOT_A_MARKET = new Set([
+  "TERM", "POSITION", "POSITIONS", "SUR", "ON", "THE", "A", "UN", "UNE", "MY", "MES", "MA", "MON", "DE", "DU", "LE", "LA", "AND", "ET", "WITH", "AVEC", "AT", "X", "LEVIER", "LEVERAGE",
+  // Venues are where an order goes, never what it trades ("long on Hyperliquid").
+  "HYPERLIQUID", "HL", "EXTENDED", "X10", "SIDE", "LEG", "JAMBE",
+]);
 
 const num = (s: string | undefined) => (s ? Number(s.replace(",", ".")) : undefined);
 
 export function parseExplicitPerpOrder(thesis: string): ExplicitPerpOrder | null {
   const text = thesis.trim();
+  // A long and a short in one request is a two-leg position (lib/planner/pair.ts), not one order.
+  if (/\blong\b/i.test(text) && /\bshort\b/i.test(text)) return null;
   const m = text.match(/\b(short|long|shorter|longer|vendre à découvert)\s+(?:(?:du|de|le|la|l'|on|sur|un|une)\s+)?([a-zA-Z&]{2,12}\d{0,3}(?::[A-Za-z0-9]+)?)\b/i);
   if (!m) return null;
   const side = /^short/i.test(m[1]) || /découvert/i.test(m[1]) ? "Short" : "Long";

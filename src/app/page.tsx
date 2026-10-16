@@ -29,7 +29,7 @@ import { ACTIVE_CHAIN_IDS, CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
 import { FEATURES } from "@/lib/features";
 import { deployableUsd } from "@/lib/budgetFit";
 import { routeThesis, type TradePlan } from "@/lib/routeThesis";
-import { routeThesisAsync, type PortfolioContext } from "@/lib/intentEngine";
+import { routeThesisAsync, threadHistory, type PortfolioContext } from "@/lib/intentEngine";
 import { useExtendedAccount } from "@/hooks/useExtendedAccount";
 import { fetchExtendedBalance } from "@/lib/integrations/extended-live";
 import type { Signer as ExtendedSigner } from "@blackcube/extended-sdk";
@@ -226,7 +226,12 @@ export default function TerminalApp() {
       : undefined;
 
     try {
-      const routed = await fundThreadItem(await routeThesisAsync(trimmed, portfolioSnapshot, { clarified: !!answering, answeredQuestion: answering?.clarify?.question }));
+      const routed = await fundThreadItem(await routeThesisAsync(trimmed, portfolioSnapshot, {
+            clarified: !!answering,
+            answeredQuestion: answering?.clarify?.question,
+            // The question being answered is already in the request: the turns before it give the context.
+            history: threadHistory(answering ? thread.slice(0, -1) : thread),
+          }));
       setThread((cur) => cur.concat([routed]));
     } catch {
       setThread((cur) => cur.concat([{ ...routeThesis(trimmed), notice: "Something went wrong building your plan. Below is a basic plan from local rules, without live rates; ask again in a moment." }]));

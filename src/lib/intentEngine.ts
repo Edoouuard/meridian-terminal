@@ -254,7 +254,26 @@ export interface PortfolioContext {
  * Falls back to the sync regex parser on any error (network, API key missing,
  * malformed response, etc.) — the app never breaks.
  */
-export async function routeThesisAsync(rawText: string, portfolio?: PortfolioContext, opts: { clarified?: boolean; answeredQuestion?: string } = {}): Promise<ThreadItem> {
+/**
+ * The last few exchanges, as the planner reads them: what the user asked and
+ * what Meridian answered (the question asked, or the plan shown and its legs).
+ */
+export function threadHistory(items: ThreadItem[], max = 4): { request: string; answer?: string }[] {
+  return items
+    .filter((it) => typeof it.text === "string" && it.text.trim())
+    .slice(-max)
+    .map((it) => {
+      const legs = it.plan?.legs?.map((l) => `${l.side} ${l.asset} on ${l.protocol}${l.leverage ? ` ${l.leverage}x` : ""}${l.sizeUsd ? ` $${Math.round(l.sizeUsd)}` : ""}`).join("; ");
+      const answer = it.clarify ? `Asked: ${it.clarify.question}` : legs ? `Proposed: ${legs}` : undefined;
+      return { request: it.text!.trim(), answer };
+    });
+}
+
+export async function routeThesisAsync(
+  rawText: string,
+  portfolio?: PortfolioContext,
+  opts: { clarified?: boolean; answeredQuestion?: string; history?: { request: string; answer?: string }[] } = {},
+): Promise<ThreadItem> {
   const text = (rawText ?? "").trim();
   if (!text) return routeThesis(text);
 
@@ -264,7 +283,7 @@ export async function routeThesisAsync(rawText: string, portfolio?: PortfolioCon
       // Past the server budget (route maxDuration 190s): fall back to local rules.
       signal: AbortSignal.timeout(185_000),
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ thesis: text, portfolio, clarified: opts.clarified === true, answeredQuestion: opts.answeredQuestion }),
+      body: JSON.stringify({ thesis: text, portfolio, clarified: opts.clarified === true, answeredQuestion: opts.answeredQuestion, history: opts.history }),
     });
 
     if (!res.ok) {

@@ -1,0 +1,89 @@
+import { describe, expect, it } from "vitest";
+import { buildPairStrategy, mentionedBases, pairAssetQuestion, parsePairRequest } from "./pair";
+import { effectiveRequest } from "./conversation";
+import { enforceConformance } from "./schema";
+import { capitalShare, sizeQuestion } from "./sizing";
+import { extendedQuote, hlQuote, type MarketSnapshot } from "./markets";
+import { parseExplicitPerpOrder } from "@/lib/explicitOrder";
+import { validateAndFixStrategy } from "@/lib/strategyIntegrity";
+
+const NOW = Date.parse("2026-10-16T20:30:00Z");
+// Live values from the owner's test (2026-10-16): SPCX funding +9.6%/yr on Hyperliquid, +14.9%/yr on Extended.
+const markets: MarketSnapshot = {
+  fetchedAt: new Date(NOW - 20_000).toISOString(),
+  quotes: [
+    hlQuote({ market: "xyz:SPCX", base: "SPCX", markUsd: 145.965, fundingHourly: 0.096 / 8760, szDecimals: 2, maxLeverage: 20, dayVolumeUsd: 3e7 }),
+    extendedQuote({ market: "SPCX-USD", base: "SPCX", markUsd: 145.965, fundingHourly: 0.149 / 8760, sizeStep: 0.01, minQty: 0.1, maxLeverage: 20, dayVolumeUsd: 1e6 }),
+    hlQuote({ market: "ETH", base: "ETH", markUsd: 3000, fundingHourly: 0.0000125, szDecimals: 4, maxLeverage: 25, dayVolumeUsd: 1e9 }),
+    extendedQuote({ market: "ETH-USD", base: "ETH", markUsd: 3001, fundingHourly: 0.00001, sizeStep: 0.001, minQty: 0.01, maxLeverage: 50, dayVolumeUsd: 5e8 }),
+    hlQuote({ market: "HYPE", base: "HYPE", markUsd: 40, fundingHourly: 0.00001, szDecimals: 2, maxLeverage: 10, dayVolumeUsd: 2e8 }),
+  ],
+};
+
+describe("the owner's SPCX conversation (2026-10-16)", () => {
+  const first = "beta neutral en SPCX leverage 10";
+  const followUp = "Why not open a long on Hyperliquid and a short on Extended?";
+
+  it("never reads a venue as the asset of an order", () => {
+    expect(parseExplicitPerpOrder(followUp)).toBeNull();
+    expect(parseExplicitPerpOrder("open a long on Hyperliquid")).toBeNull();
+    expect(parseExplicitPerpOrder("long SPCX on Hyperliquid 10x")?.asset).toBe("SPCX");
+    expect(mentionedBases(followUp, markets)).toEqual([]);
+  });
+
+  it("applies the follow-up to the SPCX request, also once the capital question is answered", () => {
+    const history = [{ request: first, answer: "Proposed: Short SPCX-USD PERP on Extended 10x; Long xyz:SPCX PERP on Hyperliquid 10x" }];
+    expect(effectiveRequest(followUp, history, markets)).toBe(`${first} — ${followUp}`);
+    const answered = `${followUp} — 100% of my available capital`;
+    const request = effectiveRequest(answered, history, markets);
+    expect(request).toBe(`${first} — ${answered}`);
+    expect(capitalShare(request)).toBe(1);
+    expect(parsePairRequest(request, markets)).toEqual({ base: "SPCX", leverage: 10 });
+  });
+
+  it("keeps a new request on its own", () => {
+    expect(effectiveRequest("best stablecoin yield on Base", [{ request: first }], markets)).toBe("best stablecoin yield on Base");
+    expect(effectiveRequest("short ETH 2x", [{ request: first }], markets)).toBe("short ETH 2x");
+  });
+
+  it("builds the first request itself (no venue named, Extended connected) and asks the capital share first", () => {
+    expect(parsePairRequest(first, markets, { extendedConnected: true })).toEqual({ base: "SPCX", leverage: 10 });
+    expect(parsePairRequest(first, markets, { extendedConnected: false })).toBeNull();
+    expect(sizeQuestion({ thesis: first, hyperliquidFreeUsd: 21.79, extendedFreeUsd: 21.35 })?.clarify.question).toMatch(/capital disponible/);
+  });
+
+  it("two legs: long SPCX on Hyperliquid (lower funding), short on Extended (higher), 10x, ~$197 each at 100%", () => {
+    const pair = buildPairStrategy({ base: "SPCX", leverage: 10 }, markets)!;
+    expect(pair.legs.map((l) => `${l.side} ${l.asset} ${l.protocol} ${l.leverage}x`)).toEqual(["Long xyz:SPCX PERP Hyperliquid 10x", "Short SPCX-USD PERP Extended 10x"]);
+    const fixed = validateAndFixStrategy(pair, { assets: [{ symbol: "USDC", venue: "Wallet", chain: "Base", usd: 10 }] });
+    expect(fixed.legs).toHaveLength(2);
+    const out = enforceConformance([fixed], "farming", {
+      order: null,
+      namedVenues: ["Hyperliquid", "Extended"],
+      extended: { connected: true, network: "mainnet", availableUsd: 21.35 },
+      markets,
+      balances: { hyperliquidFreeUsd: 21.79, extendedFreeUsd: 21.35, walletDeployableUsd: 10 },
+      sizeShare: 1,
+      now: NOW,
+    }).strategies[0];
+    expect(out.kind).toBe("requested");
+    expect(out.status).toBe("executable");
+    expect(out.legs).toHaveLength(2);
+    expect(out.economics?.legs?.map((l) => l.baseQuantity)).toEqual([1.35, 1.35]);
+    expect(out.economics?.annualizedGrossCarryUsd).toBeGreaterThan(0);
+  });
+
+  it("caps the leverage to what both markets allow", () => {
+    const pair = buildPairStrategy({ base: "SPCX", leverage: 40 }, markets)!;
+    expect(pair.legs.every((l) => l.leverage === 20)).toBe(true);
+    expect(pair.summary).toMatch(/40x asked; 20x/);
+  });
+
+  it("asks which asset when a two-venue neutral request names none, among assets listed on both", () => {
+    const req = parsePairRequest("beta neutral entre Hyperliquid et Extended", markets);
+    expect(req).toEqual({ base: undefined, leverage: undefined });
+    const q = pairAssetQuestion(markets, true)!;
+    expect(q.question).toMatch(/quel actif/);
+    expect(q.options.map((o) => o.split(" ")[0])).toEqual(["SPCX", "ETH"]);
+  });
+});

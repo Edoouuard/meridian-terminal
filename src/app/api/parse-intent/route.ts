@@ -12,7 +12,10 @@ import { enforceConformance, namedVenues, type Objective } from "@/lib/planner/s
 import type { VenueBalances } from "@/lib/planner/economics";
 import type { MarketSnapshot } from "@/lib/planner/markets";
 import { completionText } from "@/lib/planner/completion";
-import { capitalShare, sizeQuestion } from "@/lib/planner/sizing";
+import { capitalShare, looksFrench, sizeQuestion } from "@/lib/planner/sizing";
+import { buildPairStrategy, mentionedBases, pairAssetQuestion, parsePairRequest } from "@/lib/planner/pair";
+import { cleanHistory, conversationSection, effectiveRequest } from "@/lib/planner/conversation";
+import { marketBase } from "@/lib/perpVenues";
 import { parseAmount } from "@/lib/tradePlan";
 import { EXPLAIN_SYSTEM, explainPayload, mergeExplanations, type Explanation } from "@/lib/planner/explain";
 import { hyperliquidMarginUsd, validateAndFixStrategy } from "@/lib/strategyIntegrity";
@@ -475,7 +478,7 @@ const EXPLAIN_TIMEOUT_MS = 25_000;
 
 export async function POST(req: NextRequest) {
   try {
-    const { thesis, portfolio, clarified, answeredQuestion } = await req.json();
+    const { thesis, portfolio, clarified, answeredQuestion, history: rawHistory } = await req.json();
     if (!thesis || typeof thesis !== "string" || thesis.trim().length === 0) {
       return NextResponse.json({ error: "thesis is required" }, { status: 400 });
     }
@@ -491,18 +494,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // A perp plan with no size: ask how much of the free capital to use before building anything.
-    const snap = portfolio as PortfolioSnapshot | undefined;
-    const asked = snap
-      ? sizeQuestion({
-          thesis,
-          clarified: !!clarified,
-          hyperliquidFreeUsd: snap.hyperliquid ? snap.hyperliquid.freeMarginUsd : null,
-          extendedFreeUsd: snap.extended?.connected ? (snap.extended.availableUsd ?? null) : null,
-        })
-      : null;
-    if (asked && FEATURES.perps) return NextResponse.json({ decision: "clarify", understanding: asked.understanding, clarify: asked.clarify, strategies: [] });
-
     const model = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
     const explainModel = process.env.OPENROUTER_EXPLAIN_MODEL || model;
 
@@ -512,13 +503,41 @@ export async function POST(req: NextRequest) {
     const baseUrl = `${proto}://${host}`;
     const yieldContext = await fetchYieldContext(baseUrl, req.headers.get("cookie"));
     const portfolioContext = formatPortfolioContext(portfolio as PortfolioSnapshot | undefined);
+    const snapshot = portfolio as PortfolioSnapshot | undefined;
+
+    // A follow-up ("why not long Hyperliquid and short Extended?") applies to the last request that named an asset:
+    // the server's checks read both together, and the model sees the conversation.
+    const history = cleanHistory(rawHistory);
+    const request = effectiveRequest(thesis.trim(), history, yieldContext.markets);
+    const answered = typeof answeredQuestion === "string" ? answeredQuestion : undefined;
+    const french = looksFrench(request);
+
+    // Questions the server asks itself, before any plan: which asset for a two-venue neutral position, then how much capital.
+    const pairReq = FEATURES.perps ? parsePairRequest(request, yieldContext.markets, { extendedConnected: !!snapshot?.extended?.connected && snapshot.extended.network !== "testnet" }) : null;
+    if (pairReq && !pairReq.base) {
+      const q = pairAssetQuestion(yieldContext.markets, french);
+      if (q && answered !== q.question) {
+        return NextResponse.json({ decision: "clarify", understanding: french ? "Position neutre entre Hyperliquid et Extended : il manque l'actif." : "A neutral position between Hyperliquid and Extended: the asset is missing.", clarify: q, strategies: [] });
+      }
+    }
+    const asked = snapshot && FEATURES.perps
+      ? sizeQuestion({
+          thesis: request,
+          answeredQuestion: answered,
+          hyperliquidFreeUsd: snapshot.hyperliquid ? snapshot.hyperliquid.freeMarginUsd : null,
+          extendedFreeUsd: snapshot.extended?.connected ? (snapshot.extended.availableUsd ?? null) : null,
+        })
+      : null;
+    if (asked) return NextResponse.json({ decision: "clarify", understanding: asked.understanding, clarify: asked.clarify, strategies: [] });
 
     // Build the user message with live yield data + portfolio injected
     const sections: string[] = [];
     if (portfolioContext) sections.push(portfolioContext);
     if (yieldContext.summary) sections.push(yieldContext.summary);
     else sections.push("## LIVE DATA UNAVAILABLE\nThe live rates could not be loaded for this request. Do not quote any APY or rate: omit \"apy\", and say in each summary that rates will be shown live before signing.");
-    sections.push(`User thesis: ${thesis.trim()}`);
+    const convo = conversationSection(history);
+    if (convo) sections.push(convo);
+    sections.push(request === thesis.trim() ? `User thesis: ${thesis.trim()}` : `User message: ${thesis.trim()}\nResolved with the conversation (plan this): ${request}`);
     if (clarified) {
       sections.push(
         `The user answered your question${typeof answeredQuestion === "string" ? ` ("${answeredQuestion.slice(0, 300)}")` : ""}; their answer ends the thesis. That question is resolved: never ask it again. Build, unless the answer reveals a different blocker that needs a different question.`,
@@ -526,10 +545,26 @@ export async function POST(req: NextRequest) {
     }
     const userMessage = sections.join("\n\n---\n\n");
 
+    // The two-venue neutral position on a named asset is built by the server (lib/planner/pair.ts), not proposed by the model.
+    const serverPair = pairReq?.base && yieldContext.markets ? buildPairStrategy({ ...pairReq, base: pairReq.base }, yieldContext.markets) : null;
+    // A dollar size is the position per leg (as for a single order); without one the server sizes from the free margin below.
+    const pairSize = parseAmount(request);
+    if (serverPair && pairSize !== undefined) serverPair.legs = serverPair.legs.map((l) => ({ ...l, sizeUsd: pairSize }));
+
     // Pipeline step 1: the model reads the data and proposes structures (or one question).
     let text: string;
     let usedModel = model;
-    try {
+    if (serverPair) {
+      const goal = /\b(volume|farm\w*|points?)\b/i.test(request) ? "farming" : "neutral_carry";
+      text = JSON.stringify({
+        decision: "build",
+        objective: goal,
+        understanding: french
+          ? `Position neutre sur ${pairReq!.base} : long sur une venue, short de la même quantité sur l'autre, entre Hyperliquid et Extended.`
+          : `Neutral position on ${pairReq!.base}: long on one venue, short the same quantity on the other, between Hyperliquid and Extended.`,
+        strategies: [serverPair],
+      });
+    } else try {
       ({ text, model: usedModel } = await completeWithFallback(
         apiKey,
         model,
@@ -560,8 +595,10 @@ export async function POST(req: NextRequest) {
       console.error("[parse-intent] no JSON in response:", text.slice(0, 500));
       return NextResponse.json({ error: "Failed to parse model response" }, { status: 500 });
     }
-    // An explicit order ("short ETH 2x, SL 20%") is strategy 1, whatever the model proposed.
-    const explicit = FEATURES.perps ? parseExplicitPerpOrder(thesis) : null;
+    // An explicit order ("short ETH 2x, SL 20%") is strategy 1, whatever the model proposed — only on a market a venue lists.
+    const parsedOrder = FEATURES.perps ? parseExplicitPerpOrder(request) : null;
+    const listed = (asset: string) => !yieldContext.markets || yieldContext.markets.quotes.some((q) => q.kind === "perp" && q.base.toUpperCase() === marketBase(asset)) || mentionedBases(asset, yieldContext.markets).length > 0;
+    const explicit = parsedOrder && listed(parsedOrder.asset) ? parsedOrder : null;
     if (!Array.isArray(parsed.strategies)) parsed.strategies = [];
 
     // One clarifying question instead of plans (doctrine section 2) — never
@@ -586,7 +623,6 @@ export async function POST(req: NextRequest) {
     // Deterministic checks on what the model proposed: the user's order first,
     // structure and budget, venue minimums, then the planner contract
     // (requested vs alternative, blocked, economics, recommendation).
-    const snapshot = portfolio as PortfolioSnapshot | undefined;
     const wallet = { assets: snapshot?.assets };
     let strategies = enforceExplicitOrder(parsed.strategies, explicit, wallet.assets, snapshot?.extended?.availableUsd);
     strategies = strategies.map((st: Parameters<typeof validateAndFixStrategy>[0]) => validateAndFixStrategy(st, wallet));
@@ -603,12 +639,12 @@ export async function POST(req: NextRequest) {
     };
     const conformance = enforceConformance(strategies, objective, {
       order: explicit,
-      namedVenues: namedVenues(thesis),
+      namedVenues: namedVenues(request),
       extended: ext,
       markets: yieldContext.markets,
       balances,
       // No dollar size: the share the user chose (or the policy's), applied by the server to the free margin.
-      sizeShare: parseAmount(thesis) === undefined && !explicit?.sizeUsd ? (capitalShare(thesis) ?? SIZING_POLICY.maxUtilization) : undefined,
+      sizeShare: parseAmount(request) === undefined && !explicit?.sizeUsd ? (capitalShare(request) ?? SIZING_POLICY.maxUtilization) : undefined,
       now: Date.now(),
     });
     if (conformance.notes.length) console.info("[parse-intent] conformance:", conformance.notes.join(" | "));
@@ -628,7 +664,7 @@ export async function POST(req: NextRequest) {
         explainModel,
         [
           { role: "system", content: EXPLAIN_SYSTEM },
-          { role: "user", content: JSON.stringify(explainPayload(thesis.trim(), understanding, conformance.strategies, conformance.recommended)) },
+          { role: "user", content: JSON.stringify(explainPayload(request, understanding, conformance.strategies, conformance.recommended)) },
         ],
         EXPLAIN_MAX_TOKENS,
         EXPLAIN_TIMEOUT_MS,
@@ -639,7 +675,7 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       console.error("[parse-intent] explain failed, using templates:", err instanceof Error ? err.message : err);
     }
-    const merged = mergeExplanations(conformance.strategies, explanations, thesis);
+    const merged = mergeExplanations(conformance.strategies, explanations, request);
     if (merged.rejected.length) console.info("[parse-intent] explanations replaced by templates (ungrounded numbers):", merged.rejected.join(", "));
 
     return NextResponse.json({
