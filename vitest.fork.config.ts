@@ -12,8 +12,5 @@ export default defineConfig({
     environment: "node",
     include: ["e2e/**/*.fork.test.ts"],
     testTimeout: 120_000,
-    // One file at a time: the files share one anvil fork per chain, and several of them sending
-    // transactions at once through the same fork stalled it in CI (every Base test timed out together).
-    fileParallelism: false,
   },
 });

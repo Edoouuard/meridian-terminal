@@ -218,7 +218,7 @@ Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenis�
 
 **P3 Plus de protocoles exécutables**
 - [ ] [moi] Vaults ERC-4626 vérifiés on-chain : Euler v2, Morpho (coffres supplémentaires), Yearn v3, Silo v2 — une ligne par vault dans `vaults.ts`, dépôt prouvé sur fork.
-- [x] [moi] Restaking liquide par swap Uniswap, là où le pool WETH est profond (vérifié on-chain : 0,1 WETH coté à < 1 % du taux) : ether.fi weETH (Base, Arbitrum), Kelp rsETH (Arbitrum ; wrsETH sur Base), Renzo ezETH (Base). Ethereum exclu (pools trop minces). Jetons suivis dans le portefeuille et valorisés, protocoles exécutables dans le registre, planner informé. *Preuve : test fork `e2e/restaking.fork.test.ts` (achat réel via orderRunner sur forks Base et Arbitrum), tests registre / jetons.*
+- [x] [moi] Restaking liquide par swap Uniswap, là où le pool WETH est profond (vérifié on-chain : 0,1 WETH coté à < 1 % du taux) : ether.fi weETH (Base, Arbitrum), Kelp rsETH (Arbitrum ; wrsETH sur Base), Renzo ezETH (Base). Ethereum exclu (pools trop minces). Jetons suivis dans le portefeuille et valorisés, protocoles exécutables dans le registre, planner informé. *Preuve : test fork `e2e/restaking.fork.test.ts` (achat de rsETH via orderRunner sur fork Arbitrum : 0,1 WETH → 0,0926 rsETH) ; routes Base (ezETH, wrsETH, weETH) vérifiées par cotations QuoterV2 en direct seulement — le fork Base de la CI se bloque sur ce test (à investiguer) ; tests registre / jetons.*
 - [ ] [moi] Vaults Euler v2 / Silo v2 : DefiLlama n'en liste aucun ≥ 5 M$ en USDC/WETH sur Ethereum, Base ou Arbitrum (vérifié 2026-10-16) — à reprendre quand la liquidité y sera.
 - [ ] [moi] Moonwell / Venus (forks Compound) sur Base et BNB.
 
@@ -393,7 +393,7 @@ Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenis�
 
 | Date | Fait | Preuve |
 |---|---|---|
-| 2026-10-16 | Restaking liquide exécutable : Kelp rsETH / wrsETH, Renzo ezETH, ether.fi weETH par swap Uniswap sur Base et Arbitrum | `e2e/restaking.fork.test.ts`, tests `protocols` |
+| 2026-10-16 | Restaking liquide exécutable : Kelp rsETH / wrsETH, Renzo ezETH, ether.fi weETH par swap Uniswap sur Base et Arbitrum | `e2e/restaking.fork.test.ts` (Arbitrum), cotations live (Base), tests `protocols` |
 | 2026-10-16 | Bug : « short ETH levier 2, SL 20% » donnait du lending. Un ordre explicite (côté, marché, levier, SL/TP, taille) devient la stratégie 1, garanti côté serveur ; SL/TP pré-remplis sur le bouton perp | tests `explicitOrder` |
 | 2026-10-16 | Perps HIP-3 (actions, indices, matières premières) : résolution des marchés, identifiants d'actif, levier isolé, abstraction de dex, liste live dans le planner, positions et ordres dans le panneau | tests `hyperliquidExchange` (vecteurs SDK), `hyperliquidTrade` (HIP-3) |
 | 2026-10-16 | Ordres limite Hyperliquid (GTC / post-only), annulation et déplacement des ordres ouverts, stop-loss / take-profit visibles dans le panneau | tests `hyperliquidExchange` (vecteurs SDK cancel, batchModify), `hyperliquidTrade` |
