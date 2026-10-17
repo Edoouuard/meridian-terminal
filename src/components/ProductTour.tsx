@@ -6,7 +6,7 @@ import { FEATURES } from "@/lib/features";
 import { askMeridian } from "@/lib/askBus";
 
 /** Bumped when the tour gains steps, so testers who finished the old one see the new one once. */
-export const TOUR_DONE_KEY = "meridian:tourDone:v2";
+export const TOUR_DONE_KEY = "meridian:tourDone:v3";
 const START_EVENT = "meridian:start-tour";
 /** The page opens this side tab when a step points inside it (detail: tab id). */
 export const TOUR_OPEN_TAB_EVENT = "meridian:tour-open-tab";
@@ -58,11 +58,6 @@ const ALL_STEPS: TourStep[] = [
     body: "Meridian reads live rates, funding and your balances, then proposes plans sized to what you really hold. If your request is ambiguous it asks one question. A plan it can't run yet says what blocks it; anything that changes your request is labelled as an alternative.",
   },
   {
-    title: "Try a use case",
-    body: "Pick one to send it now, or type your own. Numbers are computed from live market data, and you review every order before signing.",
-    prompts: TOUR_PROMPTS,
-  },
-  {
     target: "markets",
     title: "Live rates and markets",
     body: "Yields by asset, crypto news, chain overview and alpha. Every row has an “Ask Meridian” button that turns it into a strategy.",
@@ -72,7 +67,7 @@ const ALL_STEPS: TourStep[] = [
     tab: "venues",
     perps: true,
     title: "Trade on Extended",
-    body: "Stocks, indices and crypto perps on Extended. Connect with three wallet signatures (no keys to paste), then ask Meridian: it deposits USDC from Arbitrum when the account is empty, compares funding with Hyperliquid and builds pairs across both venues.",
+    body: "Stocks, indices and crypto perps on Extended. Before connecting: open your account on extended.exchange with this same wallet and fund it with USDC (or deposit from Arbitrum in Tools → Extended). Then click “Connect Extended with my wallet” here: three signatures, no keys to paste. Meridian finds your account, compares funding with Hyperliquid and builds pairs across both venues.",
   },
   {
     target: "tabs",
@@ -80,9 +75,9 @@ const ALL_STEPS: TourStep[] = [
     body: "Perp positions on Hyperliquid and Extended with PnL, funding and liquidation distance; every strategy you put to work (a pair with one leg filled is flagged); bridges and venue connections in Tools; every transaction in History.",
   },
   {
-    target: "status",
-    title: "You're set",
-    body: "Each transaction shows its steps and the usual wait for its chain. Replay this tour any time with the “Tour” button.",
+    title: "Try a strategy now",
+    body: "Pick one to send it to Meridian, or type your own. Plans are sized on your real balances and live rates, and you review every order before signing. Replay this tour any time with the “Tour” button.",
+    prompts: TOUR_PROMPTS,
   },
 ];
 

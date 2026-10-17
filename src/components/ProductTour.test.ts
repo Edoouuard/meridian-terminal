@@ -5,17 +5,24 @@ const vp = { width: 1440, height: 900 };
 const card = { width: 340, height: 190 };
 
 describe("product tour", () => {
-  it("opens with a welcome and ends on the replay hint", () => {
+  it("opens with a welcome and ends on strategies to try now, with the replay hint", () => {
     expect(TOUR_STEPS[0].target).toBeUndefined();
-    expect(TOUR_STEPS.at(-1)?.body).toMatch(/Tour/);
+    const last = TOUR_STEPS.at(-1)!;
+    expect(last.title).toBe("Try a strategy now");
+    expect(last.prompts?.length).toBeGreaterThan(0);
+    expect(last.body).toMatch(/Tour/);
+    expect(TOUR_STEPS.filter((s) => s.prompts)).toHaveLength(1);
   });
 
   it("with perps: shows Extended (opening the Tools tab) and every use-case prompt", () => {
     const steps = tourSteps(true);
     const ext = steps.find((s) => s.target === "extended");
     expect(ext?.tab).toBe("venues");
-    expect(ext?.body).toMatch(/three wallet signatures/);
-    expect(steps.find((s) => s.prompts)?.prompts).toEqual(TOUR_PROMPTS);
+    expect(ext?.body).toMatch(/three signatures/);
+    // The prerequisites the owner hit: an account opened on extended.exchange with the same wallet, and a balance.
+    expect(ext?.body).toMatch(/extended\.exchange with this same wallet/);
+    expect(ext?.body).toMatch(/fund it with USDC/);
+    expect(steps.at(-1)?.prompts).toEqual(TOUR_PROMPTS);
     expect(TOUR_PROMPTS.map((p) => p.prompt)).toContain("Short AMD on Extended");
   });
 
