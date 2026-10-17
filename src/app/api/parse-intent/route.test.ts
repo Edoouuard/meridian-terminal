@@ -97,3 +97,71 @@ describe("POST /api/parse-intent — the owner's SPCX conversation", () => {
     expect(data.clarify.options[0]).toMatch(/^SPCX/);
   });
 });
+
+describe("POST /api/parse-intent — a question answered in words", () => {
+  const answerJson = {
+    understanding: "Your read of the crypto market today.",
+    answer: {
+      headline: "Mixed: BTC holds while ETH lags.",
+      points: ["BTC $104,250, +1.1% over 24h", "ETH $3,012, -2.1% over 24h"],
+      takeaway: "No strong trend: yields beat chasing price right now.",
+      followUps: ["Best yield for my USDC, no lock-up"],
+    },
+  };
+  let systems: string[] = [];
+  let userMessages: string[] = [];
+  beforeEach(() => {
+    systems = [];
+    userMessages = [];
+    vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/api/yield-context")) return new Response(JSON.stringify({ summary: "live data", markets }));
+      if (u.includes("/api/prices")) return new Response(JSON.stringify([{ symbol: "BTC", price: 104250, change24h: 1.05 }, { symbol: "ETH", price: 3012, change24h: -2.1 }]));
+      if (u.includes("/api/news")) return new Response(JSON.stringify({ status: "ok", items: [{ id: "1", title: "ETF inflows rise", link: "", source: "Reuters", coins: ["BTC"] }] }));
+      if (u.includes("openrouter")) {
+        const body = JSON.parse(String(init?.body));
+        systems.push(body.messages[0].content);
+        userMessages.push(body.messages[1].content);
+        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify(answerJson) } }] }));
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+  });
+
+  it("the owner's 'What to to think about the crypto market?': a market read from live prices and news — no capital question, no plan, no fallback", async () => {
+    const { status, data } = await post({ thesis: "What to to think about the crypto market? — Market overview only, no plan and no trade" });
+    expect(status).toBe(200);
+    expect(data.decision).toBe("answer");
+    expect(data.strategies).toEqual([]);
+    expect(data.answer.headline).toBe("Mixed: BTC holds while ETH lags.");
+    expect(data.answer.followUps).toEqual(["Best yield for my USDC, no lock-up"]);
+    expect(systems).toHaveLength(1);
+    expect(systems[0]).toMatch(/market analyst/);
+    expect(userMessages[0]).toContain("BTC $104,250");
+    expect(userMessages[0]).toContain("ETF inflows rise");
+  });
+
+  it("a malformed answer is an error the client reports, not an invented plan", async () => {
+    vi.stubGlobal("fetch", async (url: string) => {
+      const u = String(url);
+      if (u.includes("openrouter")) return new Response(JSON.stringify({ choices: [{ message: { content: "{\"answer\": {\"headline\": \"x\"}}" } }] }));
+      return new Response(JSON.stringify(u.includes("/api/news") ? { items: [] } : u.includes("/api/prices") ? [] : { summary: "" }));
+    });
+    const { status, data } = await post({ thesis: "How is the market doing?" });
+    expect(status).toBe(500);
+    expect(data.error).toMatch(/malformed/);
+  });
+
+  it("the model may answer a question in words on its own ('explain funding rates')", async () => {
+    vi.stubGlobal("fetch", async (url: string) => {
+      const u = String(url);
+      if (u.includes("/api/yield-context")) return new Response(JSON.stringify({ summary: "live data", markets }));
+      if (u.includes("openrouter")) return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ decision: "answer", strategies: [], ...answerJson }) } }] }));
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    const { status, data } = await post({ thesis: "Explain funding rates", portfolio: undefined });
+    expect(status).toBe(200);
+    expect(data.decision).toBe("answer");
+    expect(data.answer.points).toHaveLength(2);
+  });
+});

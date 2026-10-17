@@ -17,6 +17,8 @@ import { buildPairStrategy, mentionedBases, pairAssetQuestion, parsePairRequest 
 import { cleanHistory, conversationSection, effectiveRequest } from "@/lib/planner/conversation";
 import { marketBase } from "@/lib/perpVenues";
 import { parseAmount } from "@/lib/tradePlan";
+import { ANSWER_SYSTEM, cleanAnswer, marketSection, wantsAnswer, type PriceRow } from "@/lib/planner/answer";
+import type { NewsItem } from "@/lib/news";
 import { EXPLAIN_SYSTEM, explainPayload, mergeExplanations, type Explanation } from "@/lib/planner/explain";
 import { hyperliquidMarginUsd, validateAndFixStrategy } from "@/lib/strategyIntegrity";
 
@@ -235,7 +237,15 @@ Every leg MUST set "chain" to the chain where that leg executes, using one of: $
 
 ## Output Format
 
-Return ONLY valid JSON (no markdown, no text before/after). "decision" is "clarify" or "build" (doctrine section 2).
+Return ONLY valid JSON (no markdown, no text before/after). "decision" is "clarify" or "build" (doctrine section 2), or "answer" when the user asks a question to be answered in words, with no trade to plan (an explanation, a view, how something works). Never ask whether they want a plan or an overview: answer.
+
+Answer (strategies empty; every point carries a figure from the live data, never invented):
+{
+  "decision": "answer",
+  "understanding": "The question in one short sentence.",
+  "answer": { "headline": "One line that answers it", "points": ["3 to 5 short points"], "takeaway": "What it means for the user", "followUps": ["A request Meridian can run next"] },
+  "strategies": []
+}
 
 Clarify (one question, strategies empty):
 {
@@ -308,6 +318,24 @@ async function fetchYieldContext(baseUrl: string, cookie: string | null): Promis
     return { summary: "" };
   }
 }
+
+/** Live prices and headlines for a market answer; an unavailable source comes back empty. */
+async function fetchMarketPulse(baseUrl: string, cookie: string | null): Promise<{ prices: PriceRow[]; news: NewsItem[] }> {
+  const get = async (path: string) => {
+    try {
+      const res = await fetch(`${baseUrl}${path}`, { signal: AbortSignal.timeout(8000), cache: "no-store", headers: cookie ? { cookie } : undefined });
+      return res.ok ? await res.json() : null;
+    } catch {
+      return null;
+    }
+  };
+  const [prices, news] = await Promise.all([get("/api/prices"), get("/api/news")]);
+  return { prices: Array.isArray(prices) ? (prices as PriceRow[]) : [], news: Array.isArray(news?.items) ? (news.items as NewsItem[]) : [] };
+}
+
+/** Answer pass: the market read, from the live data. */
+const ANSWER_MAX_TOKENS = 4096;
+const ANSWER_TIMEOUT_MS = 60_000;
 
 /**
  * One chat completion as text; throws on a transport or HTTP error, on an
@@ -511,6 +539,46 @@ export async function POST(req: NextRequest) {
     const request = effectiveRequest(thesis.trim(), history, yieldContext.markets);
     const answered = typeof answeredQuestion === "string" ? answeredQuestion : undefined;
 
+    // A question for a view, not a trade ("what do you think about the market?", "overview only, no plan"): answered in words.
+    if (wantsAnswer(request)) {
+      const pulse = await fetchMarketPulse(baseUrl, req.headers.get("cookie"));
+      const sections = [marketSection(pulse.prices, pulse.news)];
+      if (yieldContext.summary) sections.push(yieldContext.summary);
+      if (portfolioContext) sections.push(portfolioContext);
+      const convo = conversationSection(history);
+      if (convo) sections.push(convo);
+      sections.push(`User question: ${request}`);
+      try {
+        const { text: raw } = await completeWithFallback(
+          apiKey,
+          model,
+          [
+            { role: "system", content: ANSWER_SYSTEM },
+            { role: "user", content: sections.join("\n\n---\n\n") },
+          ],
+          ANSWER_MAX_TOKENS,
+          ANSWER_TIMEOUT_MS,
+        );
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let out: any = null;
+        try {
+          out = extractJson(raw);
+        } catch {
+          out = null;
+        }
+        const answer = cleanAnswer(out?.answer);
+        if (!answer) {
+          console.error("[parse-intent] answer malformed", { sample: raw.slice(0, 300) });
+          return NextResponse.json({ error: "The market answer came back malformed" }, { status: 500 });
+        }
+        return NextResponse.json({ decision: "answer", understanding: typeof out.understanding === "string" ? out.understanding : "", answer, strategies: [] });
+      } catch (err) {
+        const e = err as Error & { detail?: string };
+        console.error("[parse-intent] answer failed:", e.message, e.detail ?? "");
+        return NextResponse.json({ error: e.message }, { status: 502 });
+      }
+    }
+
     // Questions the server asks itself, before any plan: which asset for a two-venue neutral position, then how much capital.
     const pairReq = FEATURES.perps ? parsePairRequest(request, yieldContext.markets, { extendedConnected: !!snapshot?.extended?.connected && snapshot.extended.network !== "testnet" }) : null;
     if (pairReq && !pairReq.base) {
@@ -604,6 +672,11 @@ export async function POST(req: NextRequest) {
     const sameQuestion = (q: string) => typeof answeredQuestion === "string" && q.trim().toLowerCase() === answeredQuestion.trim().toLowerCase();
     if (clarify && parsed.strategies.length === 0 && !explicit && !sameQuestion(clarify.question)) {
       return NextResponse.json({ decision: "clarify", understanding: typeof parsed.understanding === "string" ? parsed.understanding : "", clarify, strategies: [] });
+    }
+    // A question the model chose to answer in words ("explain funding rates").
+    const modelAnswer = cleanAnswer(parsed.answer);
+    if (modelAnswer && parsed.strategies.length === 0 && !explicit) {
+      return NextResponse.json({ decision: "answer", understanding: typeof parsed.understanding === "string" ? parsed.understanding : "", answer: modelAnswer, strategies: [] });
     }
     if (parsed.strategies.length === 0 && !explicit) {
       // Diagnostics only: the shape the model returned, never the user's text.
