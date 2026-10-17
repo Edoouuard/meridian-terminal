@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { executeExtendedPerp, type ExecuteExtendedParams, type ExecuteExtendedResult } from "@/lib/integrations/extended-live";
+import { repairExtendedVault } from "@/hooks/useExtendedAccount";
 
 export type ExtendedPerpStatus = "idle" | "submitting" | "confirmed" | "error";
 
@@ -34,6 +35,7 @@ export function useExtendedPerp(): UseExtendedPerpResult {
       try {
         setState({ status: "submitting" });
         const result = await executeExtendedPerp(p);
+        if (result.repairedVaultId) repairExtendedVault(result.repairedVaultId);
         setState({ status: result.ok ? "confirmed" : "error", result, error: result.error });
       } catch (err) {
         setState({ status: "error", error: err instanceof Error ? err.message : String(err) });

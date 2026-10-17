@@ -95,6 +95,7 @@ export function connectExtendedAccount(input: ConnectExtendedInput): ExtendedSig
   const vaultId = input.vaultId.trim();
   if (!apiKey) throw new ExtendedKeyError("An Extended API key is required.");
   if (!vaultId) throw new ExtendedKeyError("A vault (position) id is required.");
+  if (!/^\d+$/.test(vaultId)) throw new ExtendedKeyError("The vault (position) id is a whole number (e.g. 419856), shown as \"Vault\" in Extended's API management page — not a 0x… key.");
 
   const l2PrivateKey = normalizeHex(input.l2PrivateKey);
   let l2PublicKey: `0x${string}`;
@@ -111,6 +112,14 @@ export function connectExtendedAccount(input: ConnectExtendedInput): ExtendedSig
   persist(next);
   emit();
   return next;
+}
+
+/** Save Extended's own position id for the connected account (repaired before an order, see extended-live.ts withExtendedVault). */
+export function repairExtendedVault(vaultId: string): void {
+  if (!signer || !/^\d+$/.test(vaultId) || signer.vaultId === vaultId) return;
+  signer = { ...signer, vaultId };
+  persist(signer);
+  emit();
 }
 
 export function disconnectExtendedAccount(): void {
