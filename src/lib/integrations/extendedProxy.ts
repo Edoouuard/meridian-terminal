@@ -76,3 +76,20 @@ export function orderPathFor(path: string[], method: string, body: string | unde
   }
   return typeof market === "string" && isRfq(market) ? [...path, "rfq"] : path;
 }
+
+/**
+ * What an order looked like, for the logs when Extended refuses it: every
+ * field but the settlement (signature, Stark key, position), which is never
+ * logged. Extended answers a body it can't read with an empty 400, so the
+ * fields are the only clue.
+ */
+export function orderForLog(body: string | undefined): string {
+  if (!body) return "(no body)";
+  try {
+    const o = JSON.parse(body) as Record<string, unknown>;
+    const { settlement: _s, ...rest } = o;
+    return JSON.stringify({ ...rest, settlement: _s === undefined ? "MISSING" : "present" }).slice(0, 600);
+  } catch {
+    return `(not JSON, ${body.length} chars)`;
+  }
+}
