@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { EXTENDED_HOSTS, extendedUpstreamUrl, forwardableExtendedHeaders, orderPathFor, type ExtendedNetworkName } from "@/lib/integrations/extendedProxy";
+import { EXTENDED_HOSTS, extendedUpstreamUrl, forwardableExtendedHeaders, orderForLog, orderPathFor, type ExtendedNetworkName } from "@/lib/integrations/extendedProxy";
 
 /**
  * Relay to Extended's REST API. Extended sends no CORS headers (preflight
@@ -51,6 +51,8 @@ async function relay(req: NextRequest, ctx: { params: Promise<{ network: string;
     const text = await res.text();
     // Diagnostics: the path and Extended's answer (never headers: they carry the API key and signatures).
     if (!res.ok) console.error("[extended-relay]", req.method, `/${path.join("/")}`, res.status, text.slice(0, 200));
+    // A refused order: its fields (never the settlement signature) say what Extended couldn't read.
+    if (!res.ok && req.method === "POST" && /^api\/v1\/user\/order(\/rfq)?$/.test(path.join("/"))) console.error("[extended-relay] order fields", orderForLog(body));
     // 451 = Extended refuses this server's location for legal reasons (geo-restriction), with an empty body.
     if (res.status === 451) {
       return NextResponse.json(

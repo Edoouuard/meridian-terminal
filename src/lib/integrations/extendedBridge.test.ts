@@ -82,3 +82,15 @@ describe("Extended relay — orders on RFQ markets (SPCX-USD, 2026-10-16)", () =
     expect(orderPathFor(["api", "v1", "user", "order"], "POST", "{bad", rfq)).toEqual(["api", "v1", "user", "order"]);
   });
 });
+
+describe("Extended relay — refused order log", () => {
+  it("logs the order's fields but never its settlement", async () => {
+    const { orderForLog } = await import("./extendedProxy");
+    const line = orderForLog(JSON.stringify({ market: "SPCX-USD", qty: "1.35", settlement: { signature: { r: "0xsecret", s: "0xsecret" }, starkKey: "0xkey" } }));
+    expect(line).toContain('"market":"SPCX-USD"');
+    expect(line).toContain('"settlement":"present"');
+    expect(line).not.toContain("secret");
+    expect(line).not.toContain("0xkey");
+    expect(orderForLog("{bad")).toBe("(not JSON, 4 chars)");
+  });
+});
