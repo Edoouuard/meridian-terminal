@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Extended, Signer } from "@blackcube/extended-sdk";
 import {
   executeExtendedPerp,
@@ -160,5 +160,41 @@ describe("Extended errors in English", () => {
     expect(englishExtendedError("Requête échouée")).toBe("Extended refused the request");
     expect(englishExtendedError("HTTP 400")).toBe("Extended refused the request (HTTP 400, no reason given)");
     expect(englishExtendedError("Market not found")).toBe("Market not found");
+  });
+});
+
+describe("Extended position id (owner's account, 2026-10-17: vault stored as 0x2c8f…)", () => {
+  const base = { apiKey: "k", l2PrivateKey: "0x1" as const, l2PublicKey: "0x3e8" as const, network: "mainnet" as const };
+  const info = (data: unknown) => vi.fn(async () => new Response(JSON.stringify({ status: "OK", data })));
+
+  it("keeps a decimal vault id without calling Extended", async () => {
+    const { withExtendedVault } = await import("./extended-live");
+    const f = vi.fn();
+    expect(await withExtendedVault({ ...base, vaultId: "419856" }, f as never)).toEqual({ signer: { ...base, vaultId: "419856" } });
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it("replaces a 0x… vault with the account's l2Vault, read with the API key", async () => {
+    const { withExtendedVault } = await import("./extended-live");
+    const f = info({ l2Vault: 419856, l2Key: "0x3e8" });
+    const out = await withExtendedVault({ ...base, vaultId: "0x2c8fdac708346e21cf88d4f08462ad0b726992632811e79fbf02ba84fb4af5" }, f as never);
+    expect(out).toEqual({ signer: { ...base, vaultId: "419856" }, repaired: "419856" });
+    const [url, init] = f.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toMatch(/\/api\/v1\/user\/account\/info$/);
+    expect((init.headers as Record<string, string>)["x-api-key"]).toBe("k");
+  });
+
+  it("refuses when the account's key isn't the stored trading key", async () => {
+    const { withExtendedVault } = await import("./extended-live");
+    const out = await withExtendedVault({ ...base, vaultId: "0xabc" }, info({ l2Vault: "419856", l2Key: "0x999" }) as never);
+    expect(out).toEqual({ error: expect.stringMatching(/isn't this Extended account's key/) });
+  });
+
+  it("tells a decimal id from a key", async () => {
+    const { isVaultId } = await import("./extended-live");
+    expect(isVaultId("419856")).toBe(true);
+    expect(isVaultId(419856)).toBe(true);
+    expect(isVaultId("0x2c8f")).toBe(false);
+    expect(isVaultId("")).toBe(false);
   });
 });

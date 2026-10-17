@@ -166,6 +166,8 @@ export interface ExecuteExtendedParams {
 
 export interface ExecuteExtendedResult {
   ok: boolean;
+  /** Set when the stored vault id wasn't Extended's position id and was replaced by the one Extended reports: the caller saves it. */
+  repairedVaultId?: string;
   network: ExtendedNetwork;
   market: string;
   qty?: string;
@@ -174,6 +176,32 @@ export interface ExecuteExtendedResult {
   avgPrice?: string;
   order?: unknown;
   error?: string;
+}
+
+/** Extended's position (vault) id is a decimal integer; anything else (a 0x… key) makes Extended refuse every order with an empty 400. */
+export function isVaultId(v: unknown): boolean {
+  return /^\d+$/.test(String(v ?? "").trim());
+}
+
+/**
+ * The signer with Extended's own position id for this API key's account
+ * (GET /user/account/info → l2Vault) when the stored one isn't a decimal id.
+ * Refuses when the account's Stark key isn't the stored trading key: orders
+ * signed with it would be rejected anyway.
+ */
+export async function withExtendedVault(
+  signer: ExtendedSigner,
+  fetchImpl: typeof fetch = fetch,
+): Promise<{ signer: ExtendedSigner; repaired?: string } | { error: string }> {
+  if (isVaultId(signer.vaultId)) return { signer };
+  const r = await getPrivate(signer, "/user/account/info", fetchImpl).catch(() => ({ status: 0 }) as { status: number; data?: unknown });
+  const info = (r as { data?: { l2Vault?: unknown; l2Key?: unknown } }).data;
+  const vault = info?.l2Vault === undefined ? "" : String(info.l2Vault).trim();
+  if (!isVaultId(vault)) return { error: "Extended didn't return this account's position id; reconnect Extended in Tools → Extended." };
+  if (typeof info?.l2Key === "string" && info.l2Key && BigInt(info.l2Key) !== BigInt(signer.l2PublicKey)) {
+    return { error: "The trading key saved in this browser isn't this Extended account's key; reconnect Extended in Tools → Extended." };
+  }
+  return { signer: { ...signer, vaultId: vault }, repaired: vault };
 }
 
 /** Order states Extended reports (python SDK `OrderStatus`). */
@@ -286,7 +314,11 @@ export async function executeExtendedPerp(
   const worst = worstCasePrice(price, params.isBuy);
   const limitPrice = info ? roundPriceToTick(worst, info.tick, params.isBuy) : formatDecimal(worst, 2);
 
-  const dex = deps.client ?? extendedClient(params.signer);
+  // A stored vault id that isn't Extended's position id is repaired from the account before signing.
+  const fixed = await withExtendedVault(params.signer, fetchImpl);
+  if ("error" in fixed) return { ok: false, network, market, error: fixed.error };
+  const repairedVaultId = fixed.repaired;
+  const dex = deps.client ?? extendedClient(fixed.signer);
   try {
     if (!params.reduceOnly && params.leverage && params.leverage > 0) {
       const lev = Math.max(1, Math.min(Math.round(params.leverage), info?.maxLeverage ?? params.leverage));
@@ -304,11 +336,11 @@ export async function executeExtendedPerp(
     const id = (order as { id?: string }).id;
     const fill = id ? await confirmOrder(params.signer, id, fetchImpl, sleep) : null;
     if (fill && FINAL_FAIL.has(fill.status) && !(Number(fill.filledQty) > 0)) {
-      return { ok: false, network, market, qty: qtyStr, order, error: `Order not filled: ${explainExtendedReject(fill.reason)}.` };
+      return { ok: false, network, market, qty: qtyStr, order, repairedVaultId, error: `Order not filled: ${explainExtendedReject(fill.reason)}.` };
     }
-    return { ok: true, network, market, qty: qtyStr, order, filledQty: fill?.filledQty, avgPrice: fill?.avgPrice };
+    return { ok: true, network, market, qty: qtyStr, order, repairedVaultId, filledQty: fill?.filledQty, avgPrice: fill?.avgPrice };
   } catch (err) {
-    return { ok: false, network, market, qty: qtyStr, error: englishExtendedError(err instanceof Error ? err.message : String(err)) };
+    return { ok: false, network, market, qty: qtyStr, repairedVaultId, error: englishExtendedError(err instanceof Error ? err.message : String(err)) };
   }
 }
 

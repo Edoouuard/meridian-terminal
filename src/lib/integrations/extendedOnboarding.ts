@@ -193,5 +193,14 @@ export async function onboardExtended(deps: OnboardDeps): Promise<ExtendedOnboar
   const apiKey = (keyBody?.data as { key?: string } | undefined)?.key;
   if (!apiKey) throw new Error("Extended did not return an API key.");
 
-  return { apiKey, l2PrivateKey: key.privateKey, vaultId: String(account.l2Vault), accountId: String(account.id) };
+  // Orders sign with the decimal position id; read it from the account when onboarding returned something else.
+  let vaultId = String(account.l2Vault).trim();
+  if (!/^\d+$/.test(vaultId)) {
+    const infoRes = await f(`${base}/api/v1/user/account/info`, { headers: { "x-api-key": apiKey } });
+    const info = (await readJson(infoRes))?.data as { l2Vault?: unknown } | undefined;
+    vaultId = info?.l2Vault === undefined ? "" : String(info.l2Vault).trim();
+    if (!/^\d+$/.test(vaultId)) throw new Error("Extended did not return the account's position id.");
+  }
+
+  return { apiKey, l2PrivateKey: key.privateKey, vaultId, accountId: String(account.id) };
 }
