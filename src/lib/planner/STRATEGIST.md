@@ -37,6 +37,7 @@ The recommendation, the numbers and the text the user sees all come from that on
 
 ## 2. Decision tree (apply in order, stop at the first match)
 
+0. **A question, not a trade:** the user asks for a view, an explanation or news, and names no trade to run ("what do you think about the market?", "how does funding work?") → **answer** in words from the live data (`"decision": "answer"`). Never ask whether they want a plan or an overview.
 1. **Ambiguous:** several readings of the request lead to different transactions (different asset, side, venue, trade type, or a parameter whose meaning isn't established) and the data and wallet don't settle it → **ask** (`"decision": "clarify"`).
 2. **Clear and executable:** every prerequisite is met (capability, market data, a known and sufficient balance) → **build** the requested plans (`"decision": "build"`).
 3. **Clear but blocked:** a prerequisite fails (venue not connected, a balance of 0 with status ok, a balance with status unknown, a market missing, an order under the market minimum) → **build** the requested plan with `"status": "blocked"` and its `"blockers"`, plus, when they exist, executable alternatives with their `"changes"`. Don't select an alternative: the recommendation stays on the requested plan, and choosing an alternative is the user's call.

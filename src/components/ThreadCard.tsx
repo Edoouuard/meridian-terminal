@@ -6,6 +6,7 @@ import type { TradePlan } from "@/lib/tradePlan";
 import { defaultStrategyIndex, fmtPct, strategyView, type RiskTier, type StrategyView } from "@/lib/strategyView";
 import { ExecuteStrategyButton, StrategyLegs } from "@/components/thread/StrategyLegs";
 import { YieldFinderCard } from "@/components/thread/YieldFinderCard";
+import { askMeridian } from "@/lib/askBus";
 
 const RISK_COLORS: Record<RiskTier, string> = {
   conservative: "var(--risk-good)",
@@ -356,13 +357,46 @@ export function ThreadCard({
     );
   }
 
+  if (item.answer) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
+        <div className="user-bubble"><p>{item.text}</p></div>
+        <div className="ai-bubble ai-bubble--wide market-answer">
+          <div className="answer-head">
+            <span className="answer-head__kicker">Market read · live data</span>
+          </div>
+          <p className="market-answer__headline">{item.answer.headline}</p>
+          <ul className="market-answer__points">
+            {item.answer.points.map((p, i) => (
+              <li key={i} style={{ animationDelay: `${120 + i * 70}ms` }}>
+                {p}
+              </li>
+            ))}
+          </ul>
+          {item.answer.takeaway && <p className="market-answer__takeaway">{item.answer.takeaway}</p>}
+          {item.answer.followUps.length > 0 && (
+            <div className="market-answer__next">
+              <span className="text-muted" style={{ fontSize: 11 }}>Act on it</span>
+              {item.answer.followUps.map((f) => (
+                <button key={f} type="button" className="btn btn-secondary market-answer__ask" onClick={() => askMeridian(f)}>
+                  {f} <span aria-hidden="true">→</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="text-muted" style={{ fontSize: 11, margin: 0 }}>A read of today&apos;s data, not a forecast or advice.</p>
+        </div>
+      </div>
+    );
+  }
+
   if (!item.plan) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)" }}>
         <div className="user-bubble"><p>{item.text}</p></div>
         <div className="ai-bubble">
           <p className="ai-bubble-text">
-            Describe your goal — yield, exposure, hedge, airdrops — and I&apos;ll design strategies with live rates.
+            {item.notice ?? "Describe your goal — yield, exposure, hedge, airdrops — and I'll design strategies with live rates."}
           </p>
         </div>
       </div>

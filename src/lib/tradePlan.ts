@@ -107,6 +107,7 @@ export interface TradePlan {
 }
 
 import type { PlannerClarify } from "@/lib/planner/clarify";
+import type { PlannerAnswer } from "@/lib/planner/answer";
 import type { Economics, Figure, PairExecution } from "@/lib/planner/schema";
 
 /** Augment ThreadItem with an optional parsed plan (keeps data.ts untouched). */
@@ -123,6 +124,8 @@ declare module "@/lib/data" {
     recommendedIndex?: number;
     /** The planner asks one question before planning; the next message answers it. */
     clarify?: PlannerClarify;
+    /** A question answered in words (a market view), with no plan. */
+    answer?: PlannerAnswer;
   }
 }
 

@@ -16,6 +16,7 @@ import { parseAmount } from "@/lib/tradePlan";
 import { deployableUsd } from "@/lib/budgetFit";
 import { SIZING_POLICY } from "@/lib/planner/policy";
 import { cleanClarify, type PlannerClarify } from "@/lib/planner/clarify";
+import { cleanAnswer, wantsAnswer, type PlannerAnswer } from "@/lib/planner/answer";
 
 /* ------------------------------------------------------------------ */
 /*  Types for the /api/parse-intent response                          */
@@ -74,6 +75,8 @@ export interface ParseIntentResponse {
   strategies: LLMStrategy[];
   /** One question the planner asks before planning (STRATEGIST.md section 3). */
   clarify?: PlannerClarify;
+  /** A question answered in words, with no plan (a market view). */
+  answer?: PlannerAnswer;
   /** Index of the strategy the planner recommends for this user. */
   recommended?: number;
 }
@@ -264,7 +267,7 @@ export function threadHistory(items: ThreadItem[], max = 4): { request: string; 
     .slice(-max)
     .map((it) => {
       const legs = it.plan?.legs?.map((l) => `${l.side} ${l.asset} on ${l.protocol}${l.leverage ? ` ${l.leverage}x` : ""}${l.sizeUsd ? ` $${Math.round(l.sizeUsd)}` : ""}`).join("; ");
-      const answer = it.clarify ? `Asked: ${it.clarify.question}` : legs ? `Proposed: ${legs}` : undefined;
+      const answer = it.clarify ? `Asked: ${it.clarify.question}` : it.answer ? `Answered: ${it.answer.headline}` : legs ? `Proposed: ${legs}` : undefined;
       return { request: it.text!.trim(), answer };
     });
 }
@@ -299,6 +302,12 @@ export async function routeThesisAsync(
       return { type: "custom", text, understanding: cleanText(data.understanding, 240), clarify };
     }
 
+    // A question answered in words: show the answer, never a fallback plan.
+    const answer = cleanAnswer(data.answer);
+    if (answer && (!data.strategies || data.strategies.length === 0)) {
+      return { type: "custom", text, understanding: cleanText(data.understanding, 240), answer };
+    }
+
     if (!data.strategies || data.strategies.length === 0) {
       throw new Error("No strategies returned");
     }
@@ -329,6 +338,8 @@ export async function routeThesisAsync(
     };
   } catch (err) {
     console.warn("[intentEngine] LLM parsing failed, falling back to regex parser:", err);
+    // A market question has no local-rules plan: say the read is unavailable instead of inventing a trade.
+    if (wantsAnswer(text)) return { type: "custom", text, notice: plannerFallbackNotice(err).replace(/ Below is a basic plan[^.]*\./, "").replace("AI planner", "market read") };
     return { ...fitFallbackToPortfolio(routeThesis(text), text, portfolio), notice: plannerFallbackNotice(err) };
   }
 }
