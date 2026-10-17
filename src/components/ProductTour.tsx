@@ -1,12 +1,14 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useAccount } from "wagmi";
 import { FEATURES } from "@/lib/features";
 import { askMeridian } from "@/lib/askBus";
 
 /** Bumped when the tour gains steps, so testers who finished the old one see the new one once. */
 export const TOUR_DONE_KEY = "meridian:tourDone:v3";
+/** Delay before the tour opens on a first visit, so the page has painted its panels. */
+const AUTO_START_MS = 900;
 const START_EVENT = "meridian:start-tour";
 /** The page opens this side tab when a step points inside it (detail: tab id). */
 export const TOUR_OPEN_TAB_EVENT = "meridian:tour-open-tab";
@@ -81,6 +83,10 @@ const ALL_STEPS: TourStep[] = [
   },
 ];
 
+/** The welcome text for a visitor who hasn't connected a wallet yet. */
+export const WELCOME_DISCONNECTED =
+  "In under a minute, here is how to go from an idea to a position. Connect a wallet (top right) whenever you're ready: every step is signed by you, nothing moves without your approval.";
+
 /** The tour for this build: perps steps and prompts only when perps are enabled. */
 export function tourSteps(perps: boolean): TourStep[] {
   return ALL_STEPS.filter((s) => perps || !s.perps).map((s) => (s.prompts ? { ...s, prompts: s.prompts.filter((p) => perps || !p.perps) } : s));
@@ -115,6 +121,7 @@ export function placeTooltip(
   card: { width: number; height: number },
 ): { top: number; left: number } {
   const margin = 12;
+  card = { width: card.width, height: Math.min(card.height, viewport.height - margin * 2) };
   if (!rect) return { top: Math.max(margin, (viewport.height - card.height) / 2), left: Math.max(margin, (viewport.width - card.width) / 2) };
   const below = rect.top + rect.height + margin;
   const above = rect.top - margin - card.height;
@@ -124,8 +131,8 @@ export function placeTooltip(
 }
 
 /**
- * First-connection product tour: once a wallet connects for the first time in
- * this browser, a short guided pass highlights the portfolio, the composer,
+ * First-visit product tour: every new visitor (wallet connected or not) gets a
+ * short guided pass highlights the portfolio, the composer,
  * live markets and the side tabs. Skippable at any point (Escape too), never
  * shown again once finished or skipped, and replayable from the top bar.
  */
@@ -134,13 +141,16 @@ export function ProductTour() {
   const [index, setIndex] = useState<number | null>(null);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [viewport, setViewport] = useState({ width: 1280, height: 800 });
+  const cardRef = useRef<HTMLDivElement>(null);
+  /** The card's rendered height, so it is placed by its real size (the last step is tall). */
+  const [cardHeight, setCardHeight] = useState<number | null>(null);
 
-  // First connection in this browser starts the tour once.
+  // The first visit in this browser starts the tour once, wallet connected or not.
   useEffect(() => {
-    if (!isConnected || readDone()) return;
-    const t = setTimeout(() => setIndex((i) => (i === null ? 0 : i)), 900);
+    if (readDone()) return;
+    const t = setTimeout(() => setIndex((i) => (i === null ? 0 : i)), AUTO_START_MS);
     return () => clearTimeout(t);
-  }, [isConnected]);
+  }, []);
 
   useEffect(() => {
     const start = () => setIndex(0);
@@ -182,6 +192,17 @@ export function ProductTour() {
     };
   }, [step]);
 
+  // Follow the card's real height (content, fonts, viewport width).
+  useLayoutEffect(() => {
+    const el = cardRef.current;
+    if (!el) return;
+    const read = () => setCardHeight(el.offsetHeight);
+    read();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(read) : null;
+    ro?.observe(el);
+    return () => ro?.disconnect();
+  }, [index]);
+
   const close = useCallback(() => {
     markDone();
     setIndex(null);
@@ -208,7 +229,7 @@ export function ProductTour() {
   }, [index, close, next, back]);
 
   if (!step || index === null) return null;
-  const cardSize = { width: Math.min(step.prompts ? 400 : 340, viewport.width - 24), height: step.prompts ? 340 : 190 };
+  const cardSize = { width: Math.min(step.prompts ? 420 : 340, viewport.width - 24), height: cardHeight ?? (step.prompts ? 520 : 200) };
   const pos = placeTooltip(rect, viewport, cardSize);
   const pad = 6;
   const last = index === TOUR_STEPS.length - 1;
@@ -218,25 +239,32 @@ export function ProductTour() {
       {rect ? (
         <div
           className="tour__spot"
+          key={`spot-${index}`}
           style={{ top: rect.top - pad, left: rect.left - pad, width: rect.width + pad * 2, height: rect.height + pad * 2 }}
         />
       ) : (
         <div className="tour__dim" />
       )}
-      <div className="tour__card" key={index} style={{ top: pos.top, left: pos.left, width: cardSize.width }}>
+      <div
+        ref={cardRef}
+        className={`tour__card${step.prompts ? " tour__card--final" : ""}`}
+        key={index}
+        style={{ top: pos.top, left: pos.left, width: cardSize.width, maxHeight: viewport.height - 24 }}
+      >
         <div className="tour__progress" aria-hidden="true">
           {TOUR_STEPS.map((_, i) => (
-            <span key={i} className={i <= index ? "is-on" : undefined} />
+            <span key={i} className={i < index ? "is-on" : i === index ? "is-on is-current" : undefined} />
           ))}
         </div>
         <h4 className="tour__title">{step.title}</h4>
-        <p className="tour__body">{step.body}</p>
+        <p className="tour__body">{index === 0 && !isConnected ? WELCOME_DISCONNECTED : step.body}</p>
         {step.prompts && (
           <div className="tour__prompts">
-            {step.prompts.map((p) => (
-              <button key={p.prompt} type="button" className="tour__prompt" onClick={() => send(p.prompt)}>
+            {step.prompts.map((p, i) => (
+              <button key={p.prompt} type="button" className="tour__prompt" style={{ animationDelay: `${180 + i * 55}ms` }} onClick={() => send(p.prompt)}>
                 <span className="tour__prompt-label">{p.label}</span>
                 <span className="tour__prompt-text">“{p.prompt}”</span>
+                <span className="tour__prompt-go" aria-hidden="true">→</span>
               </button>
             ))}
           </div>

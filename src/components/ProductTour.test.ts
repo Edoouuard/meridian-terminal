@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TOUR_PROMPTS, TOUR_STEPS, placeTooltip, tourSteps } from "@/components/ProductTour";
+import { TOUR_PROMPTS, TOUR_STEPS, WELCOME_DISCONNECTED, placeTooltip, tourSteps } from "@/components/ProductTour";
 
 const vp = { width: 1440, height: 900 };
 const card = { width: 340, height: 190 };
@@ -44,5 +44,18 @@ describe("product tour", () => {
 
   it("centres the card when there is nothing to highlight", () => {
     expect(placeTooltip(null, vp, card)).toEqual({ top: 355, left: 550 });
+  });
+  it("keeps a card taller than the screen (the last step) fully on screen, its buttons included", () => {
+    const small = { width: 1280, height: 640 };
+    const tall = { width: 420, height: 900 };
+    expect(placeTooltip(null, small, tall).top).toBe(12);
+    // Anchored low on the page: it still starts at the top margin rather than running off the bottom.
+    expect(placeTooltip({ top: 560, left: 200, width: 400, height: 50 }, small, tall).top).toBe(12);
+  });
+
+  it("welcomes a visitor without a wallet without claiming one is connected", () => {
+    expect(TOUR_STEPS[0].body).toMatch(/wallet is connected/);
+    expect(WELCOME_DISCONNECTED).not.toMatch(/is connected/);
+    expect(WELCOME_DISCONNECTED).toMatch(/Connect a wallet/);
   });
 });
