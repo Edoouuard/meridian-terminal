@@ -96,10 +96,16 @@ export function assetKind(symbol: string): "stable" | "eth" | "hype" | "other" {
   return "other";
 }
 
-/** The verified vault a DefiLlama pool corresponds to, if any. */
-export function vaultForPool(project: string, chainId: number, symbol: string): VaultEntry | undefined {
+/**
+ * The verified vault a DefiLlama pool corresponds to, if any. A vault pinned
+ * to a pool id matches that pool only: another pool of the same project and
+ * asset pays another rate.
+ */
+export function vaultForPool(project: string, chainId: number, symbol: string, poolId?: string): VaultEntry | undefined {
   const sym = symbol.toUpperCase();
-  return VAULTS.find((v) => v.llamaProject === project && v.chainId === chainId && v.llamaSymbol.toUpperCase() === sym);
+  return VAULTS.find(
+    (v) => v.llamaProject === project && v.chainId === chainId && v.llamaSymbol.toUpperCase() === sym && (!v.llamaPool || v.llamaPool === poolId),
+  );
 }
 
 /**
@@ -107,7 +113,7 @@ export function vaultForPool(project: string, chainId: number, symbol: string): 
  * cover their protocol on the chains they're wired for (checked again at
  * execution); vault-backed protocols only where a verified vault matches.
  */
-export function isExecutablePool(project: string, chainId: number, symbol: string): boolean {
+export function isExecutablePool(project: string, chainId: number, symbol: string, poolId?: string): boolean {
   const info = PROTOCOLS[project];
   if (!info) return false;
   if (info.coverage === "execute") {
@@ -117,6 +123,6 @@ export function isExecutablePool(project: string, chainId: number, symbol: strin
     if (SWAP_LST_CHAINS[project]) return SWAP_LST_CHAINS[project].includes(chainId);
     return true;
   }
-  if (info.coverage === "vault") return vaultForPool(project, chainId, symbol) !== undefined;
+  if (info.coverage === "vault") return vaultForPool(project, chainId, symbol, poolId) !== undefined;
   return false;
 }

@@ -131,3 +131,20 @@ describe("liquid restaking bought by swap (ether.fi, Kelp, Renzo)", () => {
     expect(findToken("ezETH", 1)).toBeUndefined();
   });
 });
+
+describe("vaults pinned to a DefiLlama pool id", () => {
+  it("only the pinned pool is executable and keeps its own row next to a deeper pool of the same asset", () => {
+    const pinned = { protocol: "Yearn" as const, llamaProject: "yearn-finance", llamaSymbol: "USDT", llamaPool: "pool-a", chainId: 1, vault: "0x0000000000000000000000000000000000000001" as const, shareSymbol: "yvUSDT", assetSymbol: "USDT", assetAddress: "0xdAC17F958D2ee523a2206206994597C13D831ec7" as const, assetDecimals: 6, exit: "Instant", instantWithdraw: true };
+    VAULTS.push(pinned);
+    try {
+      expect(isExecutablePool("yearn-finance", 1, "USDT", "pool-a")).toBe(true);
+      expect(isExecutablePool("yearn-finance", 1, "USDT", "pool-b")).toBe(false);
+      expect(isExecutablePool("yearn-finance", 1, "USDT")).toBe(false);
+      const row = (pool: string, apy: number, tvlUsd: number) => ({ pool, project: "yearn-finance", chain: "Ethereum", symbol: "USDT", apy, apyBase: apy, tvlUsd, exposure: "single" });
+      const out = parseOpportunities([row("pool-b", 9, 80e6), row("pool-a", 6, 20e6)], { kind: "stable" }).filter((o) => o.symbol === "USDT" && o.protocol === "Yearn");
+      expect(out.map((o) => [o.apy, o.coverage])).toEqual([[9, "watch"], [6, "execute"]]);
+    } finally {
+      VAULTS.pop();
+    }
+  });
+});

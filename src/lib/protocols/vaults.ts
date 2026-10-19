@@ -19,6 +19,12 @@ export interface VaultEntry {
   llamaProject: string;
   /** DefiLlama pool symbol for this vault (the underlying for Fluid/Spark, the share token for sUSDS/sUSDe). */
   llamaSymbol: string;
+  /**
+   * DefiLlama pool id, when the project lists several pools for the same
+   * asset on a chain (Euler, Gearbox…): only that pool's rate is this
+   * vault's, so only that row is marked executable.
+   */
+  llamaPool?: string;
   chainId: number;
   vault: Address;
   /** Share token symbol (fUSDC, sUSDS…). */

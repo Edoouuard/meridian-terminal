@@ -29,6 +29,8 @@ export interface Opportunity {
 }
 
 interface RawPool {
+  /** DefiLlama pool id. */
+  pool?: string;
   project?: string;
   chain?: string;
   symbol?: string;
@@ -66,7 +68,7 @@ export function parseOpportunities(
     if (!(apy > 0) || apy > MAX_OPPORTUNITY_APY || tvlUsd < minTvl) continue;
 
     const project = p.project as string;
-    const vault = vaultForPool(project, chainId, p.symbol);
+    const vault = vaultForPool(project, chainId, p.symbol, p.pool);
     const opp: Opportunity = {
       protocol: info.name,
       project,
@@ -80,12 +82,13 @@ export function parseOpportunities(
       apyReward: Math.round(num(p.apyReward) * 100) / 100,
       apyMean30d: typeof p.apyMean30d === "number" && Number.isFinite(p.apyMean30d) ? Math.round(p.apyMean30d * 100) / 100 : undefined,
       tvlUsd: Math.round(tvlUsd),
-      coverage: isExecutablePool(project, chainId, p.symbol) ? "execute" : "watch",
+      coverage: isExecutablePool(project, chainId, p.symbol, p.pool) ? "execute" : "watch",
       shareSymbol: vault?.shareSymbol,
       exit: vault?.exit,
     };
-    // One row per protocol + chain + symbol: the deepest pool.
-    const key = `${project}|${chainId}|${p.symbol.toUpperCase()}`;
+    // One row per protocol + chain + symbol: the deepest pool. A pool Meridian executes keeps its own row,
+    // so a deeper pool of the same protocol it can't deposit into never hides it.
+    const key = `${project}|${chainId}|${p.symbol.toUpperCase()}${vault?.llamaPool ? `|${vault.llamaPool}` : ""}`;
     const prev = best.get(key);
     if (!prev || opp.tvlUsd > prev.tvlUsd) best.set(key, opp);
   }
