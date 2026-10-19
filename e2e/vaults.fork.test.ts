@@ -36,7 +36,7 @@ import { executePreparedOrder, prepareOrder, type OrderRunnerClient, type OrderR
 // fork test files sign with #0 on the same forks in parallel, and a shared account races on nonces.
 const account = privateKeyToAccount("0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d");
 const PRICES = [
-  ...["USDC", "USDT", "USDS", "USDE"].map((symbol) => ({ symbol, price: 1 })),
+  ...["USDC", "USDT", "USDS", "USDE", "GHO", "CRVUSD"].map((symbol) => ({ symbol, price: 1 })),
   // Only sizes the test deposit; any recent ETH price works.
   { symbol: "ETH", price: 2500 },
   { symbol: "WETH", price: 2500 },
@@ -151,4 +151,7 @@ describe.skipIf(!ETH_URL)("vaults on an Ethereum fork", () => {
   it("deposits USDC into Yearn yvUSDC-1", () => kit!.depositLeg("Yearn", "USDC", "Ethereum", 100), 120_000);
   it("deposits WETH into Yearn yvWETH-1", () => kit!.depositLeg("Yearn", "WETH", "Ethereum", 100), 120_000);
   it("deposits USDS into Yearn yvUSDS-1", () => kit!.depositLeg("Yearn", "USDS", "Ethereum", 100), 120_000);
+  it("deposits GHO into Fluid fGHO", () => kit!.depositLeg("Fluid", "GHO", "Ethereum", 100), 120_000);
+  it("deposits crvUSD into Curve Savings scrvUSD", () => kit!.depositLeg("Curve Savings", "crvUSD", "Ethereum", 100), 120_000);
+  it("lends crvUSD on Curve LlamaLend (sfrxUSD market)", () => kit!.depositLeg("Curve LlamaLend", "crvUSD", "Ethereum", 100), 120_000);
 });

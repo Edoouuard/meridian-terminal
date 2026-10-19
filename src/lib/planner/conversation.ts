@@ -30,7 +30,7 @@ export function cleanHistory(v: unknown): Turn[] {
 }
 
 /** Topics that make a message a request of its own even without a perp asset. */
-const OWN_TOPIC = /\b(stable\w*|usdc|usdt|dai|yield|rendement|apy|apr|lend\w*|prêt|pret|borrow|emprunt|stake|staking|restak\w*|lido|aave|morpho|pendle|compound|spark|fluid|ethena|yearn|eigen\w*|vault|swap|bridge|send|envoie|transfer|withdraw|retire|deposit|dépos\w*|depos\w*|hlp|llp|portfolio|portefeuille|news|actu\w*)\b/i;
+const OWN_TOPIC = /\b(stable\w*|usdc|usdt|dai|yield|rendement|apy|apr|lend\w*|prêt|pret|borrow|emprunt|stake|staking|restak\w*|lido|aave|morpho|pendle|compound|spark|fluid|ethena|yearn|curve|crvusd|llamalend|gho|eigen\w*|vault|swap|bridge|send|envoie|transfer|withdraw|retire|deposit|dépos\w*|depos\w*|hlp|llp|portfolio|portefeuille|news|actu\w*)\b/i;
 
 /** Does this message stand on its own (it names an asset or a topic)? */
 export function standsAlone(text: string, markets: MarketSnapshot | undefined): boolean {
