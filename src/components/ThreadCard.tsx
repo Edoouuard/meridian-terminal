@@ -7,6 +7,7 @@ import { defaultStrategyIndex, fmtPct, strategyView, type RiskTier, type Strateg
 import { ExecuteStrategyButton, StrategyLegs } from "@/components/thread/StrategyLegs";
 import { YieldFinderCard } from "@/components/thread/YieldFinderCard";
 import { askMeridian } from "@/lib/askBus";
+import { MarketChart } from "@/components/MarketChart";
 
 const RISK_COLORS: Record<RiskTier, string> = {
   conservative: "var(--risk-good)",
@@ -373,6 +374,13 @@ export function ThreadCard({
               </li>
             ))}
           </ul>
+          {item.answer.charts && item.answer.charts.length > 0 && (
+            <div className="market-answer__charts">
+              {item.answer.charts.map((c) => (
+                <MarketChart key={c.id} chart={c} />
+              ))}
+            </div>
+          )}
           {item.answer.takeaway && <p className="market-answer__takeaway">{item.answer.takeaway}</p>}
           {item.answer.followUps.length > 0 && (
             <div className="market-answer__next">

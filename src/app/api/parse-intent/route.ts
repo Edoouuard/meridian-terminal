@@ -18,6 +18,7 @@ import { cleanHistory, conversationSection, effectiveRequest } from "@/lib/plann
 import { marketBase } from "@/lib/perpVenues";
 import { parseAmount } from "@/lib/tradePlan";
 import { ANSWER_SYSTEM, cleanAnswer, marketSection, wantsAnswer, type PriceRow } from "@/lib/planner/answer";
+import { chartsSection, fetchDefiCharts, pickCharts, priceMovesChart, type MarketChart } from "@/lib/planner/marketCharts";
 import type { NewsItem } from "@/lib/news";
 import { EXPLAIN_SYSTEM, explainPayload, mergeExplanations, type Explanation } from "@/lib/planner/explain";
 import { hyperliquidMarginUsd, validateAndFixStrategy } from "@/lib/strategyIntegrity";
@@ -541,8 +542,10 @@ export async function POST(req: NextRequest) {
 
     // A question for a view, not a trade ("what do you think about the market?", "overview only, no plan"): answered in words.
     if (wantsAnswer(request)) {
-      const pulse = await fetchMarketPulse(baseUrl, req.headers.get("cookie"));
-      const sections = [marketSection(pulse.prices, pulse.news)];
+      const [pulse, defi] = await Promise.all([fetchMarketPulse(baseUrl, req.headers.get("cookie")), fetchDefiCharts()]);
+      const moves = priceMovesChart(pulse.prices);
+      const available: MarketChart[] = [...(moves ? [moves] : []), ...defi];
+      const sections = [marketSection(pulse.prices, pulse.news), chartsSection(defi)];
       if (yieldContext.summary) sections.push(yieldContext.summary);
       if (portfolioContext) sections.push(portfolioContext);
       const convo = conversationSection(history);
@@ -571,7 +574,8 @@ export async function POST(req: NextRequest) {
           console.error("[parse-intent] answer malformed", { sample: raw.slice(0, 300) });
           return NextResponse.json({ error: "The market answer came back malformed" }, { status: 500 });
         }
-        return NextResponse.json({ decision: "answer", understanding: typeof out.understanding === "string" ? out.understanding : "", answer, strategies: [] });
+        const charts = pickCharts(out?.answer?.charts, available);
+        return NextResponse.json({ decision: "answer", understanding: typeof out.understanding === "string" ? out.understanding : "", answer: { ...answer, charts }, strategies: [] });
       } catch (err) {
         const e = err as Error & { detail?: string };
         console.error("[parse-intent] answer failed:", e.message, e.detail ?? "");

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { extendedQuote, hlQuote } from "@/lib/planner/markets";
+import { resetChartCache } from "@/lib/planner/marketCharts";
 
 // The route end to end on the owner's SPCX conversation (2026-10-16), with the live data and the model mocked.
 vi.mock("@/lib/features", () => ({ FEATURES: { perps: true } }));
@@ -99,7 +100,7 @@ describe("POST /api/parse-intent — the owner's SPCX conversation", () => {
 });
 
 describe("POST /api/parse-intent — a question answered in words", () => {
-  const answerJson = {
+  const answerJson: { understanding: string; answer: Record<string, unknown> } = {
     understanding: "Your read of the crypto market today.",
     answer: {
       headline: "Mixed: BTC holds while ETH lags.",
@@ -111,13 +112,16 @@ describe("POST /api/parse-intent — a question answered in words", () => {
   let systems: string[] = [];
   let userMessages: string[] = [];
   beforeEach(() => {
+    resetChartCache();
     systems = [];
     userMessages = [];
     vi.stubGlobal("fetch", async (url: string, init?: RequestInit) => {
       const u = String(url);
       if (u.includes("/api/yield-context")) return new Response(JSON.stringify({ summary: "live data", markets }));
-      if (u.includes("/api/prices")) return new Response(JSON.stringify([{ symbol: "BTC", price: 104250, change24h: 1.05 }, { symbol: "ETH", price: 3012, change24h: -2.1 }]));
+      if (u.includes("/api/prices")) return new Response(JSON.stringify([{ symbol: "BTC", price: 104250, change24h: 1.05 }, { symbol: "ETH", price: 3012, change24h: -2.1 }, { symbol: "SOL", price: 180, change24h: 0.4 }]));
       if (u.includes("/api/news")) return new Response(JSON.stringify({ status: "ok", items: [{ id: "1", title: "ETF inflows rise", link: "", source: "Reuters", coins: ["BTC"] }] }));
+      if (u.includes("/v2/chains")) return new Response(JSON.stringify([{ name: "Ethereum", tvl: 60e9 }, { name: "Solana", tvl: 10e9 }, { name: "Base", tvl: 5e9 }]));
+      if (u.includes("llama.fi")) return new Response("down", { status: 503 });
       if (u.includes("openrouter")) {
         const body = JSON.parse(String(init?.body));
         systems.push(body.messages[0].content);
@@ -139,6 +143,17 @@ describe("POST /api/parse-intent — a question answered in words", () => {
     expect(systems[0]).toMatch(/market analyst/);
     expect(userMessages[0]).toContain("BTC $104,250");
     expect(userMessages[0]).toContain("ETF inflows rise");
+    // No chart picked by the model: today's price moves (CoinGecko) by default; the DeFi TVL source was down, so it's left out.
+    expect(data.answer.charts.map((c: { id: string }) => c.id)).toEqual(["price_moves"]);
+    expect(userMessages[0]).toContain("chain_tvl: TVL by chain · today: Ethereum $60.0B");
+  });
+
+  it("a macro question gets the charts the model picked, with the figures it read", async () => {
+    answerJson.answer = { ...answerJson.answer, charts: ["chain_tvl", "made_up"] };
+    const { data } = await post({ thesis: "What's the macro picture for DeFi TVL?" });
+    expect(data.decision).toBe("answer");
+    expect(data.answer.charts.map((c: { id: string }) => c.id)).toEqual(["chain_tvl"]);
+    expect(data.answer.charts[0].points[0]).toEqual({ label: "Ethereum", value: 60e9 });
   });
 
   it("a malformed answer is an error the client reports, not an invented plan", async () => {

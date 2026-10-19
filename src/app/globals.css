@@ -1587,3 +1587,60 @@ body {
 .market-answer__ask span { display: inline-block; transition: transform 0.15s; }
 .market-answer__ask:hover span { transform: translateX(3px); }
 @media (prefers-reduced-motion: reduce) { .market-answer__points li { animation: none; } }
+
+/* ── Market charts (answers to macro / market questions) ────────────────
+   Colors validated with the dataviz skill's validate_palette.js (light,
+   surface #f3f2f2): series #a06f24; up #13866f / down #c0432f (CVD ΔE 9.6),
+   always paired with a signed label, never color alone. */
+:root {
+  --chart-series: #a06f24;
+  --chart-up: #13866f;
+  --chart-down: #c0432f;
+}
+.market-answer__charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px; }
+.mchart {
+  margin: 0; padding: 10px 12px 8px; border: 1px solid var(--color-divider); border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--color-surface) 40%, var(--color-bg)); display: flex; flex-direction: column; gap: 6px; min-width: 0;
+  animation: pop-in 0.45s ease-out both;
+}
+.mchart:nth-child(2) { animation-delay: 0.08s; }
+.mchart:nth-child(3) { animation-delay: 0.16s; }
+.mchart__head { display: flex; flex-direction: column; gap: 1px; }
+.mchart__title { font-family: var(--font-heading); font-weight: 600; font-size: 14px; }
+.mchart__caption { font-size: 11.5px; color: var(--color-neutral-700); font-variant-numeric: tabular-nums; }
+.mchart__plot { position: relative; }
+.mchart__svg { display: block; width: 100%; height: auto; touch-action: none; cursor: crosshair; }
+.mchart__axis { stroke: var(--color-divider); stroke-width: 1; }
+.mchart__line { fill: none; stroke: var(--chart-series); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; stroke-dasharray: 1; stroke-dashoffset: 1; animation: mchart-draw 1.1s ease-out 0.15s forwards; }
+.mchart__area { opacity: 0; animation: fade-in 0.6s ease-out 0.6s forwards; }
+.mchart__end { fill: var(--chart-series); stroke: var(--color-bg); stroke-width: 2; }
+.mchart__cross { stroke: var(--color-neutral-500); stroke-width: 1; stroke-dasharray: 3 3; }
+.mchart__dot { fill: var(--chart-series); stroke: var(--color-bg); stroke-width: 2; }
+.mchart__tick { font-size: 10px; fill: var(--color-neutral-600); font-family: var(--font-body); }
+@keyframes mchart-draw { to { stroke-dashoffset: 0; } }
+.mchart__tip {
+  position: absolute; top: 0; transform: translateX(-50%); pointer-events: none; white-space: nowrap;
+  display: flex; flex-direction: column; align-items: center; padding: 3px 7px; border-radius: var(--radius-md);
+  background: var(--color-text); color: var(--color-bg); font-size: 11px; line-height: 1.3; font-variant-numeric: tabular-nums;
+}
+.mchart__tip span { opacity: 0.75; font-size: 10px; }
+.mchart__bars { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.mchart__bars li { display: grid; grid-template-columns: 74px 1fr 58px; align-items: center; gap: 6px; font-size: 11.5px; animation: rise-in 0.35s ease-out both; }
+.mchart__bars li:hover .mchart__bar { filter: brightness(1.12); }
+.mchart__bar-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text); }
+.mchart__bar-value { text-align: right; font-variant-numeric: tabular-nums; color: var(--color-neutral-700); }
+.mchart__bar-track { position: relative; height: 10px; }
+.mchart__bar { position: absolute; top: 0; bottom: 0; left: 0; background: var(--chart-series); border-radius: 0 4px 4px 0; transform-origin: left; animation: mchart-grow 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.mchart__bar.is-up { background: var(--chart-up); border-radius: 0 4px 4px 0; }
+.mchart__bar.is-down { background: var(--chart-down); border-radius: 4px 0 0 4px; left: auto; transform-origin: right; }
+.mchart__zero { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: var(--color-neutral-500); }
+@keyframes mchart-grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+.mchart__table summary { font-size: 10.5px; color: var(--color-neutral-600); cursor: pointer; }
+.mchart__table table { width: 100%; border-collapse: collapse; font-size: 11px; font-variant-numeric: tabular-nums; margin-top: 4px; }
+.mchart__table th { text-align: left; font-weight: 400; color: var(--color-neutral-700); padding: 1px 0; }
+.mchart__table td { text-align: right; padding: 1px 0; }
+@media (prefers-reduced-motion: reduce) {
+  .mchart, .mchart__bars li, .mchart__bar { animation: none; }
+  .mchart__line { animation: none; stroke-dasharray: none; stroke-dashoffset: 0; }
+  .mchart__area { animation: none; opacity: 1; }
+}

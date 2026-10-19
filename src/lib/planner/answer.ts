@@ -7,6 +7,7 @@
  */
 
 import type { NewsItem } from "@/lib/news";
+import { cleanChart, type MarketChart } from "@/lib/planner/marketCharts";
 
 export interface PlannerAnswer {
   /** One line: the answer itself. */
@@ -17,6 +18,8 @@ export interface PlannerAnswer {
   takeaway?: string;
   /** Requests Meridian can run next, written as the user would type them. */
   followUps: string[];
+  /** Charts drawn under the points (DeFi TVL, stablecoins, price moves…), attached by the server. */
+  charts?: MarketChart[];
 }
 
 /** The user explicitly wants no plan. */
@@ -37,6 +40,8 @@ const ASKS_VIEW = new RegExp(
     "\\bwhy (is|are|did|does) (the )?(market|crypto|btc|eth|bitcoin|ethereum|price)\\w*\\b",
     "\\b(que|qu'en) pens\\w*\\b",
     "(analyse|état|etat|tendance|actu\\w*) (du|des) march\\w*",
+    "\\b(macro|tvl|total value locked|stablecoin (supply|market ?cap|flows?)|dex volumes?|defi (overview|trends?|state|activity|growth))\\b",
+    "\\b(dominance|liquidity|inflows?|outflows?) (of|in|on|across) (the )?(market|crypto|defi|chains?)\\b",
   ].join("|"),
   "i",
 );
@@ -65,7 +70,8 @@ export function cleanAnswer(v: unknown): PlannerAnswer | null {
   const headline = cleanStr(o.headline, 200);
   const points = cleanStrs(o.points, 280, 6);
   if (!headline || points.length === 0) return null;
-  return { headline, points, takeaway: cleanStr(o.takeaway, 400), followUps: cleanStrs(o.followUps, 120, 3) };
+  const charts = Array.isArray(o.charts) ? o.charts.map(cleanChart).filter((c): c is MarketChart => c !== null).slice(0, 3) : [];
+  return { headline, points, takeaway: cleanStr(o.takeaway, 400), followUps: cleanStrs(o.followUps, 120, 3), ...(charts.length ? { charts } : {}) };
 }
 
 export interface PriceRow {
@@ -104,12 +110,14 @@ export function marketSection(prices: PriceRow[], news: NewsItem[], now = new Da
 
 export const ANSWER_SYSTEM = `You are Meridian's market analyst. The user asked a question to be answered in words, not a plan or a trade.
 
-Answer from the LIVE data you are given (prices, 24h moves, breadth, headlines, funding rates, yields, the user's portfolio if any). Rules:
+Answer from the LIVE data you are given (prices, 24h moves, breadth, headlines, DeFi TVL, stablecoin supply, DEX volume, TVL by chain, funding rates, yields, the user's portfolio if any). Rules:
 - Write in English only, whatever language the user writes in.
 - Every point carries a figure from the data (a price, a % move, a funding rate, a yield). Never invent a number, a date or a headline; if a source is unavailable, say so instead.
 - Give a clear read (risk-on, risk-off, mixed) and why, then what stands out: majors, movers, funding (positive funding = longs pay shorts, crowded longs), the best yields Meridian can execute.
 - Funding and yields are observed now and can change; a view is not a forecast. No promises, no "guaranteed".
 - If the user holds positions, say in one point what the market means for them.
+- Macro and DeFi questions: use the DefiLlama figures (TVL trend, stablecoin supply as fresh liquidity, DEX volume as activity, TVL by chain as where capital sits).
+- "charts": 1 to 3 chart ids from the "DeFi data" section and "price_moves", the ones that best show your answer (e.g. a macro question: "defi_tvl", "stablecoins"; a "how is the market" question: "price_moves", "defi_tvl"). Only ids listed as available.
 - Never propose orders or sizes. "followUps" are 2-3 requests Meridian can run next, phrased as the user would type them (e.g. "Best yield for my USDC, no lock-up", "Short ETH 2x on Hyperliquid, stop-loss 20%").
 
 Return ONLY valid JSON:
@@ -119,6 +127,7 @@ Return ONLY valid JSON:
     "headline": "One line that answers the question.",
     "points": ["3 to 5 short points, each with its figure"],
     "takeaway": "One or two sentences: what it means for the user.",
-    "followUps": ["Request 1", "Request 2"]
+    "followUps": ["Request 1", "Request 2"],
+    "charts": ["price_moves", "defi_tvl"]
   }
 }`;
