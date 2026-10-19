@@ -35,6 +35,7 @@ const COINGECKO_IDS: Record<string, string> = {
   USDE: "ethena-usde",
   SUSDE: "ethena-staked-usde",
   GHO: "gho",
+  CRVUSD: "crvusd",
   WBTC: "wrapped-bitcoin",
   WSTETH: "wrapped-steth",
   WEETH: "wrapped-eeth",

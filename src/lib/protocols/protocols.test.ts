@@ -148,3 +148,43 @@ describe("vaults pinned to a DefiLlama pool id", () => {
     }
   });
 });
+
+describe("protocols added 2026-10-19 (verified on-chain: asset(), deposit open to anyone, TVL = DefiLlama row)", () => {
+  const withCrv = [...prices, { symbol: "CRVUSD", price: 1 }, { symbol: "GHO", price: 1 }];
+
+  it("Curve Savings: crvUSD → scrvUSD on Ethereum, approve then deposit", () => {
+    expect(findVault("Curve Savings", "crvUSD", 1)?.shareSymbol).toBe("scrvUSD");
+    expect(findVault("scrvusd", "scrvUSD", 1)?.shareSymbol).toBe("scrvUSD");
+    const order = resolveOrderForLeg({ side: "Supply", asset: "crvUSD", protocol: "Curve Savings", sizeUsd: 50, chain: "Ethereum" }, undefined, withCrv, 1) as Order;
+    expect(order).toMatchObject({ protocol: "vault", chainId: 1, amount: 50n * 10n ** 18n, vaultAddress: "0x0655977FEb2f289A4aB78af67BAB0d17aAb84367" });
+    const deposit = buildExecution(order);
+    expect("error" in deposit ? deposit.error : deposit.functionName).toBe("deposit");
+  });
+
+  it("Curve LlamaLend: crvUSD into the sfrxUSD market vault; Fluid GHO on Ethereum", () => {
+    const lend = resolveOrderForLeg({ side: "Supply", asset: "crvUSD", protocol: "Curve LlamaLend", sizeUsd: 20 }, undefined, withCrv, 1) as Order;
+    expect(lend.vaultAddress).toBe("0x3Da0F110079012387F47C6Fc6e878F10262E300a");
+    const gho = resolveOrderForLeg({ side: "Supply", asset: "GHO", protocol: "Fluid", sizeUsd: 20 }, undefined, withCrv, 1) as Order;
+    expect(gho.vaultAddress).toBe("0x6A29A46E21C730DcA1d8b23d637c101cec605C5B");
+    expect(findVault("Curve LlamaLend", "crvUSD", 42161)).toBeUndefined();
+  });
+
+  it("only the exact DefiLlama pool is executable when a project lists several for the same asset", () => {
+    expect(isExecutablePool("curve-llamalend", 1, "CRVUSD", "27af094e-e18f-5eb2-bfbf-1cf24be73057")).toBe(true);
+    // Another LlamaLend market (sreUSD collateral) pays another rate: watch only.
+    expect(isExecutablePool("curve-llamalend", 1, "CRVUSD", "fc689839-abf0-4649-a9dc-8a4778550f4b")).toBe(false);
+    expect(isExecutablePool("crvusd", 1, "SCRVUSD", "5fd328af-4203-471b-bd16-1705c726d926")).toBe(true);
+    expect(isExecutablePool("sky-lending", 1, "SDAI", "c8a24fee-ec00-4f38-86c0-9f6daebc4225")).toBe(true);
+    expect(isExecutablePool("sky-lending", 1, "SUSDS", "d8c4eff5-c8a9-46fc-a888-057c4c668e72")).toBe(true);
+    const opps = parseOpportunities(
+      [{ pool: "5fd328af-4203-471b-bd16-1705c726d926", project: "crvusd", chain: "Ethereum", symbol: "SCRVUSD", apy: 1.07, apyBase: 1.07, tvlUsd: 14.76e6, exposure: "single" }],
+      { kind: "stable" },
+    );
+    expect(opps).toMatchObject([{ protocol: "Curve Savings", symbol: "crvUSD", shareSymbol: "scrvUSD", coverage: "execute" }]);
+  });
+
+  it("Sky + DAI still signs through the dedicated sDAI path, into the same vault the new row lists", () => {
+    expect(findVault("Sky", "DAI", 1)?.vault).toBe("0x83F20F44975D03b1b09e64809B757c47f942BEeA");
+    expect(resolveOrderForLeg({ side: "Supply", asset: "DAI", protocol: "Sky", sizeUsd: 10 }, undefined, [...prices, { symbol: "DAI", price: 1 }], 1)).toMatchObject({ protocol: "maker" });
+  });
+});

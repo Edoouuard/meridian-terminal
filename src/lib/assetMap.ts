@@ -458,7 +458,7 @@ export function resolveOrderForLeg(
     };
   }
 
-  // --- Verified ERC-4626 savings vaults (Fluid, Sky sUSDS, Spark Savings, Ethena) ---
+  // --- Verified ERC-4626 vaults (Fluid, Sky sUSDS, Spark Savings, Ethena, Yearn, Curve Savings, Curve LlamaLend) ---
   const vaultProtocol = vaultProtocolFor(leg.protocol);
   if (vaultProtocol && !(vaultProtocol === "Sky" && /^s?dai$/i.test(bareSymbol(leg.asset)))) {
     const vault = findVault(leg.protocol, bareSymbol(leg.asset), resolveChainId);

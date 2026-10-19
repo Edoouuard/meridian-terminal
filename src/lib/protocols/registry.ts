@@ -40,6 +40,8 @@ export const PROTOCOLS: Record<string, ProtocolInfo> = {
   "spark-savings": { name: "Spark Savings", category: "savings", coverage: "vault" },
   "ethena-usde": { name: "Ethena", category: "savings", coverage: "vault" },
   "yearn-finance": { name: "Yearn", category: "savings", coverage: "vault" },
+  crvusd: { name: "Curve Savings", category: "savings", coverage: "vault" },
+  "curve-llamalend": { name: "Curve LlamaLend", category: "lending", coverage: "vault" },
   // Watched: live rates for comparison only
   maple: { name: "Maple", category: "credit", coverage: "watch" },
   // Liquid (re)staking tokens bought with a Uniswap swap, on the chains with a deep WETH pool (see SWAP_LST_CHAINS).
@@ -52,7 +54,6 @@ export const PROTOCOLS: Record<string, ProtocolInfo> = {
   "meth-protocol": { name: "Mantle mETH", category: "staking", coverage: "watch" },
   "liquid-collective": { name: "Liquid Collective", category: "staking", coverage: "watch" },
   "aave-v4": { name: "Aave v4", category: "lending", coverage: "watch" },
-  "curve-llamalend": { name: "Curve LlamaLend", category: "lending", coverage: "watch" },
   "venus-core-pool": { name: "Venus", category: "lending", coverage: "watch" },
   "lista-lending": { name: "Lista", category: "lending", coverage: "watch" },
   dolomite: { name: "Dolomite", category: "lending", coverage: "watch" },
@@ -86,7 +87,7 @@ export const LLAMA_CHAIN_ID: Record<string, number> = {
   "Hyperliquid L1": 999,
 };
 
-export const STABLE_SYMBOLS = new Set(["USDC", "USDT", "USDT0", "USD₮0", "FEUSD", "USDHL", "DAI", "USDS", "SUSDS", "SDAI", "USDE", "SUSDE", "GHO", "PYUSD", "USDC.E", "RLUSD", "USD1", "FDUSD", "CRVUSD", "FRAX"]);
+export const STABLE_SYMBOLS = new Set(["USDC", "USDT", "USDT0", "USD₮0", "FEUSD", "USDHL", "DAI", "USDS", "SUSDS", "SDAI", "USDE", "SUSDE", "GHO", "PYUSD", "USDC.E", "RLUSD", "USD1", "FDUSD", "CRVUSD", "SCRVUSD", "FRAX"]);
 
 export function assetKind(symbol: string): "stable" | "eth" | "hype" | "other" {
   const s = symbol.toUpperCase();
