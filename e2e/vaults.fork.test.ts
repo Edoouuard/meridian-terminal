@@ -28,6 +28,7 @@ import { arbitrum, base, mainnet } from "viem/chains";
 import { ERC20_ABI } from "@/lib/onchain";
 import { resolveOrderForLeg } from "@/lib/assetMap";
 import type { Order } from "@/lib/execution";
+import { ERC4626_READ_ABI } from "@/lib/defiPositions";
 import { findVault } from "@/lib/protocols/vaults";
 import { HYPERLIQUID_BRIDGE2 } from "@/lib/integrations/hyperliquidDeposit";
 import { executePreparedOrder, prepareOrder, type OrderRunnerClient, type OrderRunnerDeps, type WriteAsync } from "@/lib/orderRunner";
@@ -105,6 +106,10 @@ function forkKit(url: string, chain: Chain) {
     console.info(`${protocol} ${vault.shareSymbol} on ${chainName}: deposited ${usd} ${vault.assetSymbol} → ${shares} share units (tx ${result.hash})`);
     expect(shares).toBeGreaterThan(0n);
     expect(await balanceOf(vault.assetAddress)).toBe(0n);
+    // The portfolio reads the position back as convertToAssets(shares): the deposit, give or take rounding.
+    const worth = await publicClient.readContract({ address: vault.vault, abi: ERC4626_READ_ABI, functionName: "convertToAssets", args: [shares] });
+    expect(Number(worth) / Number(order.amount)).toBeGreaterThan(0.99);
+    expect(Number(worth) / Number(order.amount)).toBeLessThan(1.01);
   }
 
   /** Resolve a Hyperliquid deposit leg and send it; Bridge2's USDC balance must grow by exactly the amount. */

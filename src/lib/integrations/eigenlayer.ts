@@ -47,5 +47,10 @@ export const EIGENLAYER_STAKER_SHARES_ABI = [
   },
 ] as const;
 
+/** StrategyBase.sharesToUnderlyingView(shares) — what restaked shares are worth in stETH (portfolio). */
+export const EIGENLAYER_SHARES_TO_UNDERLYING_ABI = [
+  { type: "function", name: "sharesToUnderlyingView", stateMutability: "view", inputs: [{ name: "amountShares", type: "uint256" }], outputs: [{ name: "", type: "uint256" }] },
+] as const;
+
 export const EIGENLAYER_RISK_NOTE =
   "Restaked stETH earns operator rewards only once delegated to an operator (do that in the EigenLayer app), and withdrawing takes ~14 days through EigenLayer's queue.";
