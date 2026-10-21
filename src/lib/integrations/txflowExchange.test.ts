@@ -121,3 +121,21 @@ describe("TxFlow position stop-loss / take-profit", () => {
     expect(txflowProtectionPrices(3000, true, "0.1", {})).toEqual({ sl: undefined, tp: undefined });
   });
 });
+
+describe("TxFlow builder approval", () => {
+  it("signs ApproveBuilderFee with the documented type, on the wallet's chain, for Meridian's builder", async () => {
+    const { txflowApproveBuilderFee, TXFLOW_BUILDER, TXFLOW_BUILDER_MAX_FEE } = await import("@/lib/integrations/txflowExchange");
+    expect(TXFLOW_BUILDER).toBe("0xD69Fb18e83F0691D13D9B27D50E7D589eAAcc4E2");
+    expect(TXFLOW_BUILDER_MAX_FEE).toBe("0.001%");
+    const { action, typedData, signatureChainId } = txflowApproveBuilderFee({ network: "mainnet", builder: TXFLOW_BUILDER, maxFeeRate: TXFLOW_BUILDER_MAX_FEE, nonce: 7, walletChainId: 42161 });
+    expect(action).toEqual({ type: "approveBuilderFee", txflowNetwork: "TxFlow-Mainnet", chainId: 869, apiVersion: 1, builder: TXFLOW_BUILDER, maxFeeRate: "0.001%", nonce: 7 });
+    expect(typedData.types.ApproveBuilderFee.map((f) => `${f.type} ${f.name}`).join(",")).toBe(
+      "string txflowNetwork,uint32 chainId,uint32 apiVersion,address builder,string maxFeeRate,uint64 nonce",
+    );
+    expect(typedData.domain.chainId).toBe(42161);
+    expect(typedData.message.chainId).toBe(869);
+    expect(signatureChainId).toBe(42161);
+    // The digest is computable (a malformed type would throw here).
+    expect(hashTypedData(typedData)).toMatch(/^0x[0-9a-f]{64}$/);
+  });
+});

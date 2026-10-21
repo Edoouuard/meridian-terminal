@@ -70,7 +70,7 @@ export function TxflowPanel() {
 
   const connect = async () => {
     setError(null);
-    setBusy("Sign in your wallet: approve Meridian's TxFlow trading key (no gas)…");
+    setBusy("Sign in your wallet (no gas): TxFlow asks first to approve Meridian as builder (no fee), then Meridian's trading key…");
     try {
       await approveTxflowAgent({ user: address, walletSign, walletChainId: chainId });
       setKeyTick((t) => t + 1);
@@ -106,7 +106,7 @@ export function TxflowPanel() {
       <p style={{ fontSize: 11, margin: "6px 0 0" }} className="text-muted">
         {agent
           ? `Connected · trading key ${agent.address.slice(0, 6)}…${agent.address.slice(-4)} on ${TXFLOW_NETWORK}. TxFlow legs sign and submit live; the key can trade, never withdraw.`
-          : "Your TxFlow account is this wallet. Connect once: your wallet approves a Meridian trading key (one signature, no gas). It can trade, never withdraw."}
+          : "Your TxFlow account is this wallet. Connect once (no gas): TxFlow requires approving a builder, Meridian's, with no fee charged, then your wallet approves Meridian's trading key. Up to two signatures; the key can trade, never withdraw."}
       </p>
       {!agent && (
         <button className="btn btn-primary" style={{ fontSize: 12, marginTop: 6 }} disabled={!!busy} onClick={() => void connect()}>

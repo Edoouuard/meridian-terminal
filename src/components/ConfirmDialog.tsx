@@ -1,6 +1,7 @@
 "use client";
 
 import { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { HealthFactorEstimateResult } from "@/lib/safety";
 
 /**
@@ -46,8 +47,13 @@ export function ConfirmDialog({
   const isHfLowering = !!guardrail?.lowersHealthFactor;
   const needsExtraConfirm = isHfLowering && !guardrail?.computable;
 
-  return (
+  // Rendered on document.body: a parent with a transform or an animation (the
+  // thread's cards) would otherwise anchor this "fixed" overlay to the card,
+  // high up in the conversation, instead of the screen the user is looking at.
+  const dialog = (
     <div
+      role="dialog"
+      aria-modal="true"
       style={{
         position: "fixed",
         inset: 0,
@@ -120,4 +126,5 @@ export function ConfirmDialog({
       </div>
     </div>
   );
+  return typeof document === "undefined" ? dialog : createPortal(dialog, document.body);
 }
