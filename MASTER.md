@@ -38,7 +38,7 @@ Un utilisateur DeFi équipé d'un wallet, qui gère de quelques milliers à quel
 |---|---|---|
 | Planner IA (`/api/parse-intent`, OpenRouter Gemini Flash) | ✅ prod, 3 stratégies, taux live (cookie bêta transmis, PR #35), dimensionné sur le solde libre (`budgetFit`) | Pas de jeu d'évaluation : qualité non mesurée |
 | Validateur déterministe (`strategyIntegrity`, `fundingPlanner`, `budgetFit`) | ✅ 441 tests | — |
-| Portefeuille (8 chaînes EVM + compte Hyperliquid) | ✅ soldes, Aave, donut d'allocation, prix de tous les jetons suivis | Positions Morpho, Pendle, Spark Savings, Fluid, Yearn, EigenLayer non lues |
+| Portefeuille (8 chaînes EVM + compte Hyperliquid) | ✅ soldes, Aave, donut d'allocation, prix de tous les jetons suivis ; positions DeFi (vaults, MetaMorpho, Pendle PT/YT/LP, EigenLayer, retraits Lido) depuis 2026-10-21 | Positions DeFi pas encore vues avec un wallet réel |
 | Exécution spot (Aave, Morpho, Spark, Fluid, Yearn, Sky, Ethena, Lido, EigenLayer, Pendle, Uniswap, wrap WETH) | 🟡 prouvée sur forks en CI | Aucune transaction réelle confirmée par protocole |
 | Bridges (deBridge, LI.FI) | 🟡 prouvés sur fork Arbitrum | Aucun bridge réel de bout en bout |
 | Hyperliquid (dépôt, perps avec SL/TP, vente spot UETH/UBTC, retrait) | 🟡 signature identique au SDK officiel (vecteurs testés) ; retrait vers Compound confirmé par le propriétaire | Perps jamais exécutés sur un vrai compte |
@@ -263,9 +263,9 @@ Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenis�
 - [ ] [moi] Test fork de bout en bout d'une stratégie à 3 étapes (bridge simulé + supply + swap). *Preuve : CI.*
 
 **1.4 Positions complètes**
-- [ ] [moi] Lire les parts des vaults ERC-4626 suivis (`lib/protocols/vaults.ts` : Fluid, Spark Savings, Sky, Ethena, Yearn) via `balanceOf` + `convertToAssets`.
-- [ ] [moi] Lire les parts Morpho (coffres MetaMorpho), les PT Pendle détenus (+ échéance), les parts EigenLayer (`StrategyManager`), les demandes de retrait Lido.
-- [ ] [moi] Afficher ces positions dans le portefeuille et les compter dans la valeur nette (jamais dans le solde libre). *Preuve : tests de parsing + capture avec un wallet réel.*
+- [x] [moi] Lire les parts des vaults ERC-4626 suivis (`lib/protocols/vaults.ts` : Fluid, Spark Savings, Sky, Ethena, Yearn, Curve) via `balanceOf` + `convertToAssets`. *Preuve : `defiPositions.test.ts` ; le test fork relit chaque dépôt via `convertToAssets` (écart < 1 %).*
+- [x] [moi] Lire les parts Morpho (coffres MetaMorpho), les PT Pendle détenus (+ échéance), les parts EigenLayer (`StrategyManager`), les demandes de retrait Lido. *Preuve : `defiPositions.test.ts`, `pendlePositions.test.ts` (forme de l'API Pendle d'après sa spec OpenAPI) ; fork : `sharesToUnderlyingView` rend ~0,5 stETH pour 0,5 restaké.*
+- [ ] [moi] Afficher ces positions dans le portefeuille et les compter dans la valeur nette (jamais dans le solde libre). *Preuve : tests de parsing + capture avec un wallet réel.* — Fait (groupe « DeFi positions », test « net worth, never free balance ») ; reste la capture avec un wallet réel.
 
 **1.5 Suivre les stratégies**
 - [ ] [moi] Page « Mes stratégies » (`lib/strategyTracker.ts`) : valeur d'entrée, valeur actuelle (depuis les positions), rendement réalisé, étapes confirmées avec hashes.
@@ -443,6 +443,7 @@ Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenis�
 | 2026-10-13 | Un seul chemin d'exécution, code mort supprimé, parcours d'or et bridge prouvés sur forks, Pendle et EigenLayer exécutables | PR #16-#33 |
 | 2026-10-19 | Graphiques dans les réponses marché, façon DefiLlama : TVL DeFi totale et offre de stablecoins (90 j), TVL par chaîne, volume DEX (30 j) depuis DefiLlama, et variations 24h (CoinGecko). Le modèle lit les mêmes chiffres et choisit jusqu'à 3 graphiques (par défaut : variations 24h + TVL) ; détection étendue aux questions macro (TVL, stablecoins, volumes, liquidité). Rendu SVG : courbes avec infobulle au survol, barres, barres divergentes vert/rouge avec signe, vue « Data ». Couleurs validées (validate_palette.js). Format DefiLlama non vérifié depuis le conteneur (hôte bloqué) : une source qui change de forme est omise, jamais fausse | tests `planner/marketCharts`, `parse-intent/route` |
 | 2026-10-19 | Nouveaux protocoles exécutables (vaults ERC-4626 vérifiés on-chain : asset(), dépôt ouvert à tous, TVL = ligne DefiLlama) : **Curve Savings** (crvUSD → scrvUSD), **Curve LlamaLend** (prêt de crvUSD, marché sfrxUSD), **Fluid GHO**, et le pool sDAI de Sky marqué exécutable. Chaque vault est rattaché à son pool DefiLlama exact (`llamaPool`) : quand un protocole a plusieurs pools pour le même actif, seul le bon taux est montré comme exécutable. crvUSD suivi en wallet et pricé. Écartés : stUSDS (retraits non garantis, pertes socialisables), sfrxUSD (dépôts désactivés), Euler/Gearbox/Silo (< 10 M$ sur nos chaînes) | tests `protocols`, fork `e2e/vaults.fork.test.ts` (CI) |
+| 2026-10-21 | Portefeuille complet : nouveau groupe « DeFi positions » compté dans la valeur nette, jamais dans le solde libre — parts des vaults vérifiés (convertToAssets), vaults MetaMorpho (indexeur Morpho), Pendle PT/YT/LP (API dashboard Pendle + nom et échéance lus sur le contrat du marché, « matured, redeemable » à l'échéance), stETH restaké sur EigenLayer (sharesToUnderlyingView), stETH en file de retrait Lido (pending / ready to claim). sUSDe reste un jeton du wallet (pas de double compte) ; les positions Haiku de ces protocoles ne s'ajoutent plus | tests `defiPositions`, `pendlePositions`, fork vaults + EigenLayer |
 
 ---
 

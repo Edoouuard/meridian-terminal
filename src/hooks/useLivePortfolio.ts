@@ -36,6 +36,7 @@ import { fetchClearinghouseState, fetchHlHoldings, hyperliquidEnv, HLP_VAULT_ADD
 import { ethPriceFromAssets, netEthDelta, stakingConcentration } from "@/lib/riskModel";
 import { useLivePrices } from "./useLivePrices";
 import { useIndexedPositions } from "./useIndexedPositions";
+import { useDefiPositions } from "./useDefiPositions";
 
 export interface LiveAsset {
   symbol: string;
@@ -140,7 +141,10 @@ export function useLivePortfolio(): LivePortfolio {
   const { address, isConnected } = useAccount();
   const hlAccount = useSharedHlAccount();
   const { data: prices } = useLivePrices();
-  const { morpho: indexedMorpho } = useIndexedPositions(address, isConnected);
+  const { morpho: indexedMorpho, vaults: indexedVaults } = useIndexedPositions(address, isConnected);
+  const priceOf = (symbol: string): number => prices?.find((p) => p.symbol === symbol)?.price ?? 0;
+  // Money put to work in protocols (vault shares, MetaMorpho, EigenLayer, Lido withdrawals): net worth, never the free balance.
+  const defi = useDefiPositions(address, isConnected, priceOf, indexedVaults);
 
   // Fetch the Hyperliquid clearinghouse state when a wallet connects. Reads are
   // read-only, so they always target MAINNET — the user's real account; order
@@ -302,6 +306,7 @@ export function useLivePortfolio(): LivePortfolio {
       tokenBalancesQuery.refetch(),
       lendingQuery.refetch(),
       cometQuery.refetch(),
+      defi.refetch(),
     ]);
   }, [
     mainnetBalance,
@@ -323,11 +328,8 @@ export function useLivePortfolio(): LivePortfolio {
     tokenBalancesQuery,
     lendingQuery,
     cometQuery,
+    defi,
   ]);
-
-  function priceOf(symbol: string): number {
-    return prices?.find((p) => p.symbol === symbol)?.price ?? 0;
-  }
 
   const nativeAssets: LiveAsset[] = SUPPORTED_CHAINS.map((chain) => {
     const q = nativeBalanceByChainId[chain.id];
@@ -374,7 +376,7 @@ export function useLivePortfolio(): LivePortfolio {
     hlAssets.push({ symbol: isHlp ? "HLP" : "Vault", venue: isHlp ? "Hyperliquid HLP" : "Hyperliquid vault", chain: "Hyperliquid L1", balance: v.equity, usd: v.equity });
   }
 
-  const assets = [...nativeAssets, ...tokenAssets, ...hlAssets].sort((a, b) => b.usd - a.usd);
+  const assets = [...nativeAssets, ...tokenAssets, ...hlAssets, ...defi.positions].sort((a, b) => b.usd - a.usd);
   const assetsUsd = assets.reduce((sum, a) => sum + a.usd, 0);
 
   const aavePositions: LiveAavePosition[] = lendingPoolList

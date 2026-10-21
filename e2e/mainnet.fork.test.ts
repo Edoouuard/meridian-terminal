@@ -29,7 +29,7 @@ import { ERC20_ABI } from "@/lib/onchain";
 import { findToken, resolveOrderForLeg } from "@/lib/assetMap";
 import type { Order } from "@/lib/execution";
 import { PENDLE_ROUTER_V4, fetchPendleBuyQuote, fetchPendleMarkets, pickPendleMarket } from "@/lib/integrations/pendle";
-import { EIGENLAYER_STAKER_SHARES_ABI, EIGENLAYER_STETH_STRATEGY, EIGENLAYER_STRATEGY_MANAGER } from "@/lib/integrations/eigenlayer";
+import { EIGENLAYER_SHARES_TO_UNDERLYING_ABI, EIGENLAYER_STAKER_SHARES_ABI, EIGENLAYER_STETH_STRATEGY, EIGENLAYER_STRATEGY_MANAGER } from "@/lib/integrations/eigenlayer";
 import { executePreparedOrder, prepareOrder, type OrderRunnerClient, type OrderRunnerDeps, type WriteAsync } from "@/lib/orderRunner";
 
 const ANVIL_ETH_URL = process.env.ANVIL_ETH_URL;
@@ -186,5 +186,9 @@ describe.skipIf(!ANVIL_ETH_URL)("Ethereum fork — Pendle PT and EigenLayer rest
       args: [account.address, EIGENLAYER_STETH_STRATEGY],
     });
     expect(shares).toBeGreaterThan(0n);
+    // The portfolio values them with the strategy's own conversion: ~0.5 stETH back.
+    const underlying = await publicClient.readContract({ address: EIGENLAYER_STETH_STRATEGY, abi: EIGENLAYER_SHARES_TO_UNDERLYING_ABI, functionName: "sharesToUnderlyingView", args: [shares] });
+    expect(Number(underlying) / 1e18).toBeGreaterThan(0.49);
+    expect(Number(underlying) / 1e18).toBeLessThan(0.51);
   }, 180_000);
 });

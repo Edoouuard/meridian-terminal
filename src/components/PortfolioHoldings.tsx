@@ -17,7 +17,7 @@ function fmtUsd(v: number): string {
  * legend row with its label, share and value, so colour never carries
  * identity alone. A colour follows its entity, never its rank.
  */
-const SLOT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"] as const;
+const SLOT = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#7c5cd6"] as const;
 const OTHER_COLOR = "#9a9993";
 
 const GROUP_COLOR: Record<string, string> = {
@@ -26,6 +26,7 @@ const GROUP_COLOR: Record<string, string> = {
   staking: SLOT[2],
   lending: SLOT[3],
   hyperliquid: SLOT[4],
+  defi: SLOT[5],
 };
 
 /** Fixed colour per chain; any other chain folds into "Other". */
@@ -155,6 +156,8 @@ function AllocationDonut({ view }: { view: PortfolioView }) {
 
 /** Hyperliquid account rows read better by what they are than by their unit. */
 function holdingLabel(h: Holding): string {
+  // A DeFi position reads by where it sits ("Fluid vault · fUSDC"); its amount is in the underlying token.
+  if (h.group === "defi") return h.venues[0] ?? h.symbol;
   if (h.group !== "hyperliquid") return h.symbol;
   if (h.venues.some((v) => /perps/i.test(v))) return "Perps account";
   if (h.venues.some((v) => /hlp/i.test(v))) return "HLP vault";
@@ -268,7 +271,7 @@ export function PortfolioHoldings({ live }: { live: LivePortfolio }) {
               ) : (
                 <ul className="hold-list">
                   {g.holdings.map((h) => (
-                    <HoldingRow key={`${h.group}-${h.symbol}`} h={h} />
+                    <HoldingRow key={`${h.group}-${h.symbol}-${h.venues[0] ?? ""}`} h={h} />
                   ))}
                 </ul>
               ))}

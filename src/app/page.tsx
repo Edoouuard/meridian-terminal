@@ -44,8 +44,8 @@ import { onAsk } from "@/lib/askBus";
 // forward: `recordExecution({ type, label, amount, asset, protocol, chainId, status, hash })`.
 export { recordExecution };
 
-/** Protocols useLivePortfolio already reads on-chain (lending pools + Morpho indexer). */
-const LIVE_TRACKED_PROTOCOLS = /aave|spark|compound|morpho/i;
+/** Protocols useLivePortfolio already reads on-chain (lending pools, Morpho indexer, vaults, EigenLayer, Lido). */
+const LIVE_TRACKED_PROTOCOLS = /aave|spark|compound|morpho|fluid|yearn|sky|ethena|curve|eigen|lido/i;
 
 const CHAIN_NAMES = SUPPORTED_CHAINS.map((c) => CHAIN_LABEL[c.id]).join(", ");
 import { ThreadItem, fmtUsd } from "@/lib/data";

@@ -5,7 +5,10 @@
  * into one row. Pure and unit-tested; the panel only renders it.
  */
 
-export type HoldingGroup = "crypto" | "stable" | "staking" | "hyperliquid";
+export type HoldingGroup = "crypto" | "stable" | "staking" | "defi" | "hyperliquid";
+
+/** Venues of money put to work in a protocol (lib/defiPositions): vault shares, Pendle PT, EigenLayer, Lido withdrawals. */
+const DEFI_VENUE = /\b(vault|pendle|eigenlayer|withdrawal)\b/i;
 
 export interface AssetLike {
   symbol: string;
@@ -59,6 +62,7 @@ export function holdingGroup(a: Pick<AssetLike, "symbol" | "venue">): HoldingGro
   const s = a.symbol.toUpperCase();
   const v = a.venue.toLowerCase();
   if (v.includes("hyperliquid") && !v.includes("spot") && !v.includes("staking")) return "hyperliquid";
+  if (DEFI_VENUE.test(a.venue)) return "defi";
   if (v.includes("staking") || STAKING.has(s)) return "staking";
   if (STABLES.has(s)) return "stable";
   return "crypto";
@@ -68,6 +72,7 @@ const LABEL: Record<HoldingGroup | "lending", string> = {
   crypto: "Crypto",
   stable: "Stablecoins",
   staking: "Staking & savings",
+  defi: "DeFi positions",
   lending: "Lending",
   hyperliquid: "Hyperliquid",
 };
@@ -82,8 +87,9 @@ export function buildPortfolioView(
   for (const a of assets) {
     if (!(a.usd > 0.5) && !(a.balance > 0)) continue;
     const group = holdingGroup(a);
-    // Staked HYPE and spot HYPE are different holdings even with the same symbol.
-    const key = `${group}|${a.symbol.toUpperCase()}`;
+    // Staked HYPE and spot HYPE are different holdings even with the same symbol; a DeFi position is one per venue
+    // (stETH restaked on EigenLayer and stETH in Lido's queue are two rows).
+    const key = `${group}|${a.symbol.toUpperCase()}${group === "defi" ? `|${a.venue}` : ""}`;
     const h = byKey.get(key) ?? { symbol: a.symbol, group, balance: 0, usd: 0, chains: [], venues: [], usdByChain: {} };
     h.balance += a.balance;
     h.usd += a.usd;
@@ -98,7 +104,7 @@ export function buildPortfolioView(
     if (typeof ch === "number" && Number.isFinite(ch)) h.change24h = ch;
   }
 
-  const order: HoldingGroup[] = ["crypto", "stable", "staking", "hyperliquid"];
+  const order: HoldingGroup[] = ["crypto", "stable", "staking", "defi", "hyperliquid"];
   const groups: PortfolioView["groups"] = order
     .map((g) => {
       const holdings = [...byKey.values()].filter((h) => h.group === g).sort((a, b) => b.usd - a.usd);
