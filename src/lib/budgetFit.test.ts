@@ -122,3 +122,18 @@ describe("Hyperliquid spot buys", () => {
     expect(freshCapitalUsd([buy, short], 40)).toBeCloseTo(22, 6);
   });
 });
+
+describe("TxFlow legs", () => {
+  it("never draw their margin from Hyperliquid or the wallet (the TxFlow account or its deposit leg funds them)", () => {
+    const perp = { side: "Short", asset: "ETH-USDC PERP", protocol: "TxFlow", chain: "Arbitrum", sizeUsd: 300, leverage: 3 } as TradeLeg;
+    expect(freshCapitalUsd([perp], 500)).toBe(0);
+  });
+
+  it("deposit from Arbitrum whatever chain the model wrote", () => {
+    const fixed = validateAndFixStrategy(
+      { name: "x", risk: "moderate", summary: "", variantNote: "", legs: [{ side: "Deposit", asset: "USDC", protocol: "TxFlow", chain: "Base", sizeUsd: 20 } as LLMLeg] },
+      { assets: [{ symbol: "USDC", venue: "Wallet", chain: "Arbitrum", usd: 100 }] },
+    );
+    expect(fixed.legs[0].chain).toBe("Arbitrum");
+  });
+});

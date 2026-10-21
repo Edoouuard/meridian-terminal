@@ -319,6 +319,7 @@ const PROTOCOL_PATTERNS: Array<[RegExp, string]> = [
   [/\blido\b|\bwsteth\b|\bsteth\b/i, "Lido"],
   [/\buniswap\b/i, "Uniswap"],
   [/\bextended\b/i, "Extended"],
+  [/\btxflow\b/i, "TxFlow"],
   [/\bvariational\b|\boptions\b/i, "Variational"],
   [/\bondo\b/i, "Ondo"],
   [/\blighter\b/i, "Lighter"],

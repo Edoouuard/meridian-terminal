@@ -82,8 +82,8 @@ export function freshCapitalUsd(legs: TradeLeg[], hlMarginUsd = 0): number {
     const side = leg.side.trim().toLowerCase();
     const chainId = chainIdFromName(leg.chain) ?? 0;
     if (side === "long" || side === "short") {
-      // Extended margin comes from the Extended account (or a Deposit leg to it, counted as its own spend), never from Hyperliquid or the wallet directly.
-      if (/extended/i.test(leg.protocol)) continue;
+      // Extended / TxFlow margin comes from that venue's account (or a Deposit leg to it, counted as its own spend), never from Hyperliquid or the wallet directly.
+      if (/extended|txflow/i.test(leg.protocol)) continue;
       fresh += take(HL_MARGIN, size / Math.max(1, leg.leverage ?? 1));
       continue;
     }

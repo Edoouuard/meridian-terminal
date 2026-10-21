@@ -16,6 +16,7 @@ import { ProductTour, startTour, TOUR_OPEN_TAB_EVENT } from "@/components/Produc
 import { OPEN_STRATEGIES_EVENT, useTrackedStrategies } from "@/lib/strategyTracker";
 import { HyperliquidPanel } from "@/components/HyperliquidPanel";
 import { ExtendedConnectPanel } from "@/components/ExtendedConnectPanel";
+import { TxflowPanel } from "@/components/TxflowPanel";
 import { LifiPerpsConnectPanel } from "@/components/LifiPerpsConnectPanel";
 import { LidoWithdrawalsPanel } from "@/components/LidoWithdrawalsPanel";
 import { PerpPositionsPanel } from "@/components/PerpPositionsPanel";
@@ -440,6 +441,7 @@ export default function TerminalApp() {
                   <div data-tour="extended">
                     <ExtendedConnectPanel />
                   </div>
+                  <TxflowPanel />
                   <LifiPerpsConnectPanel provider="ondo" />
                   <LifiPerpsConnectPanel provider="lighter" />
                 </>
