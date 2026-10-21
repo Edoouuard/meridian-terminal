@@ -22,7 +22,7 @@ const fmt = (x: number) => `$${x.toLocaleString("en-US", { minimumFractionDigits
  * Hyperliquid takes a $1 fee; the USDC lands on Arbitrum in a few minutes,
  * where the next step (a bridge or a deposit) waits for it.
  */
-export function HyperliquidWithdrawButton({ leg }: { leg: TradeLeg }) {
+export function HyperliquidWithdrawButton({ leg, onDone }: { leg: TradeLeg; onDone?: (ref: string) => void }) {
   const { address, isConnected, chainId } = useAccount();
   const { signTypedDataAsync } = useSignTypedData();
   const envName = useSharedHlEnv();
@@ -85,6 +85,7 @@ export function HyperliquidWithdrawButton({ leg }: { leg: TradeLeg }) {
         return;
       }
       setState({ status: "done", amount: out.amount });
+      onDone?.(`hyperliquid:USDC:${out.amount}@withdraw`);
       recordExecution({ type: "withdraw", label: "Withdraw USDC from Hyperliquid to Arbitrum", amount: String(out.amount), asset: "USDC", protocol: "Hyperliquid", status: "confirmed" });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

@@ -207,6 +207,13 @@ export function legState(s: TrackedStrategy, i: number): "confirmed" | "pending"
   return liveSince(s) !== undefined && isMoveLeg(l) ? "skipped" : "pending";
 }
 
+/** The steps still to run, in plan order: all of them until the strategy is tracked, then those neither confirmed nor skipped. */
+export function remainingLegIndexes(s: TrackedStrategy | undefined, count: number): number[] {
+  const all = Array.from({ length: count }, (_, i) => i);
+  if (!s) return all;
+  return all.filter((i) => !s.legs[i] || legState(s, i) === "pending");
+}
+
 /**
  * What is actually put to work: the earning legs' size (bridges move the same
  * money), else the plan size. Borrowed money isn't the user's: a borrow is

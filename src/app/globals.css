@@ -1645,3 +1645,45 @@ body {
   .mchart__area { animation: none; opacity: 1; }
 }
 .strat-exit { font-size: 12px; padding: 4px 10px; margin-left: 6px; }
+
+/* Guided run: where a multi-step strategy stands, and which step is next */
+.guided-run {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
+}
+.guided-run__go {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-accent-700);
+}
+.leg-card--done {
+  opacity: 0.7;
+}
+.leg-card--done .leg-card__step {
+  background: var(--risk-good, #27ae60);
+}
+.leg-card--next {
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent);
+  animation: leg-next-pulse 2.4s ease-in-out infinite;
+}
+@keyframes leg-next-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-accent) 18%, transparent); }
+  50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--color-accent) 8%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .leg-card--next { animation: none; }
+}
