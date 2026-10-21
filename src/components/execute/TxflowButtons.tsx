@@ -133,7 +133,7 @@ export function TxflowPerpExecuteButton({ leg, onFilled, baseQty, hedged = false
   );
 
   if (state.status === "approving" || state.status === "submitting") {
-    return <>{info}<p style={muted}>{state.status === "approving" ? "Sign in your wallet: approve Meridian's TxFlow trading key (once, no gas)…" : "Sending the order to TxFlow…"}</p></>;
+    return <>{info}<p style={muted}>{state.status === "approving" ? "Sign in your wallet (once, no gas): approve Meridian as TxFlow builder (no fee), then its trading key…" : "Sending the order to TxFlow…"}</p></>;
   }
   if (state.status === "done" && state.result?.filled) {
     const f = state.result.filled;
@@ -202,7 +202,7 @@ export function TxflowPerpExecuteButton({ leg, onFilled, baseQty, hedged = false
             </label>
             {(slOn || tpOn) && <span style={{ display: "block", marginTop: 4, fontSize: 11 }} className="text-muted">Set from the real entry once the order fills: reduce-only market triggers on the whole position.</span>}
             {hedged && slOn && <span style={{ display: "block", marginTop: 4, fontSize: 11, color: "var(--risk-bad, #c0392b)" }}>This short hedges a spot position: a stop-loss would remove the hedge when the price rises.</span>}
-            {!loadTxflowAgent(address) && " First, your wallet approves a Meridian trading key for TxFlow (one signature, no gas): it can trade, never withdraw."}
+            {!loadTxflowAgent(address) && " First, your wallet connects TxFlow (up to two signatures, no gas): Meridian as builder, with no fee charged, then a Meridian trading key that can trade, never withdraw."}
           </div>
         }
         confirmLabel={isBuy ? "Open long" : "Open short"}

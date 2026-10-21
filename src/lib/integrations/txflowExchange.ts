@@ -173,6 +173,38 @@ export function txflowApproveAgent(p: { network: TxflowNetwork; agentAddress: Ad
   return { action, typedData, signatureChainId: p.walletChainId ?? null };
 }
 
+/**
+ * Meridian's builder on TxFlow. TxFlow requires every account to approve at
+ * least one builder before it accepts a trading key. Meridian approves its
+ * own with the smallest cap TxFlow allows and attaches no builder fee to its
+ * orders (owner's choice, 2026-10-21: 0%). Overridable per deployment.
+ */
+export const TXFLOW_BUILDER: Address = ((process.env.NEXT_PUBLIC_TXFLOW_BUILDER as Address | undefined) || "0xD69Fb18e83F0691D13D9B27D50E7D589eAAcc4E2") as Address;
+/** The cap the user signs: TxFlow requires more than 0%; nothing is charged while orders carry no builder object. */
+export const TXFLOW_BUILDER_MAX_FEE = "0.001%";
+
+/** Let a builder charge this user up to `maxFeeRate` (a percentage string, > 0% and ≤ 1%). */
+export function txflowApproveBuilderFee(p: { network: TxflowNetwork; builder: Address; maxFeeRate: string; nonce: number; walletChainId?: number }) {
+  const net = TXFLOW[p.network];
+  const action = { type: "approveBuilderFee", txflowNetwork: net.name, chainId: net.chainId, apiVersion: TXFLOW_API_VERSION, builder: p.builder, maxFeeRate: p.maxFeeRate, nonce: p.nonce };
+  const typedData = {
+    domain: domain(p.network, p.walletChainId),
+    types: {
+      ApproveBuilderFee: [
+        { name: "txflowNetwork", type: "string" },
+        { name: "chainId", type: "uint32" },
+        { name: "apiVersion", type: "uint32" },
+        { name: "builder", type: "address" },
+        { name: "maxFeeRate", type: "string" },
+        { name: "nonce", type: "uint64" },
+      ],
+    },
+    primaryType: "ApproveBuilderFee" as const,
+    message: { txflowNetwork: net.name, chainId: net.chainId, apiVersion: TXFLOW_API_VERSION, builder: p.builder, maxFeeRate: p.maxFeeRate, nonce: BigInt(p.nonce) },
+  };
+  return { action, typedData, signatureChainId: p.walletChainId ?? null };
+}
+
 /** USDC from the perp account to an Arbitrum address (min $2, $1 fee). */
 export function txflowWithdraw(p: { network: TxflowNetwork; destination: Address; amount: string; nonce: number; walletChainId: number }) {
   const net = TXFLOW[p.network];

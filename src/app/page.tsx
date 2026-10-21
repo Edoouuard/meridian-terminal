@@ -17,6 +17,7 @@ import { OPEN_STRATEGIES_EVENT, useTrackedStrategies } from "@/lib/strategyTrack
 import { HyperliquidPanel } from "@/components/HyperliquidPanel";
 import { ExtendedConnectPanel } from "@/components/ExtendedConnectPanel";
 import { TxflowPanel } from "@/components/TxflowPanel";
+import { PerpVenuesSummary, VENUE_ANCHOR } from "@/components/PerpVenuesSummary";
 import { LifiPerpsConnectPanel } from "@/components/LifiPerpsConnectPanel";
 import { LidoWithdrawalsPanel } from "@/components/LidoWithdrawalsPanel";
 import { PerpPositionsPanel } from "@/components/PerpPositionsPanel";
@@ -437,13 +438,22 @@ export default function TerminalApp() {
               <LidoWithdrawalsPanel />
               {FEATURES.perps && (
                 <>
-                  <HyperliquidPanel />
-                  <div data-tour="extended">
+                  <PerpVenuesSummary />
+                  <div id={VENUE_ANCHOR.hyperliquid}>
+                    <HyperliquidPanel />
+                  </div>
+                  <div data-tour="extended" id={VENUE_ANCHOR.extended}>
                     <ExtendedConnectPanel />
                   </div>
-                  <TxflowPanel />
-                  <LifiPerpsConnectPanel provider="ondo" />
-                  <LifiPerpsConnectPanel provider="lighter" />
+                  <div id={VENUE_ANCHOR.txflow}>
+                    <TxflowPanel />
+                  </div>
+                  <div id={VENUE_ANCHOR.ondo}>
+                    <LifiPerpsConnectPanel provider="ondo" />
+                  </div>
+                  <div id={VENUE_ANCHOR.lighter}>
+                    <LifiPerpsConnectPanel provider="lighter" />
+                  </div>
                 </>
               )}
               {FEATURES.solana && <SolanaPanel />}

@@ -22,6 +22,9 @@ import {
   sizeToWire,
   txflowAgentTypedData,
   txflowApproveAgent,
+  txflowApproveBuilderFee,
+  TXFLOW_BUILDER,
+  TXFLOW_BUILDER_MAX_FEE,
   txflowLeverageAction,
   txflowOrderAction,
   txflowOrderBody,
@@ -39,7 +42,9 @@ export const TXFLOW_SLIPPAGE = 0.01;
 const AGENT_NAME = "meridian";
 
 /** The wallet's EIP-712 signer (wagmi signTypedData). */
-export type TxflowWalletSign = (typedData: ReturnType<typeof txflowApproveAgent>["typedData"] | ReturnType<typeof txflowWithdraw>["typedData"]) => Promise<Hex>;
+export type TxflowWalletSign = (
+  typedData: ReturnType<typeof txflowApproveAgent>["typedData"] | ReturnType<typeof txflowWithdraw>["typedData"] | ReturnType<typeof txflowApproveBuilderFee>["typedData"],
+) => Promise<Hex>;
 
 async function postExchange(network: TxflowNetwork, envelope: Record<string, unknown>): Promise<TxflowOutcome> {
   const res = await fetch(txflowUrl(network, "exchange"), {
@@ -79,6 +84,37 @@ function saveTxflowAgent(user: Address, network: TxflowNetwork, agent: TxflowAge
   }
 }
 
+/** Builders the account has approved (ACTIVE only); null when it can't be read. */
+async function approvedBuilders(network: TxflowNetwork, user: Address): Promise<string[] | null> {
+  try {
+    const d = await txflowInfo<{ approvals?: { builder?: string; status?: string }[] }>(network, { type: "approvedBuilders", user });
+    return (d?.approvals ?? []).filter((a) => !a.status || a.status === "ACTIVE").map((a) => (a.builder ?? "").toLowerCase());
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * TxFlow accepts a trading key only from an account that approved at least
+ * one builder. When none is approved, the wallet approves Meridian's (one
+ * signature, the smallest cap, no fee attached to orders).
+ */
+export async function ensureTxflowBuilder(p: { user: Address; walletSign: TxflowWalletSign; walletChainId: number; network?: TxflowNetwork; force?: boolean }): Promise<void> {
+  const network = p.network ?? TXFLOW_NETWORK;
+  if (!p.force) {
+    const builders = await approvedBuilders(network, p.user);
+    if (builders && builders.length > 0) return;
+  }
+  if (TXFLOW_BUILDER.toLowerCase() === p.user.toLowerCase()) {
+    throw new Error("This wallet is Meridian's TxFlow builder address, which can't approve itself: trade from another wallet.");
+  }
+  const nonce = Date.now();
+  const { action, typedData, signatureChainId } = txflowApproveBuilderFee({ network, builder: TXFLOW_BUILDER, maxFeeRate: TXFLOW_BUILDER_MAX_FEE, nonce, walletChainId: p.walletChainId });
+  const signature = txflowSignature(await p.walletSign(typedData));
+  const out = await postExchange(network, { action, signature, nonce, vaultAddress: null, signatureChainId, confirm: "executed" });
+  if (!out.ok) throw new Error(`TxFlow didn't record the builder approval: ${out.error}`);
+}
+
 /** Forget the trading key kept in this browser (the next trade approves a new one). */
 export function forgetTxflowAgent(user: Address, network: TxflowNetwork = TXFLOW_NETWORK) {
   saveTxflowAgent(user, network, null);
@@ -87,12 +123,21 @@ export function forgetTxflowAgent(user: Address, network: TxflowNetwork = TXFLOW
 /** One wallet signature: authorize a fresh trading key (it replaces the earlier "meridian" key). */
 export async function approveTxflowAgent(p: { user: Address; walletSign: TxflowWalletSign; walletChainId: number; network?: TxflowNetwork }): Promise<TxflowAgent> {
   const network = p.network ?? TXFLOW_NETWORK;
+  await ensureTxflowBuilder({ ...p, network });
   const key = generatePrivateKey();
   const agent = privateKeyToAccount(key);
-  const nonce = Date.now();
-  const { action, typedData, signatureChainId } = txflowApproveAgent({ network, agentAddress: agent.address, agentName: AGENT_NAME, nonce, walletChainId: p.walletChainId });
-  const signature = txflowSignature(await p.walletSign(typedData));
-  const out = await postExchange(network, { action, signature, nonce, vaultAddress: null, signatureChainId, confirm: "executed" });
+  const send = async () => {
+    const nonce = Date.now();
+    const { action, typedData, signatureChainId } = txflowApproveAgent({ network, agentAddress: agent.address, agentName: AGENT_NAME, nonce, walletChainId: p.walletChainId });
+    const signature = txflowSignature(await p.walletSign(typedData));
+    return postExchange(network, { action, signature, nonce, vaultAddress: null, signatureChainId, confirm: "executed" });
+  };
+  let out = await send();
+  // The builder list can trail the approval it was read from: approve Meridian's builder outright, then once more.
+  if (!out.ok && /builder/i.test(out.error ?? "")) {
+    await ensureTxflowBuilder({ ...p, network, force: true });
+    out = await send();
+  }
   if (!out.ok) throw new Error(`TxFlow didn't approve the trading key: ${out.error}`);
   const stored = { key, address: agent.address };
   saveTxflowAgent(p.user, network, stored);
