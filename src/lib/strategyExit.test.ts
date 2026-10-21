@@ -110,3 +110,22 @@ describe("exit tracking", () => {
     expect(applyLegConfirmed([], plan, 0, { hash: "0xa" }, 10).changed).toBe(false);
   });
 });
+
+describe("Hyperliquid HLP and staked HYPE", () => {
+  it("exit notes point to the Hyperliquid app (lock-up / unstaking queue); value now reads the HLP and staking rows", () => {
+    const s = strat([
+      leg({ side: "Deposit", asset: "HLP", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 100 }),
+      leg({ side: "Stake", asset: "HYPE", protocol: "Hyperliquid", sizeUsd: 50 }),
+    ]);
+    const { legs, notes } = exitPlan(s);
+    expect(legs).toEqual([]);
+    expect(notes.join(" ")).toMatch(/4-day lock-up/);
+    expect(notes.join(" ")).toMatch(/7-day unstaking queue/);
+    expect(
+      currentValueUsd(s, [
+        { symbol: "HLP", venue: "Hyperliquid HLP", chain: "Hyperliquid L1", usd: 101.5 },
+        { symbol: "HYPE", venue: "Hyperliquid staking", chain: "Hyperliquid L1", usd: 52 },
+      ]),
+    ).toBe(153.5);
+  });
+});

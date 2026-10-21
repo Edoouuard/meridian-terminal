@@ -48,6 +48,8 @@ function undo(l: TrackedLeg): { leg?: TradeLeg; note?: string } {
   }
 
   if (is(l, /hyperliquid/i)) {
+    if (/\bhlp\b/i.test(l.asset)) return { note: "HLP: withdraw from the vault in the Hyperliquid app once its 4-day lock-up has passed." };
+    if ((s === "stake" || s === "delegate") && /\bhype\b/i.test(l.asset)) return { note: "Staked HYPE: undelegate in the Hyperliquid app; it comes back to spot after the 7-day unstaking queue." };
     if (s === "buy") return { leg: { ...base, side: "Sell", asset: l.asset.replace(/\s*\(.*\)$/, ""), chain: "HyperEVM", note: "Sell back to USDC on Hyperliquid spot." } };
     if (s === "deposit" || s === "fund") return { leg: { ...base, side: "Withdraw", asset: "USDC", chain: "Arbitrum", note: "Back to your wallet on Arbitrum in ~5 min ($1 fee)." } };
     return {};
@@ -109,6 +111,8 @@ export function positionFor(l: TrackedLeg, positions: PositionLike[]): PositionL
   const vault = vaultProtocolFor(l.protocol) ? findVault(l.protocol, l.asset, chainIdOf(l.chain)) : undefined;
   if (vault) return positions.find((p) => p.venue === `${vault.protocol} vault · ${vault.shareSymbol}` && p.chain.toLowerCase() === chain);
   if (is(l, /eigen/i)) return positions.find((p) => p.venue === "EigenLayer");
+  if (is(l, /hyperliquid/i) && /\bhlp\b/i.test(l.asset)) return positions.find((p) => p.venue === "Hyperliquid HLP");
+  if (is(l, /hyperliquid/i) && /\bhype\b/i.test(l.asset)) return positions.find((p) => p.venue === "Hyperliquid staking");
   if (is(l, /morpho/i)) return positions.find((p) => p.venue.startsWith("Morpho vault") && p.chain.toLowerCase() === chain && p.symbol.toUpperCase() === l.asset.toUpperCase());
   return undefined;
 }
@@ -120,7 +124,9 @@ export function positionFor(l: TrackedLeg, positions: PositionLike[]): PositionL
  * same vault, which the UI says.
  */
 export function currentValueUsd(s: TrackedStrategy, positions: PositionLike[]): number | undefined {
-  const deposits = s.legs.filter((l) => l.status === "confirmed" && /^(supply|deposit|stake|restake)$/.test(side(l)) && !is(l, /hyperliquid|extended|lido/i));
+  // A Hyperliquid account deposit or Lido stake mixes into a balance the user holds anyway; HLP and staked HYPE are positions of their own.
+  const ownPosition = (l: TrackedLeg) => !is(l, /hyperliquid|extended|lido/i) || /\b(hlp|hype)\b/i.test(l.asset);
+  const deposits = s.legs.filter((l) => l.status === "confirmed" && /^(supply|deposit|stake|restake)$/.test(side(l)) && ownPosition(l));
   if (deposits.length === 0 || s.legs.some((l) => l.status === "confirmed" && isPerp(l))) return undefined;
   let sum = 0;
   const seen = new Set<PositionLike>();

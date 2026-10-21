@@ -561,7 +561,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           functionName: "transfer",
           args: [to, amount.value],
           description: `Deposit ${order.amount} USDC into your Hyperliquid account (official Bridge2 on Arbitrum)`,
-          riskNote: "Hyperliquid credits the USDC to the sending address within about a minute. Trading and HLP deposits then happen on Hyperliquid.",
+          riskNote: "Hyperliquid credits the USDC to the sending address within about a minute. Trading, HLP deposits and HYPE staking then run from Meridian on that account.",
         };
       }
       if (isHyperCoreSystemAddress(chainId, to)) {

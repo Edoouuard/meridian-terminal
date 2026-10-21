@@ -15,7 +15,11 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import type { Address, Hex } from "viem";
 import {
   HL_WITHDRAW_FEE_USD,
+  HYPE_WEI_DECIMALS,
   approveAgentAction,
+  cDepositAction,
+  tokenDelegateAction,
+  vaultTransferAction,
   cancelAction,
   firstOrderError,
   isUnknownAgentError,
@@ -33,7 +37,7 @@ import {
   withdrawAction,
   type ExchangeOutcome,
 } from "@/lib/integrations/hyperliquidExchange";
-import { hyperliquidEnv, type HyperliquidEnv } from "@/lib/integrations/hyperliquid-live";
+import { HLP_VAULT_ADDRESS, hyperliquidEnv, type HyperliquidEnv } from "@/lib/integrations/hyperliquid-live";
 
 export const AGENT_NAME = "meridian";
 /** Market orders are IOC limits this far through the mid: they fill now or not at all. */
@@ -234,7 +238,9 @@ export type WalletSign = (
   typedData:
     | ReturnType<typeof approveAgentAction>["typedData"]
     | ReturnType<typeof withdrawAction>["typedData"]
-    | ReturnType<typeof usdClassTransferAction>["typedData"],
+    | ReturnType<typeof usdClassTransferAction>["typedData"]
+    | ReturnType<typeof cDepositAction>["typedData"]
+    | ReturnType<typeof tokenDelegateAction>["typedData"],
 ) => Promise<Hex>;
 
 /** One wallet signature: approve a fresh agent key (replaces any earlier "meridian" agent). */
@@ -657,6 +663,109 @@ export async function withdrawUsdcToArbitrum(p: {
   const signature = splitSignature(await p.walletSign(typedData));
   const out = parseExchangeResponse(await postExchange(p.env, { action, nonce: time, signature, vaultAddress: null }));
   return out.ok ? { ok: true, amount } : { ok: false, error: out.error };
+}
+
+/* ─── HLP deposit and HYPE staking ───────────────────────────────────── */
+
+/** HLP deposits are locked this long before they can be withdrawn. */
+export const HLP_LOCKUP_DAYS = 4;
+/** Staked HYPE takes this long to come back to spot after undelegating (Hyperliquid's unstaking queue). */
+export const HYPE_UNSTAKE_DAYS = 7;
+
+/**
+ * Deposit USDC from the Hyperliquid account into HLP (vaultTransfer, signed by
+ * the trading key). Outside unified mode HLP draws on perps margin, so USDC in
+ * spot is moved to perps first (one wallet signature).
+ */
+export async function depositToHlp(p: {
+  user: Address;
+  env: HyperliquidEnv;
+  walletSign: WalletSign;
+  walletChainId: number;
+  usd: number;
+  onStep?: (step: "approving" | "moving" | "depositing") => void;
+}): Promise<{ ok: boolean; amount?: number; error?: string }> {
+  const balances = await fetchWithdrawable(p.env, p.user);
+  let available = balances.unified ? withdrawableUsd(balances) : balances.perps;
+  if (!balances.unified && available < p.usd && balances.spotUsdc > 0) {
+    p.onStep?.("moving");
+    const move = Number(usdc2(Math.min(p.usd - available, balances.spotUsdc)));
+    const moved = move > 0 ? await moveSpotUsdcToPerps({ env: p.env, walletSign: p.walletSign, walletChainId: p.walletChainId, amount: move }) : { ok: true };
+    if (!moved.ok) return { ok: false, error: `Couldn't move USDC from spot to perps: ${moved.error}` };
+    available += move;
+  }
+  const amount = Number(usdc2(Math.min(p.usd, available)));
+  if (!(amount >= 1)) return { ok: false, error: `Only $${available.toFixed(2)} of USDC is free in your Hyperliquid account.` };
+  const out = await withAgent({ ...p, onApproving: () => p.onStep?.("approving") }, (key) => {
+    p.onStep?.("depositing");
+    return sendL1(p.env, key, vaultTransferAction({ vaultAddress: HLP_VAULT_ADDRESS as Address, isDeposit: true, usd: Math.round(amount * 1e6) }));
+  });
+  return out.ok ? { ok: true, amount } : { ok: false, error: out.error };
+}
+
+export interface ValidatorSummary {
+  validator: Address;
+  name: string;
+  stake: number;
+  commission: number;
+  isActive: boolean;
+  isJailed: boolean;
+}
+
+export function parseValidators(raw: unknown): ValidatorSummary[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((v) => ({
+      validator: String(v?.validator ?? "") as Address,
+      name: String(v?.name ?? "validator"),
+      stake: Number(v?.stake ?? 0),
+      commission: Number(v?.commission ?? 1),
+      isActive: v?.isActive === true,
+      isJailed: v?.isJailed === true,
+    }))
+    .filter((v) => /^0x[0-9a-fA-F]{40}$/.test(v.validator) && Number.isFinite(v.stake) && Number.isFinite(v.commission));
+}
+
+/** Where to delegate by default: an active, unjailed validator with a commission of 5% or less, the most staked first. */
+export function pickValidator(list: ValidatorSummary[]): ValidatorSummary | undefined {
+  return list.filter((v) => v.isActive && !v.isJailed && v.commission <= 0.05).sort((a, b) => b.stake - a.stake)[0];
+}
+
+export async function fetchValidators(env: HyperliquidEnv): Promise<ValidatorSummary[]> {
+  return parseValidators(await infoPost<unknown>(env, { type: "validatorSummaries" }));
+}
+
+/**
+ * Stake HYPE from the Hyperliquid spot balance: move it to staking
+ * (cDeposit), then delegate it to a validator (tokenDelegate). Two wallet
+ * signatures, no gas. Rewards accrue from the delegation; getting HYPE back
+ * takes Hyperliquid's 7-day unstaking queue.
+ */
+export async function stakeHype(p: {
+  user: Address;
+  env: HyperliquidEnv;
+  walletSign: WalletSign;
+  walletChainId: number;
+  amount: number;
+  validator: Address;
+  onStep?: (step: "depositing" | "delegating") => void;
+}): Promise<{ ok: boolean; amount?: number; error?: string }> {
+  const spot = await fetchSpotBalance(p.env, p.user, "HYPE");
+  const amount = Math.floor(Math.min(p.amount, spot) * 1e4) / 1e4;
+  if (!(amount > 0)) return { ok: false, error: "No HYPE in your Hyperliquid spot balance to stake. HYPE on HyperEVM has to be moved to HyperCore spot first." };
+  const wei = Math.round(amount * 10 ** HYPE_WEI_DECIMALS);
+  const isMainnet = !p.env.testnet;
+  p.onStep?.("depositing");
+  const n1 = Date.now();
+  const dep = cDepositAction({ wei, nonce: n1, isMainnet, signatureChainId: p.walletChainId });
+  const r1 = parseExchangeResponse(await postExchange(p.env, { action: dep.action, nonce: n1, signature: splitSignature(await p.walletSign(dep.typedData)), vaultAddress: null }));
+  if (!r1.ok) return { ok: false, error: `Couldn't move HYPE to staking: ${r1.error}` };
+  p.onStep?.("delegating");
+  const n2 = Date.now() + 1;
+  const del = tokenDelegateAction({ validator: p.validator, wei, isUndelegate: false, nonce: n2, isMainnet, signatureChainId: p.walletChainId });
+  const r2 = parseExchangeResponse(await postExchange(p.env, { action: del.action, nonce: n2, signature: splitSignature(await p.walletSign(del.typedData)), vaultAddress: null }));
+  if (!r2.ok) return { ok: false, error: `HYPE is in your staking balance but the delegation failed (${r2.error}). Delegate it from the Hyperliquid app or try again.` };
+  return { ok: true, amount };
 }
 
 /** Hyperliquid refuses orders under $10 of notional. */

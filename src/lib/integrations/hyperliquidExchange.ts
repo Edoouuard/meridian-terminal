@@ -190,6 +190,66 @@ export function usdClassTransferAction(p: { amount: string; toPerp: boolean; non
   return { action, typedData };
 }
 
+/**
+ * Deposit USDC from the account into a vault (HLP), or take it back: an L1
+ * action the agent key signs. `usd` is in micro-USDC (1 USDC = 1_000_000).
+ * Key order matters: it is hashed with msgpack exactly as built here.
+ */
+export function vaultTransferAction(p: { vaultAddress: Address; isDeposit: boolean; usd: number }) {
+  return { type: "vaultTransfer", vaultAddress: p.vaultAddress.toLowerCase(), isDeposit: p.isDeposit, usd: Math.floor(p.usd) };
+}
+
+const C_DEPOSIT_TYPES = [
+  { name: "hyperliquidChain", type: "string" },
+  { name: "wei", type: "uint64" },
+  { name: "nonce", type: "uint64" },
+] as const;
+
+/** Move HYPE from the spot balance to the staking balance (cDeposit). Signed by the WALLET. `wei` is HYPE × 1e8. */
+export function cDepositAction(p: { wei: number; nonce: number; isMainnet: boolean; signatureChainId: number }) {
+  const hyperliquidChain = p.isMainnet ? "Mainnet" : "Testnet";
+  const action = { type: "cDeposit", signatureChainId: `0x${p.signatureChainId.toString(16)}`, hyperliquidChain, wei: p.wei, nonce: p.nonce };
+  const typedData = {
+    domain: userSignedDomain(p.signatureChainId),
+    types: { "HyperliquidTransaction:CDeposit": C_DEPOSIT_TYPES },
+    primaryType: "HyperliquidTransaction:CDeposit" as const,
+    message: { hyperliquidChain, wei: BigInt(p.wei), nonce: BigInt(p.nonce) },
+  };
+  return { action, typedData };
+}
+
+const TOKEN_DELEGATE_TYPES = [
+  { name: "hyperliquidChain", type: "string" },
+  { name: "validator", type: "address" },
+  { name: "wei", type: "uint64" },
+  { name: "isUndelegate", type: "bool" },
+  { name: "nonce", type: "uint64" },
+] as const;
+
+/** Delegate staked HYPE to a validator (or undelegate). Signed by the WALLET. */
+export function tokenDelegateAction(p: { validator: Address; wei: number; isUndelegate: boolean; nonce: number; isMainnet: boolean; signatureChainId: number }) {
+  const hyperliquidChain = p.isMainnet ? "Mainnet" : "Testnet";
+  const action = {
+    type: "tokenDelegate",
+    signatureChainId: `0x${p.signatureChainId.toString(16)}`,
+    hyperliquidChain,
+    validator: p.validator,
+    wei: p.wei,
+    isUndelegate: p.isUndelegate,
+    nonce: p.nonce,
+  };
+  const typedData = {
+    domain: userSignedDomain(p.signatureChainId),
+    types: { "HyperliquidTransaction:TokenDelegate": TOKEN_DELEGATE_TYPES },
+    primaryType: "HyperliquidTransaction:TokenDelegate" as const,
+    message: { hyperliquidChain, validator: p.validator, wei: BigInt(p.wei), isUndelegate: p.isUndelegate, nonce: BigInt(p.nonce) },
+  };
+  return { action, typedData };
+}
+
+/** HYPE on HyperCore has 8 wei decimals. */
+export const HYPE_WEI_DECIMALS = 8;
+
 /** Hyperliquid's fixed fee on a withdrawal to Arbitrum, in USDC. */
 export const HL_WITHDRAW_FEE_USD = 1;
 
