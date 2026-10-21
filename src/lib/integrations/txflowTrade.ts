@@ -25,12 +25,13 @@ import {
   txflowLeverageAction,
   txflowOrderAction,
   txflowOrderBody,
+  txflowPositionTpslAction,
   txflowSignature,
   txflowWithdraw,
   type TxflowNetwork,
   type TxflowOutcome,
 } from "@/lib/integrations/txflowExchange";
-import { TXFLOW_NETWORK, fetchTxflowAccount, fetchTxflowCtx, fetchTxflowMarkets, findTxflowMarket, txflowUrl, type TxflowMarket } from "@/lib/integrations/txflow-live";
+import { TXFLOW_NETWORK, fetchTxflowAccount, fetchTxflowCtx, fetchTxflowMarkets, findTxflowMarket, txflowInfo, txflowUrl, type TxflowMarket } from "@/lib/integrations/txflow-live";
 import { TXFLOW_API_VERSION_HEADER } from "@/lib/integrations/txflowExchange";
 
 /** Market orders cross the mark by this much (IOC: fills now within it, or not at all). */
@@ -133,6 +134,71 @@ export interface TxflowFillResult extends TxflowOutcome {
   market?: TxflowMarket;
   /** Base quantity filled and its price (the entry for a new position, else the mark). */
   filled?: { totalSz: number; avgPx: number };
+  /** Stop-loss / take-profit placed after the fill, as TxFlow reports them back. */
+  protection?: TxflowProtection;
+}
+
+export interface TxflowProtection {
+  ok: boolean;
+  sl?: number;
+  tp?: number;
+  error?: string;
+}
+
+/** Stop-loss / take-profit prices from the entry: a % price move against (SL) or for (TP) the position, on the tick. */
+export function txflowProtectionPrices(entry: number, isLong: boolean, tick: string, p: { stopLossPct?: number; takeProfitPct?: number }): { sl?: string; tp?: string } {
+  const at = (pct: number, up: boolean) => priceOnTick(entry * (up ? 1 + pct / 100 : 1 - pct / 100), tick);
+  return {
+    sl: p.stopLossPct && p.stopLossPct > 0 && p.stopLossPct < 100 ? at(p.stopLossPct, !isLong) : undefined,
+    tp: p.takeProfitPct && p.takeProfitPct > 0 ? at(p.takeProfitPct, isLong) : undefined,
+  };
+}
+
+interface RawTpslPair {
+  slTriggerPrice?: string;
+  tpTriggerPrice?: string;
+  slOid?: string;
+  tpOid?: string;
+}
+
+/** The TP/SL pair bound to a position, as TxFlow lists it (zeros = none). */
+async function readPositionTpsl(network: TxflowNetwork, user: Address, market: TxflowMarket, isLong: boolean): Promise<{ sl?: number; tp?: number }> {
+  const rows = await txflowInfo<RawTpslPair[]>(network, {
+    type: "positionTpslOrders",
+    user,
+    asset: String(market.index),
+    marginMode: market.onlyIsolated ? "isolated" : "cross",
+    side: isLong ? "long" : "short",
+  }).catch(() => [] as RawTpslPair[]);
+  const num = (v?: string) => (Number(v) > 0 ? Number(v) : undefined);
+  const out: { sl?: number; tp?: number } = {};
+  for (const r of rows ?? []) {
+    out.sl = out.sl ?? num(r.slTriggerPrice);
+    out.tp = out.tp ?? num(r.tpTriggerPrice);
+  }
+  return out;
+}
+
+/**
+ * Bind a stop-loss / take-profit to the open position, then read the pair
+ * back: it counts as placed only when TxFlow lists it on the position.
+ */
+export async function placeTxflowProtection(
+  network: TxflowNetwork,
+  agentKey: Hex,
+  o: { user: Address; market: TxflowMarket; isLong: boolean; entry: number; stopLossPct?: number; takeProfitPct?: number },
+): Promise<TxflowProtection | undefined> {
+  const { sl, tp } = txflowProtectionPrices(o.entry, o.isLong, o.market.priceTick, o);
+  if (!sl && !tp) return undefined;
+  const marginMode = o.market.onlyIsolated ? "isolated" : "cross";
+  const out = await sendAgentAction(network, agentKey, txflowPositionTpslAction({ asset: o.market.index, isLong: o.isLong, sl, tp, marginMode }));
+  if (!out.ok) return { ok: false, error: out.error };
+  for (let i = 0; i < 5; i++) {
+    const seen = await readPositionTpsl(network, o.user, o.market, o.isLong);
+    if ((!sl || seen.sl) && (!tp || seen.tp)) return { ok: true, sl: seen.sl, tp: seen.tp };
+    await sleep(600);
+  }
+  return { ok: false, error: "TxFlow accepted the stop-loss / take-profit but doesn't list it on the position yet. Check it on txflow.com." };
 }
 
 /** Size the order: an exact base quantity, or USD over the mark; on szDecimals, rounded down. */
@@ -161,7 +227,7 @@ const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 export async function txflowMarketOrder(
   network: TxflowNetwork,
   agentKey: Hex,
-  o: { user: Address; symbol: string; isBuy: boolean; sizeUsd?: number; coinQty?: number; leverage?: number; reduceOnly?: boolean },
+  o: { user: Address; symbol: string; isBuy: boolean; sizeUsd?: number; coinQty?: number; leverage?: number; reduceOnly?: boolean; stopLossPct?: number; takeProfitPct?: number },
 ): Promise<TxflowFillResult> {
   const market = findTxflowMarket(await fetchTxflowMarkets(network), o.symbol);
   if (!market) return { ok: false, error: `${o.symbol} isn't listed on TxFlow.` };
@@ -194,7 +260,14 @@ export async function txflowMarketOrder(
     const filled = fillFromPositions(before, after?.size ?? 0, o.isBuy);
     if (filled > 0) {
       const avgPx = before === 0 && after?.entry ? after.entry : ctx.mark;
-      return { ok: true, market, filled: { totalSz: Number(filled.toFixed(market.szDecimals)), avgPx } };
+      // Protection from the real entry, on the position as it now stands (a failure there never undoes the fill).
+      const protection =
+        !o.reduceOnly && after && (o.stopLossPct || o.takeProfitPct)
+          ? await placeTxflowProtection(network, agentKey, { user: o.user, market, isLong: after.size > 0, entry: after.entry || avgPx, stopLossPct: o.stopLossPct, takeProfitPct: o.takeProfitPct }).catch(
+              (e: unknown): TxflowProtection => ({ ok: false, error: e instanceof Error ? e.message : String(e) }),
+            )
+          : undefined;
+      return { ok: true, market, filled: { totalSz: Number(filled.toFixed(market.szDecimals)), avgPx }, protection };
     }
     await sleep(600);
   }

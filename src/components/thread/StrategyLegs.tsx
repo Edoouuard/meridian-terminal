@@ -166,7 +166,7 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
         const isLifiSwap = /li\.?fi/i.test(leg.protocol || "") && !isBridge;
         const isLidoStake = isLido && legSide === "stake";
         // USDC from the Hyperliquid account into HLP (trading-key signed), and HYPE staking (two wallet signatures).
-        const isHlp = /hyperliquid/i.test(leg.protocol || "") && /^(deposit|supply|fund)$/.test(legSide) && (/\bhlp\b/i.test(leg.asset || "") || /\bhlp\b/i.test(leg.protocol || ""));
+        const isHlp = /hyperliquid|\bhlp\b/i.test(leg.protocol || "") && /^(deposit|supply|fund|stake)$/.test(legSide) && (/\bhlp\b/i.test(leg.asset || "") || /\bhlp\b/i.test(leg.protocol || ""));
         const isHypeStake = /hyperliquid/i.test(leg.protocol || "") && /^(stake|delegate)$/.test(legSide) && /\bhype\b/i.test(leg.asset || "");
         // A Hyperliquid deposit is a plain validated USDC transfer on Arbitrum, not a perp order.
         const isHlDeposit = /hyperliquid/i.test(leg.protocol || "") && (legSide === "deposit" || legSide === "supply" || legSide === "fund") && !isHlp;
@@ -240,7 +240,7 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
             ) : isPerp && /hyperliquid/i.test(leg.protocol || "") ? (
               <PerpExecuteButton leg={leg} hedged={hedgesSpot(leg, plan.legs)} onFilled={recordFill(i)} baseQty={partnerQty(i)} />
             ) : /txflow/i.test(leg.protocol || "") ? (
-              <TxflowPerpExecuteButton leg={leg} onFilled={recordFill(i)} baseQty={partnerQty(i)} />
+              <TxflowPerpExecuteButton leg={leg} hedged={hedgesSpot(leg, plan.legs)} onFilled={recordFill(i)} baseQty={partnerQty(i)} />
             ) : /extended/i.test(leg.protocol || "") ? (
               <ExtendedPerpExecuteButton leg={leg} prices={prices} onFilled={recordFill(i)} baseQty={partnerQty(i)} />
             ) : /ondo/i.test(leg.protocol || "") ? (

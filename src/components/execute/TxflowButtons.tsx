@@ -11,7 +11,8 @@ import { fundingAprForSide, marginNeededUsd } from "@/lib/integrations/hyperliqu
 import { ARBITRUM_USDC, HYPERLIQUID_DEPOSIT_CHAIN_ID } from "@/lib/integrations/hyperliquidDeposit";
 import { TXFLOW_MIN_WITHDRAW_USD, TXFLOW_WITHDRAW_FEE_USD } from "@/lib/integrations/txflowExchange";
 import { TXFLOW_MIN_DEPOSIT_USD, TXFLOW_NETWORK, fetchTxflowAccount, fetchTxflowBridge, fetchTxflowCtx, fetchTxflowMarkets, findTxflowMarket } from "@/lib/integrations/txflow-live";
-import { loadTxflowAgent, txflowMarketOrder, withTxflowAgent, withdrawFromTxflow, type TxflowFillResult, type TxflowWalletSign } from "@/lib/integrations/txflowTrade";
+import { loadTxflowAgent, txflowMarketOrder, txflowProtectionPrices, withTxflowAgent, withdrawFromTxflow, type TxflowFillResult, type TxflowWalletSign } from "@/lib/integrations/txflowTrade";
+import { defaultStopLossPct } from "@/components/execute/PerpExecuteButtons";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
 import { NotWired, OrderRow } from "@/components/thread/shared";
@@ -36,7 +37,7 @@ function useTxflowSigner(): { address?: Address; chainId?: number; walletSign: T
  * (approved once by the wallet; it can trade, never withdraw). The fill is
  * read back from the account; a position can be closed here at market.
  */
-export function TxflowPerpExecuteButton({ leg, onFilled, baseQty }: { leg: TradeLeg; onFilled?: (ref: string) => void; baseQty?: number }) {
+export function TxflowPerpExecuteButton({ leg, onFilled, baseQty, hedged = false }: { leg: TradeLeg; onFilled?: (ref: string) => void; baseQty?: number; hedged?: boolean }) {
   const { address, chainId, walletSign } = useTxflowSigner();
   const [confirming, setConfirming] = useState<"open" | "close" | null>(null);
   const [state, setState] = useState<{ status: "idle" | "approving" | "submitting" | "done" | "error"; result?: TxflowFillResult; error?: string; closed?: boolean }>({ status: "idle" });
@@ -45,6 +46,11 @@ export function TxflowPerpExecuteButton({ leg, onFilled, baseQty }: { leg: Trade
   const isBuy = side === "long" || side === "buy";
   const sizeUsd = leg.sizeUsd && leg.sizeUsd > 0 ? leg.sizeUsd : 0;
   const leverage = Math.max(1, Math.round(leg.leverage ?? 1));
+  // The plan's stop-loss / take-profit win over the defaults; a short that hedges a spot holding gets no stop by default.
+  const [slOn, setSlOn] = useState(leg.stopLossPct ? true : !hedged);
+  const [tpOn, setTpOn] = useState(!!leg.takeProfitPct);
+  const [slPct, setSlPct] = useState(() => leg.stopLossPct ?? defaultStopLossPct(leverage));
+  const [tpPct, setTpPct] = useState(() => leg.takeProfitPct ?? 2 * defaultStopLossPct(leverage));
 
   const market = useQuery({
     queryKey: ["txflow-market", TXFLOW_NETWORK, leg.asset],
@@ -91,7 +97,16 @@ export function TxflowPerpExecuteButton({ leg, onFilled, baseQty }: { leg: Trade
         setState({ status: "submitting" });
         return close && position
           ? txflowMarketOrder(TXFLOW_NETWORK, key, { user: address, symbol: m.name, isBuy: position.size < 0, coinQty: Math.abs(position.size), reduceOnly: true })
-          : txflowMarketOrder(TXFLOW_NETWORK, key, { user: address, symbol: m.name, isBuy, sizeUsd, coinQty: baseQty, leverage });
+          : txflowMarketOrder(TXFLOW_NETWORK, key, {
+              user: address,
+              symbol: m.name,
+              isBuy,
+              sizeUsd,
+              coinQty: baseQty,
+              leverage,
+              stopLossPct: slOn && slPct > 0 ? slPct : undefined,
+              takeProfitPct: tpOn && tpPct > 0 ? tpPct : undefined,
+            });
       });
       setState(out.ok ? { status: "done", result: out, closed: close } : { status: "error", error: out.error });
       void acct.refetch();
@@ -127,6 +142,13 @@ export function TxflowPerpExecuteButton({ leg, onFilled, baseQty }: { leg: Trade
         <p style={doneStyle}>
           {state.closed ? `Closed ${f.totalSz} ${m.base} on TxFlow at ~$${f.avgPx.toLocaleString("en-US", { maximumFractionDigits: 4 })}.` : `Filled on TxFlow: ${isBuy ? "long" : "short"} ${f.totalSz} ${m.base} at ~$${f.avgPx.toLocaleString("en-US", { maximumFractionDigits: 4 })}.`}
         </p>
+        {!state.closed && state.result.protection && (
+          <p style={state.result.protection.ok ? doneStyle : errStyle}>
+            {state.result.protection.ok
+              ? [state.result.protection.sl ? `Stop-loss $${state.result.protection.sl}` : "", state.result.protection.tp ? `take-profit $${state.result.protection.tp}` : ""].filter(Boolean).join(" · ") + " set on TxFlow."
+              : `The position is open but the stop-loss / take-profit wasn't confirmed: ${state.result.protection.error} Set it on txflow.com or close the position below.`}
+          </p>
+        )}
         {!state.closed && position && (
           <button className="btn" style={{ fontSize: 12, marginTop: 6, cursor: "pointer" }} onClick={() => setConfirming("close")}>
             Close {position.size > 0 ? "long" : "short"} {Math.abs(position.size)} {m.base} →
@@ -146,6 +168,11 @@ export function TxflowPerpExecuteButton({ leg, onFilled, baseQty }: { leg: Trade
   }
 
   const short = !acct.isLoading && free < needed;
+  // Preview from the mark; the real stop and target are set from the fill price.
+  const prot = txflowProtectionPrices(ctx.mark, isBuy, m.priceTick, { stopLossPct: slOn ? slPct : undefined, takeProfitPct: tpOn ? tpPct : undefined });
+  const pctInput = (value: number, set: (n: number) => void, label: string) => (
+    <input type="number" min={0.5} max={90} step={0.5} value={value} aria-label={label} onChange={(e) => set(Math.max(0, Number(e.target.value) || 0))} style={{ width: 56, marginLeft: 6, fontSize: 12 }} />
+  );
   return (
     <>
       {info}
@@ -165,6 +192,16 @@ export function TxflowPerpExecuteButton({ leg, onFilled, baseQty }: { leg: Trade
         body={
           <div>
             IOC market order: {isBuy ? "buy" : "sell"} {baseQty ? `${baseQty} ${m.base}` : `${fmtUsd(sizeUsd)} of ${m.base}`} at {leverage}x (cross margin), filled now within 1% of the mark or not at all.
+            <label style={{ display: "block", marginTop: 8, fontSize: 12 }}>
+              <input type="checkbox" checked={slOn} onChange={(e) => setSlOn(e.target.checked)} /> Stop-loss
+              {pctInput(slPct, setSlPct, "Stop-loss distance in %")}% {slOn && prot.sl ? `(≈ $${prot.sl})` : ""}
+            </label>
+            <label style={{ display: "block", marginTop: 4, fontSize: 12 }}>
+              <input type="checkbox" checked={tpOn} onChange={(e) => setTpOn(e.target.checked)} /> Take-profit
+              {pctInput(tpPct, setTpPct, "Take-profit distance in %")}% {tpOn && prot.tp ? `(≈ $${prot.tp})` : ""}
+            </label>
+            {(slOn || tpOn) && <span style={{ display: "block", marginTop: 4, fontSize: 11 }} className="text-muted">Set from the real entry once the order fills: reduce-only market triggers on the whole position.</span>}
+            {hedged && slOn && <span style={{ display: "block", marginTop: 4, fontSize: 11, color: "var(--risk-bad, #c0392b)" }}>This short hedges a spot position: a stop-loss would remove the hedge when the price rises.</span>}
             {!loadTxflowAgent(address) && " First, your wallet approves a Meridian trading key for TxFlow (one signature, no gas): it can trade, never withdraw."}
           </div>
         }

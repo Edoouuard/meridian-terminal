@@ -85,7 +85,8 @@ export function namedVenues(thesis: string): PerpVenueName[] {
 }
 
 const isPerp = (l: LLMLeg) => /^(long|short)$/i.test(l.side.trim());
-const venueOf = (l: LLMLeg) => (/extended/i.test(l.protocol) ? "Extended" : /hyperliquid/i.test(l.protocol) ? "Hyperliquid" : /txflow/i.test(l.protocol) ? "TxFlow" : l.protocol);
+const venueOf = (l: LLMLeg) =>
+  /extended/i.test(l.protocol) ? "Extended" : /hyperliquid|\bhlp\b/i.test(l.protocol) ? "Hyperliquid" : /txflow/i.test(l.protocol) ? "TxFlow" : l.protocol;
 
 /** How a strategy departs from the user's hard constraints (empty = it answers the request). */
 export function deviations(s: LLMStrategy, ctx: ConformanceContext): string[] {

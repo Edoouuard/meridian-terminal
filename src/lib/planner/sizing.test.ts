@@ -60,3 +60,15 @@ describe("perp legs sized from the free margin", () => {
     expect(sizePerpLegs(pair, [1, 0], { ...balances, extendedFreeUsd: null }, 1)).toBe(pair);
   });
 });
+
+describe("a vault deposit on a perp venue (owner's test: \"put 10$ into Hyperliquid main vault\")", () => {
+  it("reads the amount and asks no capital question", async () => {
+    const { parseAmount } = await import("@/lib/tradePlan");
+    expect(parseAmount("put 10$ into Hyperliquid main vault")).toBe(10);
+    expect(parseAmount("deposit 25 usdc in HLP")).toBe(25);
+    expect(sizeQuestion({ hyperliquidFreeUsd: 37.83, extendedFreeUsd: 7.54, thesis: "put 10$ into Hyperliquid main vault" })).toBeNull();
+    expect(sizeQuestion({ hyperliquidFreeUsd: 37.83, extendedFreeUsd: 7.54, thesis: "put some money into Hyperliquid's vault" })).toBeNull();
+    // A trade on the venue still gets the question.
+    expect(sizeQuestion({ hyperliquidFreeUsd: 37.83, extendedFreeUsd: 7.54, thesis: "short ETH on Hyperliquid" })).not.toBeNull();
+  });
+});

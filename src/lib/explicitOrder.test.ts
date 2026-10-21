@@ -110,7 +110,7 @@ describe("stop-loss convention", () => {
 });
 
 describe("explicit order on TxFlow", () => {
-  it("keeps the order on TxFlow, deposits from Arbitrum when short of margin, and doesn't claim a stop it can't place", () => {
+  it("keeps the order on TxFlow with its stop-loss, and deposits from Arbitrum when short of margin", () => {
     const order = parseExplicitPerpOrder("short ETH 3x sur txflow avec un SL 10%")!;
     expect(order).toMatchObject({ side: "Short", asset: "ETH", venue: "TxFlow", leverage: 3, stopLossPct: 10 });
     const arb = [{ symbol: "USDC", venue: "Wallet", chain: "Arbitrum", usd: 100 }];
@@ -120,9 +120,8 @@ describe("explicit order on TxFlow", () => {
     expect(alt.name).toBe("HL short");
     expect(s.legs.map((l) => [l.side, l.protocol])).toEqual([["Deposit", "TxFlow"], ["Short", "TxFlow"]]);
     expect(s.legs[0].sizeUsd).toBeGreaterThanOrEqual(5);
-    expect(s.summary).not.toMatch(/stop-loss/);
-    expect(s.legs[1].note).not.toMatch(/stop-loss/);
-    expect(s.fundingNotes?.join(" ")).toMatch(/doesn't place TxFlow stop-loss/);
+    expect(s.legs[1]).toMatchObject({ stopLossPct: 10 });
+    expect(s.summary).toMatch(/stop-loss at a 10% price move/);
   });
 
   it("leaves the size unset when the TxFlow balance is unknown", () => {

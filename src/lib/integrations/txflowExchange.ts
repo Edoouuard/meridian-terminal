@@ -90,6 +90,33 @@ export function txflowOrderAction(orders: TxflowOrderBody[]) {
   return { type: "order", grouping: "na", orders };
 }
 
+export interface TxflowTriggerBody {
+  a: number;
+  b: boolean;
+  p: string;
+  s: string;
+  r: boolean;
+  t: { trigger: { isMarket: boolean; triggerPx: string; tpsl: "tp" | "sl" } };
+  m?: "cross" | "isolated";
+}
+
+/**
+ * Stop-loss / take-profit bound to an open position (`grouping:
+ * "positionTpsl"`): reduce-only market triggers on the closing side, size "0"
+ * = the whole position (as `modifyTpsl` defines it), limit price = the
+ * trigger price on the tick. Key orders are the node's: a, b, p, s, r, t, m
+ * and isMarket, triggerPx, tpsl. Stop-loss first, as TxFlow pairs them.
+ */
+export function txflowPositionTpslAction(o: { asset: number; isLong: boolean; sl?: string; tp?: string; marginMode?: "cross" | "isolated" }) {
+  const leg = (tpsl: "tp" | "sl", px: string): TxflowTriggerBody => {
+    const body: TxflowTriggerBody = { a: o.asset, b: !o.isLong, p: px, s: "0", r: true, t: { trigger: { isMarket: true, triggerPx: px, tpsl } } };
+    if (o.marginMode) body.m = o.marginMode;
+    return body;
+  };
+  const orders = [o.sl ? leg("sl", o.sl) : null, o.tp ? leg("tp", o.tp) : null].filter((x): x is TxflowTriggerBody => x !== null);
+  return { type: "order", grouping: "positionTpsl", orders };
+}
+
 export function txflowLeverageAction(asset: number, leverage: number, marginMode: "cross" | "isolated" = "cross") {
   return { type: "updateLeverage", asset, leverage, marginMode };
 }

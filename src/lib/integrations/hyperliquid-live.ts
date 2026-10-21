@@ -348,6 +348,7 @@ export const HLP_VAULT_ADDRESS = "0xdfc24b077bc1425ad1dea75bcb6f8158e10df303";
  * read-only, no signing. Returns `null` on any failure or missing/invalid
  * `apr` field rather than guessing; the vault's rate floats with its
  * trailing-window PnL, so there is no honest static fallback for it.
+ * Hyperliquid reports `apr` as a decimal (0.12 = 12%): returned in percent.
  */
 export async function fetchVaultApr(vaultAddress: string, env: HyperliquidEnv): Promise<number | null> {
   try {
@@ -359,7 +360,7 @@ export async function fetchVaultApr(vaultAddress: string, env: HyperliquidEnv): 
     });
     if (!res.ok) return null;
     const data = (await res.json()) as { apr?: number };
-    return typeof data.apr === "number" && Number.isFinite(data.apr) ? data.apr : null;
+    return typeof data.apr === "number" && Number.isFinite(data.apr) ? data.apr * 100 : null;
   } catch {
     return null;
   }

@@ -285,6 +285,15 @@ export function parseAmount(text: string): number | undefined {
     else if (s === "m") v *= 1_000_000;
     if (isFinite(v) && v > 0) return Math.round(v);
   }
+  // "10$", "10 usdc", "250 dollars": the currency after the number.
+  const trailing = text.match(/\b([0-9][0-9,]*\.?[0-9]*)\s*([km])?\s*(?:\$|usdc?\b|dollars?\b|bucks\b)/i);
+  if (trailing) {
+    let v = parseFloat(trailing[1].replace(/,/g, ""));
+    const s = (trailing[2] || "").toLowerCase();
+    if (s === "k") v *= 1000;
+    else if (s === "m") v *= 1_000_000;
+    if (isFinite(v) && v > 0) return Math.round(v * 100) / 100;
+  }
   for (const m of text.matchAll(/\b([0-9][0-9,]*)\s*([km])?\b/gi)) {
     let v = parseFloat(m[1].replace(/,/g, ""));
     const s = (m[2] || "").toLowerCase();

@@ -155,7 +155,7 @@ const VENUE_ORDER = {
     minDeposit: TXFLOW_MIN_DEPOSIT_USD,
     depositNote: "Margin for the order: USDC from Arbitrum to your TxFlow account (TxFlow's bridge, credited in a minute or two).",
     unknownBalance: "Your TxFlow balance couldn't be read just now, so the size isn't set: try again, or give a size.",
-    protection: "Meridian doesn't place TxFlow stop-loss / take-profit orders yet: set them on txflow.com once the position is open.",
+    protection: undefined as string | undefined,
   },
 } as const;
 
