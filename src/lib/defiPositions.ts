@@ -97,6 +97,29 @@ export function eigenLayerPosition(underlyingStEth: bigint | undefined, priceOf:
   return [{ symbol: "stETH", venue: "EigenLayer", chain: label(1), balance, usd: balance * assetPrice("stETH", priceOf) }];
 }
 
+export interface PendleLike {
+  chainId: number;
+  kind: "PT" | "YT" | "LP";
+  symbol: string;
+  balance: number;
+  usd: number;
+  expiry?: string;
+}
+
+/** "27 Nov 2026" */
+const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
+
+/** Pendle PT / YT / LP (valued by Pendle), with the maturity in the venue; a matured PT is redeemable 1:1. */
+export function pendlePositions(rows: PendleLike[], now: Date = new Date()): PositionAsset[] {
+  return rows
+    .filter((r) => r.usd > 0)
+    .map((r) => {
+      const matured = r.expiry ? Date.parse(r.expiry) <= now.getTime() : false;
+      const when = r.expiry ? (matured ? " · matured, redeemable" : ` · matures ${fmtDate(r.expiry)}`) : "";
+      return { symbol: r.symbol, venue: `Pendle ${r.kind}${when}`, chain: label(r.chainId), balance: r.balance, usd: r.usd };
+    });
+}
+
 export interface LidoRequestLike {
   amountOfStETH: bigint;
   isFinalized: boolean;

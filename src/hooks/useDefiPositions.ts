@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useReadContract, useReadContracts } from "wagmi";
 import type { Address } from "viem";
 import { SUPPORTED_CHAINS } from "@/lib/onchain";
@@ -10,6 +10,8 @@ import {
   eigenLayerPosition,
   lidoWithdrawalPositions,
   morphoVaultPositions,
+  pendlePositions,
+  type PendleLike,
   vaultPositions,
   type MorphoVaultLike,
   type PositionAsset,
@@ -30,6 +32,23 @@ export function useDefiPositions(
   morphoVaults: MorphoVaultLike[],
 ): { positions: PositionAsset[]; isLoading: boolean; refetch: () => Promise<unknown> } {
   const on = enabled && !!address;
+
+  // Pendle PT / YT / LP across chains (server: Pendle's dashboard API + the market contracts).
+  const [pendle, setPendle] = useState<PendleLike[]>([]);
+  const [pendleTick, setPendleTick] = useState(0);
+  useEffect(() => {
+    if (!on) return;
+    let alive = true;
+    fetch(`/api/pendle/positions?address=${address}`)
+      .then((r) => (r.ok ? r.json() : { positions: [] }))
+      .then((d: { positions?: PendleLike[] }) => {
+        if (alive) setPendle(Array.isArray(d.positions) ? d.positions : []);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [on, address, pendleTick]);
 
   // Round 1: vault shares, EigenLayer deposit shares, Lido request ids.
   const first = useReadContracts({
@@ -88,6 +107,7 @@ export function useDefiPositions(
         ...morphoVaultPositions(morphoVaults, priceOf),
         ...eigenLayerPosition(eigenUnderlying, priceOf),
         ...lidoWithdrawalPositions([...statuses], priceOf),
+        ...pendlePositions(pendle),
       ]
     : [];
 
@@ -95,6 +115,9 @@ export function useDefiPositions(
   const { refetch: r2f } = vaultValue;
   const { refetch: r3f } = eigenValue;
   const { refetch: r4f } = lidoStatus;
-  const refetch = useCallback(() => Promise.all([r1f(), r2f(), r3f(), r4f()]), [r1f, r2f, r3f, r4f]);
+  const refetch = useCallback(() => {
+    setPendleTick((t) => t + 1);
+    return Promise.all([r1f(), r2f(), r3f(), r4f()]);
+  }, [r1f, r2f, r3f, r4f]);
   return { positions, isLoading: first.isLoading || vaultValue.isLoading, refetch };
 }
