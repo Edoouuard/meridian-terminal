@@ -1644,3 +1644,4 @@ body {
   .mchart__line { animation: none; stroke-dasharray: none; stroke-dashoffset: 0; }
   .mchart__area { animation: none; opacity: 1; }
 }
+.strat-exit { font-size: 12px; padding: 4px 10px; margin-left: 6px; }

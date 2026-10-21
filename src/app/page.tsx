@@ -37,7 +37,7 @@ import { fundPlan } from "@/lib/fundingPlanner";
 import { browserFundingDeps } from "@/lib/fundingDeps";
 import { useLivePrices } from "@/hooks/useLivePrices";
 import { recordExecution } from "@/lib/history";
-import { onAsk } from "@/lib/askBus";
+import { onAsk, onShowPlan } from "@/lib/askBus";
 
 // Expose the local order-history API on the page module so real execution
 // sites (lib/orderRunner, useHyperliquid) can log orders going
@@ -275,6 +275,9 @@ export default function TerminalApp() {
     submitRef.current = submitThesis;
   });
   useEffect(() => onAsk((prompt) => void submitRef.current(prompt)), []);
+  // A plan built outside the chat (a strategy's exit) joins the thread as is: it spends positions, not wallet funds,
+  // so the wallet-funding pass (bridges, resizing to balances) doesn't apply.
+  useEffect(() => onShowPlan((item) => setThread((cur) => cur.concat([{ type: "custom", text: item.text, plan: item.plan, understanding: item.understanding }]))), []);
 
   // "/" focuses the composer from anywhere outside a text field.
   useEffect(() => {

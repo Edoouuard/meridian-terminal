@@ -19,6 +19,9 @@ import {
   type TrackedStrategy,
 } from "@/lib/strategyTracker";
 import { AskButton } from "@/components/AskButton";
+import { showPlanInChat } from "@/lib/askBus";
+import { currentValueUsd, exitPlan, exitTradePlan, type PositionLike } from "@/lib/strategyExit";
+import { useLivePortfolio } from "@/hooks/useLivePortfolio";
 
 function fmtUsd(v: number): string {
   if (Math.abs(v) >= 1000) return `$${Math.round(v).toLocaleString("en-US")}`;
@@ -49,7 +52,7 @@ function useAllOpportunities(enabled: boolean) {
   });
 }
 
-function StrategyCard({ s, opps, now }: { s: TrackedStrategy; opps: Opportunity[]; now: number }) {
+function StrategyCard({ s, opps, now, positions }: { s: TrackedStrategy; opps: Opportunity[]; now: number; positions: PositionLike[] }) {
   const done = s.legs.filter((l) => l.status === "confirmed").length;
   const since = liveSince(s);
   const live = since !== undefined;
@@ -58,6 +61,12 @@ function StrategyCard({ s, opps, now }: { s: TrackedStrategy; opps: Opportunity[
   const today = s.apyKind === "variable" ? matchOpportunity(s, opps) : undefined;
   const drift = today && s.apyPct !== undefined ? today.apy - s.apyPct : undefined;
   const leg = earningLeg(s);
+  const valueNow = currentValueUsd(s, positions);
+  const pnl = valueNow !== undefined && size !== undefined ? valueNow - size : undefined;
+  const exit = exitPlan(s);
+  const closed = s.closedAt !== undefined;
+  const exitDone = s.exitLegs?.filter((l) => l.status === "confirmed").length ?? 0;
+  const canExit = !closed && s.legs.some((l) => l.status === "confirmed");
   const reviewPrompt =
     `Review my live strategy "${s.title}": ${s.legs.map((l) => `${l.side} ${l.asset} on ${l.protocol}${l.chain ? ` (${l.chain})` : ""}`).join(", ")}` +
     `${size ? `, about $${Math.round(size)}` : ""}${s.apyPct !== undefined ? `, entered at ${fmtPct(s.apyPct)} APY` : ""}. Is it still the best option, and should I change anything?`;
@@ -72,8 +81,12 @@ function StrategyCard({ s, opps, now }: { s: TrackedStrategy; opps: Opportunity[
             {live ? `live since ${fmtAge(since as number, now)}` : `started ${fmtAge(s.createdAt, now)}`}
           </span>
         </div>
-        <span className={`strat-chip${live ? " strat-chip--live" : ""}`}>
-          {live ? (
+        <span className={`strat-chip${live && !closed ? " strat-chip--live" : ""}`}>
+          {closed ? (
+            "Closed"
+          ) : s.exitLegs ? (
+            `Exiting ${exitDone}/${s.exitLegs.length}`
+          ) : live ? (
             <>
               <span className="live-dot" aria-hidden="true" /> Live
             </>
@@ -110,11 +123,29 @@ function StrategyCard({ s, opps, now }: { s: TrackedStrategy; opps: Opportunity[
             </dd>
           </div>
         )}
-        {earned !== undefined && (
-          <div>
-            <dt>Earned (est.)</dt>
-            <dd className="strat-up">+{fmtUsd(earned)}</dd>
-          </div>
+        {valueNow !== undefined ? (
+          <>
+            <div>
+              <dt title="Read live from the position. Includes anything else you hold in the same vault.">Value now</dt>
+              <dd>{fmtUsd(valueNow)}</dd>
+            </div>
+            {pnl !== undefined && (
+              <div>
+                <dt>Result</dt>
+                <dd className={pnl >= 0 ? "strat-up" : "strat-down"}>
+                  {pnl >= 0 ? "+" : "−"}
+                  {fmtUsd(Math.abs(pnl))}
+                </dd>
+              </div>
+            )}
+          </>
+        ) : (
+          earned !== undefined && (
+            <div>
+              <dt>Earned (est.)</dt>
+              <dd className="strat-up">+{fmtUsd(earned)}</dd>
+            </div>
+          )
         )}
       </dl>
 
@@ -155,6 +186,22 @@ function StrategyCard({ s, opps, now }: { s: TrackedStrategy; opps: Opportunity[
 
       <footer className="strat-card__foot">
         <AskButton prompt={reviewPrompt} label={live ? "Review with Meridian" : "Finish with Meridian"} />
+        {canExit && (
+          <button
+            type="button"
+            className="btn btn-secondary strat-exit"
+            title={exit.legs.length ? "Builds the reverse plan in the chat: each step signed by you" : exit.notes.join(" ")}
+            onClick={() =>
+              showPlanInChat({
+                text: `Exit “${s.title}”`,
+                plan: exitTradePlan(s, exit),
+                understanding: exit.legs.length ? "Your exit, last step first. Review each step before signing." : "Nothing here can be undone from Meridian; see how below.",
+              })
+            }
+          >
+            {s.exitLegs ? "Resume exit" : "Exit"}
+          </button>
+        )}
         <button
           type="button"
           className="strat-remove"
@@ -177,6 +224,7 @@ function StrategyCard({ s, opps, now }: { s: TrackedStrategy; opps: Opportunity[
 export function StrategiesPanel() {
   const { address } = useAccount();
   const strategies = useTrackedStrategies(address);
+  const { assets } = useLivePortfolio();
   const { data: opps = [] } = useAllOpportunities(strategies.length > 0);
   const [now, setNow] = useState(() => Date.now());
 
@@ -225,7 +273,7 @@ export function StrategiesPanel() {
         </section>
       )}
       {strategies.map((s) => (
-        <StrategyCard key={s.id} s={s} opps={opps} now={now} />
+        <StrategyCard key={s.id} s={s} opps={opps} now={now} positions={assets} />
       ))}
     </div>
   );

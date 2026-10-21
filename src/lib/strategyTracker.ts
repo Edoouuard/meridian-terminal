@@ -45,6 +45,10 @@ export interface TrackedStrategy {
   legs: TrackedLeg[];
   /** Two legs that make one neutral position: exposed while only one of them is filled. */
   pair?: [number, number];
+  /** The exit's steps once the user started it (lib/strategyExit.ts). */
+  exitLegs?: TrackedLeg[];
+  /** Set when every exit step confirmed: the strategy is closed. */
+  closedAt?: number;
 }
 
 export interface ConfirmInfo {
@@ -101,6 +105,8 @@ export function applyLegConfirmed(
   info: ConfirmInfo,
   now: number,
 ): { list: TrackedStrategy[]; strategy: TrackedStrategy | null; changed: boolean; justCompleted: boolean } {
+  // An exit's steps belong to the strategy it closes, never to a new entry.
+  if (plan.exitOf) return applyExitLegConfirmed(list, plan, legIndex, info, now);
   const id = strategyId(plan);
   const existing = list.find((s) => s.id === id);
   const base = existing ?? trackedFromPlan(plan, now, info.owner);
@@ -116,6 +122,27 @@ export function applyLegConfirmed(
   const justCompleted = live && base.completedAt === undefined;
   const rest = list.filter((s) => s.id !== id);
   return { list: [strategy, ...rest].slice(0, LIMIT), strategy, changed: true, justCompleted };
+}
+
+function applyExitLegConfirmed(
+  list: TrackedStrategy[],
+  plan: TradePlan,
+  legIndex: number,
+  info: ConfirmInfo,
+  now: number,
+): { list: TrackedStrategy[]; strategy: TrackedStrategy | null; changed: boolean; justCompleted: boolean } {
+  const target = list.find((s) => s.id === plan.exitOf);
+  if (!target) return { list, strategy: null, changed: false, justCompleted: false };
+  const base: TrackedLeg[] =
+    target.exitLegs && target.exitLegs.length === plan.legs.length
+      ? target.exitLegs
+      : plan.legs.map((l) => ({ side: l.side, asset: l.asset, protocol: l.protocol, chain: l.chain, sizeUsd: l.sizeUsd, status: "pending" as const }));
+  const leg = base[legIndex];
+  if (!leg || (leg.status === "confirmed" && leg.hash === info.hash)) return { list, strategy: target, changed: false, justCompleted: false };
+  const exitLegs = base.map((l, i) => (i === legIndex ? { ...l, status: "confirmed" as const, hash: info.hash, chainId: info.chainId, confirmedAt: now } : l));
+  const closed = exitLegs.every((l) => l.status === "confirmed");
+  const strategy: TrackedStrategy = { ...target, exitLegs, closedAt: target.closedAt ?? (closed ? now : undefined) };
+  return { list: list.map((s) => (s.id === target.id ? strategy : s)), strategy, changed: true, justCompleted: false };
 }
 
 /** Bridges, swaps and transfers only move funds into place; the other legs earn. */
