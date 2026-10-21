@@ -92,12 +92,14 @@ When the user's portfolio is provided:
 - **Hyperliquid**: on-chain orderbook, up to 50x leverage. Check live funding rates in the data.
 - **Hyperliquid stock, index & commodity perps (HIP-3)**: Tesla, Nvidia, the S&P 500, gold, oil… are traded as perps with USDC margin, from the same Hyperliquid account as crypto perps. For a view on a stock, an index or a commodity ("short Tesla", "long gold", "hedge my portfolio with the S&P 500"), use side "Long" or "Short", protocol "Hyperliquid", chain "Arbitrum", and asset = the EXACT market name from the live "Stock, index & commodity perps" list followed by " PERP" (e.g. "xyz:TSLA PERP", "xyz:SP500 PERP", "xyz:GOLD PERP"). Never invent a market that isn't in that list; quote its live price and funding. Respect its max leverage. These markets trade around the clock but follow the underlying's price: say so in the risk note.
 - **Extended**: StarkEx L2, up to 20x leverage. Active points program. Meridian signs Extended orders once the user has connected Extended. When the Extended account lacks margin and the wallet holds native USDC on Arbitrum, put a Deposit leg first (side "Deposit", protocol "Extended", asset "USDC", chain "Arbitrum", sizeUsd = the missing margin + $1, at least $10): Meridian deposits through Extended's bridge. When the user asks for Extended, the plan uses Extended even if the account is not connected or can't be funded: the server marks it blocked with what unblocks it. A Hyperliquid version is only an alternative, never the requested plan.
+- **TxFlow**: its own L1 with an order book, USDC margin, hourly funding (see the live "TxFlow perps" list). Executable: the first trade asks one wallet signature to approve Meridian's TxFlow trading key (it can trade, never withdraw); no connection step. Assets by the EXACT market name + " PERP" ("ETH-USDC PERP"). When the TxFlow account lacks margin, put a Deposit leg first (side "Deposit", protocol "TxFlow", asset "USDC", chain "Arbitrum", sizeUsd = the missing margin + $1, at least $5): native USDC on Arbitrum goes to TxFlow's bridge. A withdrawal is side "Withdraw", protocol "TxFlow", asset "USDC" ($1 fee, minimum $2). Meridian doesn't place stop-loss / take-profit orders on TxFlow yet: say so when the user asks for one. When the user asks for TxFlow, the plan uses TxFlow; another venue is only an alternative.
 - **Ondo**: via LI.FI relay.
 - **Lighter**: zk-rollup. Check live data for LLP vault APR if available.
 Choose the perp venue based on: the user's goal (points? liquidity? fees?), NOT a default preference.
 
 ### Protocol Vaults
-- **HLP (Hyperliquid)**: market-making vault. Check live APR in data. Meridian executes the DEPOSIT INTO HYPERLIQUID (see below); the HLP deposit itself is then done in the Hyperliquid app (say so) — never as a separate leg.
+- **HLP (Hyperliquid)**: market-making vault. Check live APR in data. Executable: side "Deposit", protocol "Hyperliquid", asset "HLP", sizeUsd = the USDC put in, chain "Arbitrum". It draws on USDC already in the user's Hyperliquid account (see HYPERLIQUID ACCOUNT); when there isn't enough, a Hyperliquid deposit leg (below) comes first. Locked 4 days; returns come from market making and can be negative — say both.
+- **HYPE staking (Hyperliquid)**: executable: side "Stake", protocol "Hyperliquid", asset "HYPE", sizeUsd = the USD value staked. It stakes HYPE held in the user's Hyperliquid spot balance (two wallet signatures, delegated to the most staked validator charging ≤ 5%); unstaking takes 7 days — say so. HYPE held elsewhere must reach Hyperliquid spot first (say so; a Buy leg on Hyperliquid spot works when the user holds USDC there).
 - **LLP (Lighter)**: liquidity pool vault. Check live APR in data.
 Use these when user wants passive yield with protocol exposure.
 
@@ -110,7 +112,7 @@ Use these when user wants passive yield with protocol exposure.
 
 ### Not Yet Live (mark "not yet live" in note if used)
 - **Pendle**: fixed yield by buying PT, held to expiry. ONLY use markets listed under "Pendle fixed yield" in the live data, on the chain shown (Ethereum, Arbitrum or Base): side "Supply", asset "PT-<name>" exactly as listed, protocol "Pendle". Bought with USDC (WETH for ETH markets). The list holds only Pendle "prime" (curated) markets and major-stablecoin markets (USDC, USDT, DAI, USDS, USDe and their savings versions, GHO, PYUSD); never propose a Pendle market that isn't listed. If no listed market fits, say so and use another venue. The rate is fixed only if held to expiry; say so.
-- **Hyperliquid deposit**: fund the user's Hyperliquid account: side "Deposit", protocol "Hyperliquid", asset "USDC", chain "Arbitrum". Native USDC on Arbitrum only, minimum $5 (smaller deposits are lost); if the USDC is elsewhere, Meridian adds the bridge itself. If the user has no stablecoins at all, fund the margin by converting a token they hold on the way: a Bridge leg with fromAsset = that token, asset "USDC", toChain "Arbitrum" (never bridge a volatile token as itself). Margin already in the user's Hyperliquid account (see HYPERLIQUID ACCOUNT) needs no deposit. Funds arrive in ~1 minute. Use it when the user wants HLP, Hyperliquid trading or HYPE exposure; trading, HLP and HYPE staking then happen in the Hyperliquid app — say so.
+- **Hyperliquid deposit**: fund the user's Hyperliquid account: side "Deposit", protocol "Hyperliquid", asset "USDC", chain "Arbitrum". Native USDC on Arbitrum only, minimum $5 (smaller deposits are lost); if the USDC is elsewhere, Meridian adds the bridge itself. If the user has no stablecoins at all, fund the margin by converting a token they hold on the way: a Bridge leg with fromAsset = that token, asset "USDC", toChain "Arbitrum" (never bridge a volatile token as itself). Margin already in the user's Hyperliquid account (see HYPERLIQUID ACCOUNT) needs no deposit. Funds arrive in ~1 minute. Use it when the user wants HLP, Hyperliquid trading or HYPE exposure; HLP deposits and HYPE staking then run from Meridian (above).
 - **HyperEVM** (Hyperliquid's EVM chain): a Bridge leg can move funds there (toChain "HyperEVM"; USDC arrives as USDT0 or the route's token). HyperEVM protocols (HyperLend, Kinetiq kHYPE, Felix…) appear under the comparison-only lists: mention them, never put them in a leg. There is no DEX Meridian can sign on HyperEVM: never put a Swap leg there. To SELL UETH, UBTC or USOL (held on HyperEVM or already in the user's Hyperliquid spot balance) for USDC, use ONE leg, never a bridge: side "Sell", protocol "Hyperliquid", asset "UETH", chain "HyperEVM", sizeUsd = the USD value sold (the whole holding when the user says "my UETH"). Meridian moves the tokens from HyperEVM into the user's Hyperliquid spot balance and sells them on Hyperliquid's UETH/USDC order book; the USDC lands in the Hyperliquid account (usable as perp margin). Only when the user wants the money on another chain do HyperEVM tokens (UETH = ETH, UBTC = BTC, USDT0, WHYPE) leave with a Bridge leg that converts on the way (fromAsset "UETH", asset "USDC", chain "HyperEVM", toChain "Arbitrum"); a Bridge from HyperEVM always names fromAsset. For a hedge, UETH/UBTC already ARE the long side: keep them and only short the same notional, rather than selling them.
 - **Savings vaults (verified ERC-4626)**: side "Supply", protocol exactly "Fluid", "Sky", "Spark Savings", "Ethena", "Yearn", "Curve Savings" or "Curve LlamaLend", asset = the token deposited, on a chain where the "Best … yields Meridian EXECUTES" list shows that protocol:
   - Fluid: USDC or USDT on Ethereum and Arbitrum, USDC on Base, WETH and GHO on Ethereum. Instant exit.
@@ -228,8 +230,8 @@ Before returning your JSON, verify each strategy against this checklist:
 ## Leg Format (STRICT)
 
 side: exactly one of: "Supply", "Borrow", "Repay", "Withdraw", "Long", "Short", "Swap", "Stake", "Bridge", "Transfer", "Restake", "Buy", "Deposit", "Sell" (Deposit only for the Hyperliquid deposit; Sell only for selling UETH/UBTC/USOL on Hyperliquid spot)
-asset: token symbol. Perps: "ETH PERP" (optional "stopLossPct" / "takeProfitPct" numbers on the perp leg); Hyperliquid stocks "xyz:AMD PERP"; Extended markets by their exact name + " PERP" ("ETH-USD PERP", "AMD_24_5-USD PERP"). Swaps: "USDC → ETH". Staking: output token "stETH".
-protocol: exactly one of: "Aave", "Compound", "Spark", "Lido", "Hyperliquid", "Extended", "Ondo", "Lighter", "Uniswap", "Morpho", "Pendle", "EigenLayer", "Fluid", "Sky", "Spark Savings", "Ethena", "Yearn", "Curve Savings", "Curve LlamaLend", "Wallet", "deBridge" (same-chain swaps use "Uniswap"; LI.FI same-chain swaps are not executable)
+asset: token symbol. Perps: "ETH PERP" (optional "stopLossPct" / "takeProfitPct" numbers on the perp leg); Hyperliquid stocks "xyz:AMD PERP"; Extended markets by their exact name + " PERP" ("ETH-USD PERP", "AMD_24_5-USD PERP"); TxFlow markets by their exact name + " PERP" ("ETH-USDC PERP"). Swaps: "USDC → ETH". Staking: output token "stETH".
+protocol: exactly one of: "Aave", "Compound", "Spark", "Lido", "Hyperliquid", "Extended", "TxFlow", "Ondo", "Lighter", "Uniswap", "Morpho", "Pendle", "EigenLayer", "Fluid", "Sky", "Spark Savings", "Ethena", "Yearn", "Curve Savings", "Curve LlamaLend", "Wallet", "deBridge" (same-chain swaps use "Uniswap"; LI.FI same-chain swaps are not executable)
 sizeUsd: integer USD value.
 leverage: only for Long/Short legs. Integer.
 to: only for a Transfer leg: the recipient address (0x…) or .eth name, copied exactly from the user's message. No recipient in the message → no Transfer leg; ask for one in the understanding.
@@ -293,7 +295,7 @@ Build (1 to 3 plans):
 Field rules:
 - "kind": "requested" when every hard constraint is met, else "alternative" with every change in "changes" ("venue: Extended → Hyperliquid"). The server re-checks this against the request and reclassifies a plan that breaks a constraint.
 - "status": "blocked" when something prevents execution now, with each reason in "blockers"; the server also blocks Extended legs from the Extended account state.
-- "economics": leave it null for plans on Hyperliquid / Extended: the server sizes and prices them leg by leg from the market data. For spot DeFi plans, give { "capitalCommittedUsd", "annualizedGrossCarryUsd", "entryExitCostUsd", "holdingDays" } from the data; null where unknown. Never "annualizedReturnOnCapitalPct": the server computes it.
+- "economics": leave it null for plans on Hyperliquid / Extended / TxFlow: the server sizes and prices them leg by leg from the market data. For spot DeFi plans, give { "capitalCommittedUsd", "annualizedGrossCarryUsd", "entryExitCostUsd", "holdingDays" } from the data; null where unknown. Never "annualizedReturnOnCapitalPct": the server computes it.
 - "sizeUsd": the USD size you intend per leg; the server converts it to a base quantity valid on the market (both markets for a pair). Unknown free amount → null (the plan is blocked).
 - "figures": the key observed numbers with their source. The server replaces them for venue plans.
 - "apy": blended expected APY in percent from the live data, for yield plans only; omit it for directional trades and pairs (use "economics").
@@ -406,6 +408,13 @@ function extendedAccountLine(ext: PortfolioSnapshot["extended"]): string {
   return `EXTENDED ACCOUNT: connected on mainnet, $${Math.round(ext.availableUsd).toLocaleString()} USDC free as margin (equity $${Math.round(ext.equityUsd ?? 0).toLocaleString()}). Extended legs up to that margin run now.`;
 }
 
+/** What the planner may do on TxFlow, from the wallet's TxFlow account (read by address, no connection step). */
+function txflowAccountLine(tx: PortfolioSnapshot["txflow"]): string {
+  if (tx === undefined || tx === null) return "TXFLOW ACCOUNT: balance unknown right now (not read): don't size TxFlow legs from a guess; a TxFlow plan is blocked until it is read.";
+  if (tx.availableUsd < 1) return "TXFLOW ACCOUNT: no USDC. A TxFlow leg needs a Deposit leg to TxFlow first (side \"Deposit\", protocol \"TxFlow\", asset \"USDC\", chain \"Arbitrum\", from native USDC on Arbitrum, minimum $5). The first TxFlow trade asks one wallet signature to approve Meridian's trading key.";
+  return `TXFLOW ACCOUNT: $${Math.round(tx.availableUsd).toLocaleString()} USDC free as margin (equity $${Math.round(tx.equityUsd).toLocaleString()}). TxFlow legs up to that margin run now.`;
+}
+
 /** Format a portfolio snapshot into a human-readable string for the LLM. */
 function formatPortfolioContext(portfolio: PortfolioSnapshot | undefined): string {
   if (!portfolio) return "";
@@ -446,6 +455,7 @@ function formatPortfolioContext(portfolio: PortfolioSnapshot | undefined): strin
     lines.push("HYPERLIQUID ACCOUNT BALANCES: unknown (not read) — don't size Hyperliquid legs from a guess.");
   }
   lines.push(extendedAccountLine(portfolio.extended));
+  lines.push(txflowAccountLine(portfolio.txflow));
 
   if (portfolio.assets && portfolio.assets.length > 0) {
     lines.push("\n### Wallet Holdings");
@@ -489,6 +499,7 @@ interface PortfolioSnapshot {
   perps?: { coin: string; size: number; notional: number; unrealizedPnl: number }[];
   netDeltaEthTotal?: number | null;
   extended?: { connected: boolean; network?: string; equityUsd?: number; availableUsd?: number };
+  txflow?: { equityUsd: number; availableUsd: number } | null;
   hyperliquid?: { unified: boolean; collateralUsd: number; marginUsedUsd: number; freeMarginUsd: number; spotUsdcUsd: number } | null;
 }
 
@@ -589,9 +600,10 @@ export async function POST(req: NextRequest) {
     // Questions the server asks itself, before any plan: which asset for a two-venue neutral position, then how much capital.
     const pairReq = FEATURES.perps ? parsePairRequest(request, yieldContext.markets, { extendedConnected: !!snapshot?.extended?.connected && snapshot.extended.network !== "testnet" }) : null;
     if (pairReq && !pairReq.base) {
-      const q = pairAssetQuestion(yieldContext.markets);
+      const q = pairAssetQuestion(yieldContext.markets, pairReq.venues);
       if (q && answered !== q.question) {
-        return NextResponse.json({ decision: "clarify", understanding: "A neutral position between Hyperliquid and Extended: the asset is missing.", clarify: q, strategies: [] });
+        const [va, vb] = pairReq.venues ?? ["Hyperliquid", "Extended"];
+        return NextResponse.json({ decision: "clarify", understanding: `A neutral position between ${va} and ${vb}: the asset is missing.`, clarify: q, strategies: [] });
       }
     }
     const asked = snapshot && FEATURES.perps
@@ -600,6 +612,7 @@ export async function POST(req: NextRequest) {
           answeredQuestion: answered,
           hyperliquidFreeUsd: snapshot.hyperliquid ? snapshot.hyperliquid.freeMarginUsd : null,
           extendedFreeUsd: snapshot.extended?.connected ? (snapshot.extended.availableUsd ?? null) : null,
+          txflowFreeUsd: snapshot.txflow ? snapshot.txflow.availableUsd : null,
         })
       : null;
     if (asked) return NextResponse.json({ decision: "clarify", understanding: asked.understanding, clarify: asked.clarify, strategies: [] });
@@ -633,7 +646,7 @@ export async function POST(req: NextRequest) {
       text = JSON.stringify({
         decision: "build",
         objective: goal,
-        understanding: `Neutral position on ${pairReq!.base}: long on one venue, short the same quantity on the other, between Hyperliquid and Extended.`,
+        understanding: `Neutral position on ${pairReq!.base}: long on one venue, short the same quantity on the other, between ${(pairReq!.venues ?? ["Hyperliquid", "Extended"]).join(" and ")}.`,
         strategies: [serverPair],
       });
     } else try {
@@ -701,7 +714,7 @@ export async function POST(req: NextRequest) {
     // structure and budget, venue minimums, then the planner contract
     // (requested vs alternative, blocked, economics, recommendation).
     const wallet = { assets: snapshot?.assets };
-    let strategies = enforceExplicitOrder(parsed.strategies, explicit, wallet.assets, snapshot?.extended?.availableUsd);
+    let strategies = enforceExplicitOrder(parsed.strategies, explicit, wallet.assets, snapshot?.extended?.availableUsd, snapshot?.txflow ? snapshot.txflow.availableUsd : undefined);
     strategies = strategies.map((st: Parameters<typeof validateAndFixStrategy>[0]) => validateAndFixStrategy(st, wallet));
     const objective = OBJECTIVES.has(parsed.objective) ? (parsed.objective as Objective) : explicit ? "explicit_order" : undefined;
 
@@ -712,6 +725,7 @@ export async function POST(req: NextRequest) {
     const balances: VenueBalances = {
       hyperliquidFreeUsd: snapshot?.hyperliquid ? snapshot.hyperliquid.freeMarginUsd : null,
       extendedFreeUsd: ext?.connected ? (ext.availableUsd ?? null) : 0,
+      txflowFreeUsd: snapshot?.txflow ? snapshot.txflow.availableUsd : null,
       walletDeployableUsd: snapshot?.assets?.length ? deployableUsd(snapshot.assets) : 0,
     };
     const conformance = enforceConformance(strategies, objective, {

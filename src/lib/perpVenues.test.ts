@@ -46,3 +46,23 @@ describe("perpVenues", () => {
     expect(crossVenueSummary(pairs)).toMatch(/- ETH \| ETH: \+10\.9% \| ETH-USD: \+11\.4% \| long Hyperliquid → short Extended/);
   });
 });
+
+describe("TxFlow in the planner's market data", () => {
+  it("reads TxFlow names as their base", () => {
+    expect(marketBase("ETH-USDC")).toBe("ETH");
+    expect(marketBase("ETH-USDC PERP")).toBe("ETH");
+    expect(marketBase("ETH-USD")).toBe("ETH");
+  });
+
+  it("pairs each TxFlow market with the venue whose funding differs most", async () => {
+    const { txflowCrossVenue, txflowCrossVenueSummary, txflowSummary } = await import("@/lib/perpVenues");
+    const tx = [{ name: "ETH-USDC", base: "ETH", mark: 3000, fundingHourly: 0.00003, maxLeverage: 25, dayVolumeUsd: 4e7 }];
+    const ext = parseExtendedMarketRows(RAW as never).filter((m) => m.base === "ETH");
+    const rows = txflowCrossVenue([{ coin: "ETH", hourlyRate: 0.0000125 }], ext, tx);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ base: "ETH", txflow: "ETH-USDC", shortOn: "TxFlow" });
+    expect(rows[0].spreadPct).toBeGreaterThan(0);
+    expect(txflowCrossVenueSummary(rows)).toContain("ETH | ETH-USDC: +26.3%");
+    expect(txflowSummary(tx)).toContain("- ETH-USDC (ETH) | $3,000 | +26.3%/yr | 25x | $40.0M");
+  });
+});

@@ -12,6 +12,7 @@ import { useBestYield } from "@/hooks/useBestYield";
 import { useHlpApr, useLlpApr } from "@/hooks/useVaultYields";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
 import { MorphoExecuteButton } from "@/components/execute/VenueExecuteButtons";
+import { HlpDepositButton } from "@/components/execute/HyperliquidEarnButtons";
 import { NotWired, OrderRow, isUnsupported } from "@/components/thread/shared";
 
 /** One honest row for a single yield option inside YieldFinderCard — a real Execute button when the venue is wired (Aave/Morpho/Compound), an honest "not wired" note with the real APY otherwise (vault deposits, LP pools, every other DefiLlama-tracked protocol). */
@@ -50,7 +51,9 @@ function YieldOptionRow({ option, asset, sizeUsd }: { option: MergedYieldOption;
           {option.vaultNote}
         </p>
       )}
-      {wired ? (
+      {option.protocol === "Hyperliquid HLP" ? (
+        <HlpDepositButton leg={{ side: "Deposit", asset: "HLP", protocol: "Hyperliquid", sizeUsd, chain: "Arbitrum" }} />
+      ) : wired ? (
         <StrategyLegContext.Provider value={{ plan, legIndex: 0 }}>
           {isMorpho ? (
             <MorphoExecuteButton leg={leg} prices={prices} />

@@ -203,6 +203,13 @@ export function resolveOrderForLeg(
   if (protocol === "hyperliquid" && side === "withdraw") {
     return { unsupported: "Withdrawn from the Hyperliquid account with its own wallet-signed button." };
   }
+  // --- TxFlow funding moves: dedicated buttons (Bridge2 address read live; withdraw3 signed by the wallet) ---
+  if (protocol === "txflow" && (side === "deposit" || side === "fund" || side === "supply")) {
+    return { unsupported: "Deposited to TxFlow with its own button (USDC on Arbitrum to TxFlow's bridge, address read live)." };
+  }
+  if (protocol === "txflow" && side === "withdraw") {
+    return { unsupported: "Withdrawn from the TxFlow account with its own wallet-signed button." };
+  }
 
   // --- Native ETH/gas transfer (executable, all chains) ---------------------
   // The recipient comes from the thesis itself (leg.to, parsed by tradePlan's
@@ -656,7 +663,7 @@ export function resolveOrderForLeg(
     }
     // Return a shell order for perp venues — ThreadCard dispatches these
     // to the correct dedicated execute button (Hyperliquid/Extended/LiFi).
-    if (protocol === "hyperliquid" || protocol === "extended" || protocol === "ondo" || protocol === "lighter") {
+    if (protocol === "hyperliquid" || protocol === "extended" || protocol === "txflow" || protocol === "ondo" || protocol === "lighter") {
       const symbol = bareSymbol(leg.asset);
       return {
         type: side === "short" ? "swap" : "swap",
@@ -877,5 +884,5 @@ export function needsLiveCompletion(order: Order): boolean {
   if (p === "morpho") return !order.vaultAddress && order.type !== "approve";
   if (p === "debridge" || p === "lifi" || p === "pendle") return !order.routerTx;
   if (p === "uniswap") return order.type === "swap" && !order.amountOutMinimum;
-  return /hyperliquid|extended|ondo|lighter/.test(p);
+  return /hyperliquid|extended|txflow|ondo|lighter/.test(p);
 }

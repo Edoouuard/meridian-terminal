@@ -89,6 +89,8 @@ export interface TradePlan {
   fit?: string;
   /** The main risks, two to four short items. */
   risks?: string[];
+  /** Set on an exit plan (lib/strategyExit.ts): the tracked strategy it closes, so its steps are recorded there. */
+  exitOf?: string;
   /** Planner contract (lib/planner/schema.ts): answers the request, or changes a hard constraint. */
   kind?: "requested" | "alternative";
   /** For an alternative: each hard constraint it changes. */

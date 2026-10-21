@@ -6,8 +6,9 @@
 
 import type { HlAccount, HlOpenOrder } from "@/lib/integrations/hyperliquid-live";
 import type { ExtendedPositionView } from "@/lib/integrations/extended-live";
+import type { TxflowAccount, TxflowMarket } from "@/lib/integrations/txflow-live";
 
-export type PerpVenue = "Hyperliquid" | "Hyperliquid stocks" | "Extended";
+export type PerpVenue = "Hyperliquid" | "Hyperliquid stocks" | "Extended" | "TxFlow";
 
 export interface PerpPositionRow {
   key: string;
@@ -94,6 +95,33 @@ export function rowsFromExtended(positions: ExtendedPositionView[] | null | unde
     stopLoss: p.sl,
     takeProfit: p.tp,
   }));
+}
+
+/** TxFlow positions, named from its markets (instrument id → "ETH"). */
+export function rowsFromTxflow(account: TxflowAccount | null | undefined, markets: TxflowMarket[]): PerpPositionRow[] {
+  return (account?.positions ?? []).map((p) => {
+    const m = markets.find((x) => x.index === p.index);
+    const size = Math.abs(p.size);
+    const notional = p.value || size * p.mark;
+    const leverage = p.leverage || 1;
+    return {
+      key: `TxFlow:${p.index}`,
+      venue: "TxFlow" as const,
+      symbol: m?.base ?? `#${p.index}`,
+      side: p.size < 0 ? ("short" as const) : ("long" as const),
+      size,
+      notional,
+      entry: p.entry,
+      mark: p.mark,
+      liq: p.liq,
+      leverage,
+      unrealizedPnl: p.unrealisedPnl,
+      margin: notional / leverage,
+      funding: p.funding,
+      stopLoss: null,
+      takeProfit: null,
+    };
+  });
 }
 
 /** How far the mark can move against the position before liquidation, in % of the mark. Null when unknown. */

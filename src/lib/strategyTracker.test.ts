@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { TradePlan } from "@/lib/tradePlan";
-import { applyLegConfirmed, deployedUsd, earningLeg, estimatedEarnedUsd, legState, liveSince, matchOpportunity, strategyId, type TrackedStrategy } from "@/lib/strategyTracker";
+import { applyLegConfirmed, deployedUsd, earningLeg, estimatedEarnedUsd, legState, liveSince, matchOpportunity, remainingLegIndexes, strategyId, type TrackedStrategy } from "@/lib/strategyTracker";
 
 const plan: TradePlan = {
   intent: "supply",
@@ -162,5 +162,21 @@ describe("pair sizing from the first fill", () => {
     const { strategy } = applyLegConfirmed([], plan, 0, { hash: "hyperliquid:UETH:0.0126@2460.5" }, 1);
     expect(pairPartnerQty(strategy!, 1)).toBe(0.0126);
     expect(pairPartnerQty(strategy!, 0)).toBeUndefined();
+  });
+});
+
+describe("remainingLegIndexes", () => {
+  it("runs every step of an untracked plan, then only what is left once a step confirms", () => {
+    expect(remainingLegIndexes(undefined, 2)).toEqual([0, 1]);
+    // Bridge done by hand: "Execute remaining" covers the deposit on the destination chain.
+    const { strategy } = applyLegConfirmed([], plan, 0, { hash: "0xaa", chainId: 42161 }, 1000);
+    expect(remainingLegIndexes(strategy ?? undefined, 2)).toEqual([1]);
+    const done = applyLegConfirmed([strategy!], plan, 1, { hash: "0xbb", chainId: 8453 }, 2000);
+    expect(remainingLegIndexes(done.strategy ?? undefined, 2)).toEqual([]);
+  });
+
+  it("drops a move that a live strategy never needed", () => {
+    const { strategy } = applyLegConfirmed([], plan, 1, { hash: "0xbb" }, 1000);
+    expect(remainingLegIndexes(strategy ?? undefined, 2)).toEqual([]);
   });
 });

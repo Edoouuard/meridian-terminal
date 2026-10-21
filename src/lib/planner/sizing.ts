@@ -4,7 +4,7 @@
  *   - the share comes from the user ("100% of my available capital", "half",
  *     "tout mon capital") or, when they gave none, from a question asked
  *     before any plan is built;
- *   - perp legs on Hyperliquid / Extended are then sized from each venue's
+ *   - perp legs on Hyperliquid / Extended / TxFlow are then sized from each venue's
  *     free margin × that share × the leg's leverage, the two legs of a pair
  *     to the smaller of the two, so the plan never trades a token amount
  *     while the margin for ten times more sits idle.
@@ -15,6 +15,7 @@ import { parseAmount } from "@/lib/tradePlan";
 import { SIZING_POLICY } from "@/lib/planner/policy";
 import type { VenueBalances } from "@/lib/planner/economics";
 import type { PlannerClarify } from "@/lib/planner/clarify";
+import type { PerpVenueName } from "@/lib/planner/markets";
 
 const CAPITAL_WORDS = "capital|balance|solde|margin|marge|funds|fonds|money|argent|available|disponible|libre|free";
 
@@ -32,7 +33,7 @@ export function capitalShare(text: string): number | undefined {
 
 /** Does the request trade on a perp venue (where the size question matters)? */
 export function isPerpRequest(text: string): boolean {
-  return /\b(long|short|levier|leverage|lev|\d+\s*x|x\s*\d+|neutral|neutre|perps?|hyperliquid|extended|funding|volume|farm\w*)\b/i.test(text);
+  return /\b(long|short|levier|leverage|lev|\d+\s*x|x\s*\d+|neutral|neutre|perps?|hyperliquid|extended|txflow|funding|volume|farm\w*)\b/i.test(text);
 }
 
 export interface SizeQuestionInput {
@@ -41,6 +42,7 @@ export interface SizeQuestionInput {
   answeredQuestion?: string;
   hyperliquidFreeUsd?: number | null;
   extendedFreeUsd?: number | null;
+  txflowFreeUsd?: number | null;
 }
 
 /**
@@ -55,6 +57,7 @@ export function sizeQuestion(i: SizeQuestionInput): { understanding: string; cla
   const known = [
     typeof i.hyperliquidFreeUsd === "number" ? { venue: "Hyperliquid", usd: i.hyperliquidFreeUsd } : null,
     typeof i.extendedFreeUsd === "number" && i.extendedFreeUsd > 0 ? { venue: "Extended", usd: i.extendedFreeUsd } : null,
+    typeof i.txflowFreeUsd === "number" && i.txflowFreeUsd > 0 ? { venue: "TxFlow", usd: i.txflowFreeUsd } : null,
   ].filter((x): x is { venue: string; usd: number } => x !== null);
   if (known.length === 0) return null;
   const fmt = (x: number) => `$${x.toLocaleString("en-US", { maximumFractionDigits: 2, minimumFractionDigits: 2 })}`;
@@ -70,7 +73,8 @@ export function sizeQuestion(i: SizeQuestionInput): { understanding: string; cla
 }
 
 const isPerp = (l: LLMLeg) => /^(long|short)$/i.test(l.side.trim());
-const venueOf = (l: LLMLeg): "Hyperliquid" | "Extended" | null => (/extended/i.test(l.protocol) ? "Extended" : /hyperliquid/i.test(l.protocol) ? "Hyperliquid" : null);
+const venueOf = (l: LLMLeg): PerpVenueName | null =>
+  /extended/i.test(l.protocol) ? "Extended" : /hyperliquid/i.test(l.protocol) ? "Hyperliquid" : /txflow/i.test(l.protocol) ? "TxFlow" : null;
 const isDepositTo = (venue: string) => (l: LLMLeg) => /^(deposit|fund)$/i.test(l.side.trim()) && new RegExp(venue, "i").test(l.protocol);
 
 /**
@@ -86,12 +90,13 @@ export function sizePerpLegs(s: LLMStrategy, pair: [number, number] | undefined,
   const perps = legs.map((l, i) => ({ l, i, v: venueOf(l) })).filter((x) => isPerp(x.l) && x.v);
   if (perps.length === 0) return s;
   if (legs.some((l) => /^(buy|swap)$/i.test(l.side.trim()) && venueOf(l) === "Hyperliquid")) return s;
-  const free: Record<"Hyperliquid" | "Extended", number | null> = {
+  const free: Record<PerpVenueName, number | null> = {
     Hyperliquid: balances.hyperliquidFreeUsd === null ? null : balances.hyperliquidFreeUsd + legs.filter(isDepositTo("hyperliquid")).reduce((a, l) => a + (l.sizeUsd ?? 0), 0),
     Extended: balances.extendedFreeUsd === null ? null : balances.extendedFreeUsd + legs.filter(isDepositTo("extended")).reduce((a, l) => a + (l.sizeUsd ?? 0), 0),
+    TxFlow: balances.txflowFreeUsd === undefined || balances.txflowFreeUsd === null ? null : balances.txflowFreeUsd + legs.filter(isDepositTo("txflow")).reduce((a, l) => a + (l.sizeUsd ?? 0), 0),
   };
   if (perps.some((p) => free[p.v!] === null)) return s;
-  const count = (v: "Hyperliquid" | "Extended") => perps.filter((p) => p.v === v).length;
+  const count = (v: PerpVenueName) => perps.filter((p) => p.v === v).length;
   const sized = new Map<number, number>();
   for (const p of perps) {
     const margin = (Math.max(0, (free[p.v!] as number) - SIZING_POLICY.feeReserveUsd) * share) / count(p.v!);

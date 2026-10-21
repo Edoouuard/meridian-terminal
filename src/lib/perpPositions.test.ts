@@ -98,3 +98,16 @@ describe("risk figures", () => {
     expect(s.closestLiqPct).toBeCloseTo(6.6667, 3);
   });
 });
+
+describe("rowsFromTxflow", () => {
+  it("names positions from TxFlow's markets and keeps unknown funding unknown", async () => {
+    const { rowsFromTxflow } = await import("@/lib/perpPositions");
+    const rows = rowsFromTxflow(
+      { accountValue: 1000, withdrawable: 800, marginUsed: 150, positions: [{ index: 2, size: -0.5, entry: 3010, mark: 3000, liq: 3900, unrealisedPnl: 5, value: 1500, leverage: 10, funding: null }] },
+      [{ index: 2, name: "ETH-USDC", base: "ETH", szDecimals: 3, priceTick: "0.01", maxLeverage: 25, onlyIsolated: false, maxMarketOrderSize: 0 }],
+    );
+    expect(rows).toEqual([
+      expect.objectContaining({ key: "TxFlow:2", venue: "TxFlow", symbol: "ETH", side: "short", size: 0.5, notional: 1500, margin: 150, funding: null, liq: 3900 }),
+    ]);
+  });
+});

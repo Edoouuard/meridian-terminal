@@ -250,6 +250,8 @@ export interface PortfolioContext {
   hyperliquid?: { unified: boolean; collateralUsd: number; marginUsedUsd: number; freeMarginUsd: number; spotUsdcUsd: number } | null;
   /** The user's Extended account: connected or not, and its USDC when it is. */
   extended?: { connected: boolean; network?: string; equityUsd?: number; availableUsd?: number };
+  /** The wallet's TxFlow account (public read by address); null when it couldn't be read. */
+  txflow?: { equityUsd: number; availableUsd: number } | null;
 }
 
 /**

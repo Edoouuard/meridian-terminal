@@ -8,6 +8,9 @@ import { HL_MIN_ORDER_USD } from "@/lib/integrations/hyperliquidTrade";
 import { HL_WITHDRAW_FEE_USD } from "@/lib/integrations/hyperliquidExchange";
 import { HL_SPOT_TAKER_FEE, TAKER_FEE } from "@/lib/perpVenues";
 import { EXTENDED_MIN_DEPOSIT_USD } from "@/lib/integrations/extendedBridge";
+import { TXFLOW_MIN_DEPOSIT_USD } from "@/lib/integrations/txflow-live";
+import { TXFLOW_MIN_WITHDRAW_USD, TXFLOW_WITHDRAW_FEE_USD } from "@/lib/integrations/txflowExchange";
+import { TXFLOW_SLIPPAGE } from "@/lib/integrations/txflowTrade";
 
 export interface Capability {
   venue: string;
@@ -49,6 +52,18 @@ export const CAPABILITIES: Capability[] = [
     operation: "Deposit USDC (side \"Deposit\", protocol \"Extended\", asset \"USDC\", chain \"Arbitrum\")",
     requires: "Extended account connected on mainnet, native USDC in the wallet on Arbitrum",
     constraints: `Minimum $${EXTENDED_MIN_DEPOSIT_USD}. Through Extended's bridge (Rhino.fi): a bridge fee shown on the quote before signing, credited in a few minutes. Put it before the Extended legs it funds.`,
+  },
+  {
+    venue: "TxFlow",
+    operation: "Perp market order (crypto), and a two-venue neutral pair with Hyperliquid or Extended in one click",
+    requires: "USDC free in the wallet's TxFlow account (see TXFLOW ACCOUNT), or a Deposit leg to TxFlow before it; balance unknown = not usable. The first trade asks one wallet signature (trading key).",
+    constraints: `IOC within ${TXFLOW_SLIPPAGE * 100}% of the mark; quantity on the market's size step. Taker fee ${pct(TAKER_FEE.TxFlow)} per side. No stop-loss / take-profit from Meridian yet.`,
+  },
+  {
+    venue: "TxFlow",
+    operation: "Deposit USDC (side \"Deposit\", protocol \"TxFlow\", asset \"USDC\", chain \"Arbitrum\") / withdraw USDC (side \"Withdraw\")",
+    requires: "Native USDC in the wallet on Arbitrum (deposit); USDC free in the TxFlow account (withdraw)",
+    constraints: `Deposit minimum $${TXFLOW_MIN_DEPOSIT_USD}, credited in a minute or two. Withdrawal minimum $${TXFLOW_MIN_WITHDRAW_USD}, fee $${TXFLOW_WITHDRAW_FEE_USD}, released to Arbitrum after TxFlow's safety wait.`,
   },
   {
     venue: "Spot DeFi",

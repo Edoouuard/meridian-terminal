@@ -13,6 +13,7 @@ import { HL_MIN_ORDER_USD, fetchMid, fetchSpotBalance, fetchSpotMarket, hyperliq
 import { describeFill, useHyperliquid } from "@/hooks/useHyperliquid";
 import { useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
+import { StrategyLegContext } from "@/components/thread/strategyLegContext";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { NotWired, OrderRow } from "@/components/thread/shared";
 import { recordExecution } from "@/lib/history";
@@ -30,7 +31,7 @@ const muted = { margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500
  *      trading key (see useHyperliquid). The USDC stays in the Hyperliquid
  *      account.
  */
-export function HyperliquidSpotSellButton({ leg }: { leg: TradeLeg }) {
+export function HyperliquidSpotSellButton({ leg, onFilled }: { leg: TradeLeg; onFilled?: (ref: string) => void }) {
   const { address, isConnected } = useAccount();
   const envName = useSharedHlEnv();
   const env = hyperliquidEnv(envName === "testnet");
@@ -71,8 +72,9 @@ export function HyperliquidSpotSellButton({ leg }: { leg: TradeLeg }) {
     if (status !== "confirmed" || recorded.current) return;
     recorded.current = true;
     recordExecution({ type: "sell", label: `Sell ${token} on Hyperliquid`, amount: String(result?.filled?.totalSz ?? ""), asset: token, protocol: "Hyperliquid", status: "confirmed" });
+    if (result?.filled) onFilled?.(`hyperliquid:${token}:${result.filled.totalSz}@${result.filled.avgPx}`);
     void core.refetch();
-  }, [status, result, token, core]);
+  }, [status, result, token, core, onFilled]);
 
   if (!isConnected || !address) return <p style={muted}>Connect a wallet to sell {token} on Hyperliquid.</p>;
   if (market.isLoading || core.isLoading || (evmToken && evm.isLoading)) return <p style={muted}>Reading your {token} on HyperEVM and Hyperliquid…</p>;
@@ -155,10 +157,13 @@ export function HyperliquidSpotSellButton({ leg }: { leg: TradeLeg }) {
       <>
         {balances}
         <OrderRow label="Step 1 of 2" value={`Move ${plan.move} ${token} to Hyperliquid`} />
-        <ValidatedExecuteButton order={order} label={`Move ${plan.move} ${token} to Hyperliquid →`} onConfirmed={() => {
-            setMoved(true);
-            setTimeout(() => setSlow(true), 120_000);
-          }} />
+        {/* The move is only half of the step: the sell, not this transfer, completes it in the strategy tracker. */}
+        <StrategyLegContext.Provider value={null}>
+          <ValidatedExecuteButton order={order} label={`Move ${plan.move} ${token} to Hyperliquid →`} onConfirmed={() => {
+              setMoved(true);
+              setTimeout(() => setSlow(true), 120_000);
+            }} />
+        </StrategyLegContext.Provider>
       </>
     );
   }

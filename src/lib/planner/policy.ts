@@ -44,7 +44,7 @@ export const EXECUTION_POLICY = {
   /** Open first the leg on the market with the lower 24h volume (the harder fill), then the other. */
   sequence: "lower_volume_first",
   orderType: "IOC market order (fills now within the slippage bound, or not at all)",
-  maxSlippagePct: { Hyperliquid: MARKET_SLIPPAGE * 100, Extended: 1 },
+  maxSlippagePct: { Hyperliquid: MARKET_SLIPPAGE * 100, Extended: 1, TxFlow: 1 },
   /** Past this, a single filled leg is flagged as an exposed partial fill. */
   maxUnhedgedSeconds: 120,
   /** The second leg trades the quantity the first one filled. */
@@ -91,7 +91,7 @@ export function policySection(): string {
     "## Data freshness",
     ...Object.entries(DATA_POLICY).map(([k, v]) => `- ${k}: max age ${v.maxAgeSeconds}s, ${v.requiredForExecution ? "required to execute" : "not required to execute"}, when stale: ${v.staleBehavior}.`),
     "## Execution of two-leg positions",
-    `- Sequence: ${e.sequence.replace(/_/g, " ")}; ${e.orderType}; max slippage Hyperliquid ${e.maxSlippagePct.Hyperliquid}%, Extended ${e.maxSlippagePct.Extended}%.`,
+    `- Sequence: ${e.sequence.replace(/_/g, " ")}; ${e.orderType}; max slippage Hyperliquid ${e.maxSlippagePct.Hyperliquid}%, Extended ${e.maxSlippagePct.Extended}%, TxFlow ${e.maxSlippagePct.TxFlow}%.`,
     `- Second leg sized on the first leg's filled quantity. A single filled leg older than ${e.maxUnhedgedSeconds}s is an exposed partial fill: ${e.onPartialFill}.`,
     `- Needs a new user signature: ${e.requiresUserApproval.join(", ")}.`,
     "## Ranking (the server applies these keys to executable requested plans)",

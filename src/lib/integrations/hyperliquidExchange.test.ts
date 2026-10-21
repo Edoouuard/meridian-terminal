@@ -4,7 +4,10 @@ import { planSpotSell } from "@/lib/integrations/hyperliquidTrade";
 import { isHyperCoreSystemAddress } from "@/lib/execution";
 import {
   approveAgentAction,
+  cDepositAction,
   cancelAction,
+  tokenDelegateAction,
+  vaultTransferAction,
   modifyAction,
   firstOrderError,
   floatToWire,
@@ -108,6 +111,35 @@ describe("hyperliquidExchange — signatures match the official SDK", () => {
   });
 });
 
+describe("hyperliquidExchange — HLP and staking match the official SDK", () => {
+  // Vectors from hyperliquid-python-sdk: sign_l1_action (vaultTransfer), sign_token_delegate_action, and
+  // sign_user_signed_action with the CDeposit types (hyperliquidChain, wei, nonce).
+  it("signs an HLP deposit (vaultTransfer, $25) like sign_l1_action", async () => {
+    const action = vaultTransferAction({ vaultAddress: "0xdfc24b077bc1425ad1dea75bcb6f8158e10df303", isDeposit: true, usd: 25_000_000 });
+    expect(await l1(action, 1700000000000, true)).toEqual({
+      r: "0x775c9e882ab9b8f8d8afade80e515e07dd5ea64b7191461528294a6fa677cb4a",
+      s: "0x40b79c7e012af8a0e81a7492b4bf4c000f0f7e6f89cad1c62c99f1a8ea1b6a0f",
+      v: 27,
+    });
+  });
+
+  it("signs cDeposit (1.5 HYPE to staking) and tokenDelegate like the SDK", async () => {
+    const cd = cDepositAction({ wei: 150_000_000, nonce: 1700000000000, isMainnet: true, signatureChainId: 0x66eee });
+    expect(cd.action).toMatchObject({ type: "cDeposit", hyperliquidChain: "Mainnet", wei: 150_000_000 });
+    expect(splitSignature(await wallet.signTypedData(cd.typedData as never))).toEqual({
+      r: "0x38a7f95dbebf8eb6b7c9fbc03b28447229a2deedd4ad53fe8a7a450497837530",
+      s: "0x5a931075eedaca11e11ebba6c0b946edd90bdad964febf5c74de8c4500bff1b8",
+      v: 28,
+    });
+    const td = tokenDelegateAction({ validator: "0x5ac99df645f3414876c816caa18b2d234024b487", wei: 150_000_000, isUndelegate: false, nonce: 1700000000000, isMainnet: true, signatureChainId: 0x66eee });
+    expect(splitSignature(await wallet.signTypedData(td.typedData as never))).toEqual({
+      r: "0x3add4356acad04ba818a938371bc35422b8c25e2a6d19166bb905deb9e734d76",
+      s: "0x4584d4f72bb5be28e371263d0adf2a29585b06bbc4be6bb27410af31e175b658",
+      v: 27,
+    });
+  });
+});
+
 describe("hyperliquidExchange — wire formats", () => {
   it("formats numbers like float_to_wire", () => {
     expect(floatToWire(100)).toBe("100");
@@ -169,5 +201,21 @@ describe("user-signed transfers (hyperliquid-python-sdk vectors, chain 0x66eee)"
     const { typedData } = usdClassTransferAction({ amount: "68", toPerp: true, nonce: 1700000000123, isMainnet: true, signatureChainId: 0x66eee });
     const sig = splitSignature(await wallet.signTypedData(typedData as never));
     expect(sig).toEqual({ r: "0x70bd432f1f53d219fbcd9b6345ab83eb28b19fbbc95f13390c59c97480beb123", s: "0x5bb489d6949b8671b597d597e978732bb461c76bbf4b2eb978c63d3475836fa1", v: 27 });
+  });
+});
+
+describe("HYPE staking — validator choice", () => {
+  it("picks the most staked active, unjailed validator charging 5% or less", async () => {
+    const { parseValidators, pickValidator } = await import("@/lib/integrations/hyperliquidTrade");
+    const list = parseValidators([
+      { validator: "0x" + "1".repeat(40), name: "Big but pricey", stake: 9e14, commission: "0.1", isActive: true, isJailed: false },
+      { validator: "0x" + "2".repeat(40), name: "Jailed", stake: 8e14, commission: "0.01", isActive: true, isJailed: true },
+      { validator: "0x" + "3".repeat(40), name: "Good", stake: 5e14, commission: "0.04", isActive: true, isJailed: false },
+      { validator: "0x" + "4".repeat(40), name: "Small", stake: 1e14, commission: "0.0", isActive: true, isJailed: false },
+      { validator: "bad", name: "x", stake: 1, commission: "0", isActive: true, isJailed: false },
+    ]);
+    expect(list).toHaveLength(4);
+    expect(pickValidator(list)?.name).toBe("Good");
+    expect(pickValidator([])).toBeUndefined();
   });
 });

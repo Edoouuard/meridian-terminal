@@ -12,7 +12,7 @@
  * per its API docs, "Get fees": taker 0.025%), as a fraction of notional.
  * Extended orders still sign the SDK's DEFAULT_TAKER_FEE as the maximum fee.
  */
-export const TAKER_FEE = { Hyperliquid: 0.00045, Extended: 0.00025 } as const;
+export const TAKER_FEE = { Hyperliquid: 0.00045, Extended: 0.00025, TxFlow: 0.00045 } as const;
 
 /** Hyperliquid spot taker fee (base tier), as a fraction of notional. */
 export const HL_SPOT_TAKER_FEE = 0.0007;
@@ -44,7 +44,7 @@ export function marketBase(name: string): string {
     .toUpperCase()
     .replace(/\s*-?PERP(ETUAL)?$/, "")
     .replace(/^[A-Z0-9]+:/, "")
-    .replace(/-USD$/, "")
+    .replace(/-USDC?$/, "")
     .replace(/_\d+_\d+$/, "")
     .replace(/(?<=\d)M$/, "");
   return BASE_ALIASES[base] ?? base;
@@ -158,5 +158,77 @@ export function crossVenueSummary(rows: ReturnType<typeof crossVenueFunding>, li
     ...rows.slice(0, limit).map(
       (r) => `- ${r.base} | ${r.hl}: ${signed(r.hlAprPct)} | ${r.extended}: ${signed(r.extendedAprPct)} | long ${r.longOn} → short ${r.shortOn} | ${signed(r.spreadPct, 2)}/yr`,
     ),
+  ].join("\n");
+}
+
+/** A TxFlow market as the planner reads it (lib/integrations/txflow-live.ts fetchTxflowMarketRows). */
+export interface TxflowRowLike {
+  name: string;
+  base: string;
+  mark: number;
+  fundingHourly: number;
+  maxLeverage: number;
+  dayVolumeUsd: number;
+}
+
+/** TxFlow's perp markets for the planner, most traded first, exact names. */
+export function txflowSummary(rows: TxflowRowLike[], limit = 30): string {
+  if (rows.length === 0) return "";
+  return [
+    "\n\n### TxFlow perps (TxFlow L1, USDC margin, executable) — exact market name | price | funding | max leverage | 24h volume",
+    `Funding: positive = longs pay shorts (a short earns it), settled hourly. Taker fee ${(TAKER_FEE.TxFlow * 100).toFixed(3)}% per side. Executable from the wallet's TxFlow account (see TXFLOW ACCOUNT); margin comes from a Deposit leg to TxFlow (USDC on Arbitrum, minimum $5).`,
+    ...rows
+      .slice(0, limit)
+      .map((m) => `- ${m.name} (${m.base}) | $${m.mark.toLocaleString("en-US", { maximumFractionDigits: 4 })} | ${signed(apr(m.fundingHourly))}/yr | ${m.maxLeverage}x | ${fmtVol(m.dayVolumeUsd)}`),
+  ].join("\n");
+}
+
+export type FundingVenue = "Hyperliquid" | "Extended" | "TxFlow";
+
+/**
+ * Each TxFlow market against the same base on Hyperliquid and Extended: the
+ * counterpart with the widest funding gap, and the pair a neutral position
+ * would take there (long where funding is lower, short where it is higher).
+ */
+export function txflowCrossVenue(
+  hl: { coin: string; hourlyRate: number }[],
+  extended: ExtendedMarketRow[],
+  txflow: TxflowRowLike[],
+): { base: string; txflow: string; txflowAprPct: number; other: FundingVenue; otherMarket: string; otherAprPct: number; spreadPct: number; longOn: FundingVenue; shortOn: FundingVenue }[] {
+  const out = [];
+  for (const t of txflow) {
+    const txAprPct = apr(t.fundingHourly);
+    const candidates: { venue: FundingVenue; market: string; aprPct: number }[] = [];
+    const h = hl.find((x) => marketBase(x.coin) === t.base);
+    if (h) candidates.push({ venue: "Hyperliquid", market: h.coin, aprPct: apr(h.hourlyRate) });
+    const e = extended.find((x) => x.base === t.base);
+    if (e) candidates.push({ venue: "Extended", market: e.name, aprPct: apr(e.fundingHourly) });
+    const best = candidates.sort((a, b) => Math.abs(b.aprPct - txAprPct) - Math.abs(a.aprPct - txAprPct))[0];
+    if (!best) continue;
+    const shortOnTx = txAprPct >= best.aprPct;
+    out.push({
+      base: t.base,
+      txflow: t.name,
+      txflowAprPct: txAprPct,
+      other: best.venue,
+      otherMarket: best.market,
+      otherAprPct: best.aprPct,
+      spreadPct: Math.abs(txAprPct - best.aprPct),
+      longOn: shortOnTx ? best.venue : ("TxFlow" as const),
+      shortOn: shortOnTx ? ("TxFlow" as const) : best.venue,
+    });
+  }
+  return out.sort((a, b) => b.spreadPct - a.spreadPct);
+}
+
+export function txflowCrossVenueSummary(rows: ReturnType<typeof txflowCrossVenue>, limit = 15): string {
+  if (rows.length === 0) return "";
+  return [
+    "\n\n### Same market on TxFlow and Hyperliquid / Extended — funding per venue (annualized) and the delta-neutral pair",
+    "A pair with TxFlow is long on one venue and short the same base quantity on the other; Meridian opens both legs in one click (the second sized on the first fill, the first closed at once if the second fails).",
+    "base | TxFlow market: funding | other venue market: funding | pair: long on → short on | funding difference earned by the pair (annualized, on N)",
+    ...rows
+      .slice(0, limit)
+      .map((r) => `- ${r.base} | ${r.txflow}: ${signed(r.txflowAprPct)} | ${r.other} ${r.otherMarket}: ${signed(r.otherAprPct)} | long ${r.longOn} → short ${r.shortOn} | ${signed(r.spreadPct, 2)}/yr`),
   ].join("\n");
 }

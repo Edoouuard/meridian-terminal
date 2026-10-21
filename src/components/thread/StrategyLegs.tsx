@@ -20,14 +20,18 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FEATURES } from "@/lib/features";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
 import { StrategyLegContext } from "@/components/thread/strategyLegContext";
-import { confirmStrategyLeg, pairPartnerQty, strategyId, useTrackedStrategies } from "@/lib/strategyTracker";
+import { confirmStrategyLeg, pairPartnerQty, remainingLegIndexes, strategyId, useTrackedStrategies } from "@/lib/strategyTracker";
+import { oneClickPair } from "@/lib/perpPair";
 import { typicalWait } from "@/components/TxProgress";
 import { BridgeExecuteButton } from "@/components/BridgeExecuteButton";
 import { HyperliquidSpotSellButton } from "@/components/execute/HyperliquidSpotSellButton";
 import { HyperliquidSpotBuyButton } from "@/components/execute/HyperliquidSpotBuyButton";
 import { isHlSpotBuyLeg } from "@/lib/budgetFit";
 import { HyperliquidWithdrawButton } from "@/components/execute/HyperliquidWithdrawButton";
+import { HlpDepositButton, HypeStakeButton } from "@/components/execute/HyperliquidEarnButtons";
 import { ExtendedDepositButton } from "@/components/execute/ExtendedDepositButton";
+import { PerpPairButton } from "@/components/execute/PerpPairButton";
+import { TxflowDepositButton, TxflowPerpExecuteButton, TxflowWithdrawButton } from "@/components/execute/TxflowButtons";
 import { ExtendedPerpExecuteButton, LifiPerpExecuteButton, PerpExecuteButton } from "@/components/execute/PerpExecuteButtons";
 import { LidoUnstakeButton, MorphoExecuteButton, MorphoWithdrawButton, PendleExecuteButton, SwapExecuteButton } from "@/components/execute/VenueExecuteButtons";
 import { NotWired, OrderRow, RISK_TIER_COLOR, isUnsupported, legRowValue } from "@/components/thread/shared";
@@ -105,6 +109,14 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
   // The second leg of a neutral pair trades the quantity the first one filled.
   const tracked = useTrackedStrategies(address).find((s) => s.id === strategyId(plan));
   const partnerQty = (i: number) => pairPartnerQty(tracked, i);
+  // Guided run: done steps ticked, the next one highlighted (whatever the venue), once a step has run.
+  const remaining = remainingLegIndexes(tracked, plan.legs.length);
+  const guided = plan.legs.length > 1 && !!tracked;
+  const nextLeg = guided ? remaining[0] : undefined;
+  const cardId = (i: number) => `leg-${strategyId(plan)}-${i}`;
+  // Both perp legs in one click while neither has filled (after that, the per-step buttons match the filled one).
+  const pairSeq = FEATURES.perps ? oneClickPair(plan) : null;
+  const pairUntouched = pairSeq && pairSeq.every((i) => remaining.includes(i));
 
   const orderAmountDisplay = (order: Order): string =>
     typeof order.amount === "bigint"
@@ -115,6 +127,27 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {guided && (
+        <div className="guided-run" role="status">
+          {nextLeg === undefined ? (
+            <span>All {plan.legs.length} steps done ✓</span>
+          ) : (
+            <>
+              <span>
+                Step {nextLeg + 1} of {plan.legs.length} · {plan.legs.length - remaining.length} done
+              </span>
+              <button
+                type="button"
+                className="guided-run__go"
+                onClick={() => document.getElementById(cardId(nextLeg))?.scrollIntoView({ behavior: "smooth", block: "center" })}
+              >
+                Go to step {nextLeg + 1} →
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {pairSeq && pairUntouched && <PerpPairButton plan={plan} seq={pairSeq} prices={prices} onFilled={(i, ref) => recordFill(i)(ref)} />}
       {plan.fundingNotes && plan.fundingNotes.length > 0 && (
         <div className="risk-note" style={{ border: "1px solid var(--color-divider)" }}>
           <div className="risk-note__label" style={{ color: "var(--color-neutral-500)" }}>Fitted to your wallet</div>
@@ -132,8 +165,11 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
         const isBridge = legSide === "bridge" || /debridge/i.test(leg.protocol || "");
         const isLifiSwap = /li\.?fi/i.test(leg.protocol || "") && !isBridge;
         const isLidoStake = isLido && legSide === "stake";
+        // USDC from the Hyperliquid account into HLP (trading-key signed), and HYPE staking (two wallet signatures).
+        const isHlp = /hyperliquid/i.test(leg.protocol || "") && /^(deposit|supply|fund)$/.test(legSide) && (/\bhlp\b/i.test(leg.asset || "") || /\bhlp\b/i.test(leg.protocol || ""));
+        const isHypeStake = /hyperliquid/i.test(leg.protocol || "") && /^(stake|delegate)$/.test(legSide) && /\bhype\b/i.test(leg.asset || "");
         // A Hyperliquid deposit is a plain validated USDC transfer on Arbitrum, not a perp order.
-        const isHlDeposit = /hyperliquid/i.test(leg.protocol || "") && (legSide === "deposit" || legSide === "supply" || legSide === "fund");
+        const isHlDeposit = /hyperliquid/i.test(leg.protocol || "") && (legSide === "deposit" || legSide === "supply" || legSide === "fund") && !isHlp;
         // Selling UETH/UBTC on Hyperliquid spot: a move from HyperEVM, then a spot order — not a perp.
         const isHlSpotSell = /hyperliquid/i.test(leg.protocol || "") && legSide === "sell";
         // Buying UETH/UBTC on Hyperliquid spot with the account's USDC: the long side of a Hyperliquid neutral position, not a perp.
@@ -142,18 +178,22 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
         const isHlWithdraw = /hyperliquid/i.test(leg.protocol || "") && legSide === "withdraw";
         // Depositing USDC from Arbitrum into Extended: a bridge quote, then a validated deposit on Arbitrum.
         const isExtDeposit = /extended/i.test(leg.protocol || "") && (legSide === "deposit" || legSide === "fund");
+        // TxFlow funding moves: USDC on Arbitrum to its Bridge2 (address read live), and a wallet-signed withdraw3.
+        const isTxDeposit = /txflow/i.test(leg.protocol || "") && /^(deposit|fund|supply)$/.test(legSide);
+        const isTxWithdraw = /txflow/i.test(leg.protocol || "") && legSide === "withdraw";
         // Only an actual position is a perp order: "Stake HYPE" or "Withdraw" on Hyperliquid must never become a short.
-        const isPerp = /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "") && /^(long|short|buy|open)$/.test(legSide) && !isHlSpotSell && !isHlSpotBuy;
-        const isVenueOther = /hyperliquid|extended|ondo|lighter/i.test(leg.protocol || "") && !isPerp && !isHlDeposit && !isHlSpotSell && !isHlSpotBuy && !isHlWithdraw && !isExtDeposit;
+        const isPerp = /hyperliquid|extended|txflow|ondo|lighter/i.test(leg.protocol || "") && /^(long|short|buy|open)$/.test(legSide) && !isHlSpotSell && !isHlSpotBuy;
+        const isVenueOther =
+          /hyperliquid|extended|txflow|ondo|lighter/i.test(leg.protocol || "") && !isPerp && !isHlDeposit && !isHlSpotSell && !isHlSpotBuy && !isHlWithdraw && !isExtDeposit && !isHlp && !isHypeStake && !isTxDeposit && !isTxWithdraw;
         const isUniswap = /uniswap/i.test(leg.protocol || "");
         // PendleExecuteButton buys PT; selling or redeeming one is done in the Pendle app.
         const isPendle = /pendle/i.test(leg.protocol || "") && !/^(withdraw|sell|redeem)$/.test(legSide);
         const isPendleExit = /pendle/i.test(leg.protocol || "") && !isPendle;
-        const noSize = !(leg.sizeUsd && leg.sizeUsd > 0) && !leg.sizeToken && !isHlSpotSell && !isHlWithdraw;
+        const noSize = !(leg.sizeUsd && leg.sizeUsd > 0) && !leg.sizeToken && !isHlSpotSell && !isHlWithdraw && !isHypeStake;
         // These venues need live data (vault, route, on-chain quote, perp
         // signing) that only their dedicated button fetches — never hand their
         // shell order to the generic button.
-        const dedicated = isExtDeposit || isHlWithdraw || isVenueOther || isPendleExit || isHlSpotSell || isHlSpotBuy || isPerp || isUniswap || isMorpho || isLidoWithdraw || isBridge || isLifiSwap || isPendle;
+        const dedicated = isTxDeposit || isTxWithdraw || isHlp || isHypeStake || isExtDeposit || isHlWithdraw || isVenueOther || isPendleExit || isHlSpotSell || isHlSpotBuy || isPerp || isUniswap || isMorpho || isLidoWithdraw || isBridge || isLifiSwap || isPendle;
         const liveVenue = dedicated || isLidoStake;
         const building = isUnsupported(resolved) && !liveVenue;
         // A leg funded by an earlier bridge into its chain waits for the funds.
@@ -175,22 +215,32 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
         ) : noSize ? (
           <NotWired venue={protocolLabel(leg.protocol)} reason="This step came back without an amount. Ask again with the amount you want (e.g. “$500”) so nothing is guessed." />
         ) : dedicated || isUnsupported(resolved) ? (
-            isExtDeposit ? (
+            isTxDeposit ? (
+              <TxflowDepositButton leg={leg} />
+            ) : isTxWithdraw ? (
+              <TxflowWithdrawButton leg={leg} onDone={recordFill(i)} />
+            ) : isHlp ? (
+              <HlpDepositButton leg={leg} onDone={recordFill(i)} />
+            ) : isHypeStake ? (
+              <HypeStakeButton leg={leg} prices={prices} onDone={recordFill(i)} />
+            ) : isExtDeposit ? (
               <ExtendedDepositButton leg={leg} />
             ) : isHlWithdraw ? (
-              <HyperliquidWithdrawButton leg={leg} />
+              <HyperliquidWithdrawButton leg={leg} onDone={recordFill(i)} />
             ) : isVenueOther ? (
               <NotWired venue={protocolLabel(leg.protocol)} reason={`${leg.side} on ${protocolLabel(leg.protocol)} is done in its own app — Meridian places orders and deposits there.`} />
             ) : isPendleExit ? (
               <NotWired venue="Pendle" reason="Selling or redeeming a PT is done in the Pendle app (app.pendle.finance) for now." />
             ) : isHlSpotSell ? (
-              <HyperliquidSpotSellButton leg={leg} />
+              <HyperliquidSpotSellButton leg={leg} onFilled={recordFill(i)} />
             ) : isHlSpotBuy ? (
               <HyperliquidSpotBuyButton leg={leg} onFilled={recordFill(i)} />
             ) : isPerp && !FEATURES.perps ? (
               <NotWired venue={leg.protocol} reason="Perps are paused during the beta while spot execution is validated end to end." />
             ) : isPerp && /hyperliquid/i.test(leg.protocol || "") ? (
               <PerpExecuteButton leg={leg} hedged={hedgesSpot(leg, plan.legs)} onFilled={recordFill(i)} baseQty={partnerQty(i)} />
+            ) : /txflow/i.test(leg.protocol || "") ? (
+              <TxflowPerpExecuteButton leg={leg} onFilled={recordFill(i)} baseQty={partnerQty(i)} />
             ) : /extended/i.test(leg.protocol || "") ? (
               <ExtendedPerpExecuteButton leg={leg} prices={prices} onFilled={recordFill(i)} baseQty={partnerQty(i)} />
             ) : /ondo/i.test(leg.protocol || "") ? (
@@ -220,9 +270,17 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
           );
         return (
           <StrategyLegContext.Provider key={i} value={{ plan, legIndex: i }}>
-          <div className="leg-card" style={{ opacity: building ? 0.55 : 1 }}>
+          <div
+            id={cardId(i)}
+            className={`leg-card${guided && !remaining.includes(i) ? " leg-card--done" : ""}${nextLeg === i ? " leg-card--next" : ""}`}
+            style={{ opacity: building ? 0.55 : 1 }}
+          >
             <div className="leg-card__header">
-              {plan.legs.length > 1 && <span className="leg-card__step" aria-label={`Step ${i + 1}`}>{i + 1}</span>}
+              {plan.legs.length > 1 && (
+                <span className="leg-card__step" aria-label={guided && !remaining.includes(i) ? `Step ${i + 1}, done` : `Step ${i + 1}`}>
+                  {guided && !remaining.includes(i) ? "✓" : i + 1}
+                </span>
+              )}
               <span className="leg-card__side">{leg.side}</span>
               <span className="leg-card__detail">{legRowValue(leg)}</span>
             </div>
@@ -270,34 +328,45 @@ export function ExecuteStrategyButton({ plan }: { plan: TradePlan }) {
   const { chain, isConnected, address } = useAccount();
   const { progress, executeAll, cancel, reset } = useStrategyExecutor();
   const [confirming, setConfirming] = useState(false);
+  const tracked = useTrackedStrategies(address).find((s) => s.id === strategyId(plan));
+  const remaining = remainingLegIndexes(tracked, plan.legs.length);
+  const remainingKey = remaining.join(",");
 
-  // One-click execution only when EVERY leg resolves to a directly signable
-  // order: running a subset (e.g. "supply on Optimism" without its bridge)
-  // could leave the user half-way through a strategy.
+  // One-click execution only when EVERY step still to run resolves to a
+  // directly signable order: running a subset (e.g. "supply on Optimism"
+  // without its bridge) could leave the user half-way through a strategy.
+  // Steps already confirmed (a bridge done by hand, the legs before an error)
+  // are left out, so the button resumes where the strategy stands.
   const connectedChainId = chain?.id;
   const resolvedOrders = useMemo(() => {
     const results: { leg: TradeLeg; order: Order; legIndex: number }[] = [];
     let allSignable = true;
+    const todo = new Set(remainingKey ? remainingKey.split(",").map(Number) : []);
     plan.legs.forEach((leg, i) => {
+      if (!todo.has(i)) return;
       const resolved = resolveOrderForLeg(leg, undefined, prices, legChainId(leg, connectedChainId));
       if (isUnsupported(resolved) || needsLiveCompletion(resolved)) allSignable = false;
       else results.push({ leg, order: resolved, legIndex: i });
     });
     return allSignable ? results : [];
-  }, [plan.legs, prices, connectedChainId]);
+  }, [plan.legs, prices, connectedChainId, remainingKey]);
+  // The run keeps the list it started with: the remaining steps shrink as each one confirms.
+  const [runOrders, setRunOrders] = useState<typeof resolvedOrders | null>(null);
+  const entries = runOrders ?? resolvedOrders;
+  const resuming = remaining.length < plan.legs.length;
 
   // Each leg the batch run confirms is recorded against the strategy (once per hash).
   const recorded = useRef(new Set<string>());
   useEffect(() => {
     progress.legs.forEach((lp, i) => {
-      const entry = resolvedOrders[i];
+      const entry = entries[i];
       if (lp.status !== "confirmed" || !lp.hash || !entry || recorded.current.has(lp.hash)) return;
       recorded.current.add(lp.hash);
       confirmStrategyLeg(plan, entry.legIndex, { hash: lp.hash, chainId: entry.order.chainId, owner: address });
     });
-  }, [progress.legs, resolvedOrders, plan, address]);
+  }, [progress.legs, entries, plan, address]);
 
-  if (resolvedOrders.length === 0) return null;
+  if (progress.status === "idle" && resolvedOrders.length === 0) return null;
 
   // Running state — show progress
   if (progress.status === "running" || progress.status === "completed" || progress.status === "error" || progress.status === "cancelled") {
@@ -313,7 +382,7 @@ export function ExecuteStrategyButton({ plan }: { plan: TradePlan }) {
                 ? `All ${total} legs executed`
                 : progress.status === "cancelled"
                   ? `Cancelled (${confirmed}/${total} done)`
-                  : `Stopped at leg ${progress.currentLeg + 1} (${confirmed}/${total} done)`}
+                  : `Stopped at step ${(entries[progress.currentLeg]?.legIndex ?? progress.currentLeg) + 1} (${confirmed}/${total} done)`}
           </span>
           {progress.status === "running" ? (
             <button
@@ -327,9 +396,12 @@ export function ExecuteStrategyButton({ plan }: { plan: TradePlan }) {
             <button
               className="btn"
               style={{ fontSize: 11, padding: "2px 8px", cursor: "pointer" }}
-              onClick={reset}
+              onClick={() => {
+                setRunOrders(null);
+                reset();
+              }}
             >
-              Clear
+              {progress.status === "completed" || remaining.length === 0 ? "Clear" : `Resume (${remaining.length} left)`}
             </button>
           )}
         </div>
@@ -346,7 +418,7 @@ export function ExecuteStrategyButton({ plan }: { plan: TradePlan }) {
         </div>
         {progress.status === "running" && (() => {
           const current = progress.legs[progress.currentLeg];
-          const entry = resolvedOrders[progress.currentLeg];
+          const entry = entries[progress.currentLeg];
           if (!current || !entry) return null;
           const chain = CHAIN_LABEL[entry.order.chainId] ?? "the network";
           const waitingWallet = current.status === "approving" || current.status === "executing" || current.status === "switching-chain";
@@ -360,7 +432,7 @@ export function ExecuteStrategyButton({ plan }: { plan: TradePlan }) {
         })()}
         {/* Per-leg status */}
         {progress.legs.map((lp, i) => {
-          const entry = resolvedOrders[i];
+          const entry = entries[i];
           return (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, padding: "1px 0" }}>
               <span className="text-muted">{entry ? legRowValue(entry.leg) : `Leg ${i + 1}`}</span>
@@ -393,13 +465,15 @@ export function ExecuteStrategyButton({ plan }: { plan: TradePlan }) {
         className="btn btn-primary"
         style={{ fontSize: 13, marginTop: 8, cursor: "pointer", width: "100%" }}
         onClick={() => setConfirming(true)}
-        title={isConnected ? `Execute all ${resolvedOrders.length} legs sequentially` : "Connect a wallet first"}
+        title={isConnected ? `Execute ${resuming ? "the remaining" : "all"} ${resolvedOrders.length} steps sequentially` : "Connect a wallet first"}
       >
-        Execute Strategy ({resolvedOrders.length} leg{resolvedOrders.length > 1 ? "s" : ""})
+        {resuming
+          ? `Execute remaining ${resolvedOrders.length} step${resolvedOrders.length > 1 ? "s" : ""} (from step ${resolvedOrders[0].legIndex + 1})`
+          : `Execute Strategy (${resolvedOrders.length} leg${resolvedOrders.length > 1 ? "s" : ""})`}
       </button>
       <ConfirmDialog
         open={confirming}
-        title="Execute Full Strategy"
+        title={resuming ? "Execute the remaining steps" : "Execute Full Strategy"}
         body={
           <div>
             <p style={{ marginBottom: 8 }}>
@@ -407,9 +481,9 @@ export function ExecuteStrategyButton({ plan }: { plan: TradePlan }) {
               including approvals and chain switching as needed.
             </p>
             <div style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 12 }}>
-              {resolvedOrders.map(({ leg }, i) => (
-                <div key={i} style={{ display: "flex", gap: 4 }}>
-                  <span style={{ color: "var(--color-neutral-400)" }}>{i + 1}.</span>
+              {resolvedOrders.map(({ leg, legIndex }) => (
+                <div key={legIndex} style={{ display: "flex", gap: 4 }}>
+                  <span style={{ color: "var(--color-neutral-400)" }}>{legIndex + 1}.</span>
                   <span>{leg.side} {leg.asset} on {leg.protocol}</span>
                 </div>
               ))}
@@ -420,6 +494,7 @@ export function ExecuteStrategyButton({ plan }: { plan: TradePlan }) {
         warning="This moves real funds from your wallet. Each leg will require wallet confirmation."
         onConfirm={async () => {
           setConfirming(false);
+          setRunOrders(resolvedOrders);
           await executeAll(resolvedOrders.map((r) => r.order));
         }}
         onCancel={() => setConfirming(false)}
