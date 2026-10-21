@@ -347,7 +347,8 @@ export async function routeThesisAsync(
 }
 
 const isPerpLeg = (l: TradeLeg) => /^(long|short)$/i.test(l.side.trim());
-const venueOf = (l: TradeLeg) => (/extended/i.test(l.protocol ?? "") ? "Extended" : /hyperliquid/i.test(l.protocol ?? "") ? "Hyperliquid" : "Wallet");
+const venueOf = (l: TradeLeg) =>
+  /extended/i.test(l.protocol ?? "") ? "Extended" : /txflow/i.test(l.protocol ?? "") ? "TxFlow" : /hyperliquid/i.test(l.protocol ?? "") ? "Hyperliquid" : "Wallet";
 
 /**
  * The local-rules plan uses default sizes ($20,000 for a neutral pair). When
@@ -362,7 +363,7 @@ export function fitFallbackToPortfolio(item: ThreadItem, text: string, portfolio
   const wallet = deployableUsd(portfolio.assets);
   const hl = (portfolio.hyperliquid?.freeMarginUsd ?? 0) + wallet / 2;
   const ext = (portfolio.extended?.connected ? (portfolio.extended.availableUsd ?? 0) : 0) + wallet / 2;
-  const capital = (portfolio.hyperliquid?.freeMarginUsd ?? 0) + (portfolio.extended?.connected ? (portfolio.extended.availableUsd ?? 0) : 0) + wallet;
+  const capital = (portfolio.hyperliquid?.freeMarginUsd ?? 0) + (portfolio.extended?.connected ? (portfolio.extended.availableUsd ?? 0) : 0) + (portfolio.txflow?.availableUsd ?? 0) + wallet;
   const util = SIZING_POLICY.maxUtilization;
   const fit = (plan: TradePlan): TradePlan => {
     const perps = plan.legs.filter(isPerpLeg);

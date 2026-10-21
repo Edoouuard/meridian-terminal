@@ -298,8 +298,8 @@ function cleanNumbers(l: LLMLeg): LLMLeg {
     return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : undefined;
   };
   const protocol = typeof l.protocol === "string" ? l.protocol : "";
-  // Hyperliquid (Bridge2) and Extended (Rhino.fi) deposits only go from Arbitrum, whatever chain the model wrote.
-  const chain = /hyperliquid|extended/i.test(protocol) && /^deposit$/i.test(l.side.trim()) ? "Arbitrum" : l.chain;
+  // Hyperliquid (Bridge2), Extended (Rhino.fi) and TxFlow (Bridge2) deposits only go from Arbitrum, whatever chain the model wrote.
+  const chain = /hyperliquid|extended|txflow/i.test(protocol) && /^deposit$/i.test(l.side.trim()) ? "Arbitrum" : l.chain;
   return { ...l, protocol, chain, sizeUsd: num(l.sizeUsd), leverage: num(l.leverage), stopLossPct: num(l.stopLossPct), takeProfitPct: num(l.takeProfitPct) };
 }
 

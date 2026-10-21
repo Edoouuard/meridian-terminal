@@ -461,4 +461,6 @@ Phase 4  Toute la finance (TradFi) .... mois 6-12      porte : crypto + tokenis�
 
 | 2026-10-21 | TxFlow, nouvelle venue perps comme Extended : signature EIP-712 (vecteurs officiels reproduits), relais `/api/txflow`, clé de trading approuvée une fois par le wallet, ordres IOC avec lecture du fill sur le compte, dépôt vers le Bridge2 (adresse lue en direct) et retrait `withdraw3`, positions dans Risk, troisième venue de la paire en un clic, et côté planner : marchés et funding TxFlow, comparaison avec Hyperliquid / Extended, économie et dimensionnement, solde lu par adresse, « short ETH sur TxFlow », paire serveur avec TxFlow. Pas encore testé en réel | tests `txflowExchange`, `txflow-live`, `perpPair`, `planner/pair`, `explicitOrder`, `perpVenues`, `perpPositions` |
 
+| 2026-10-21 | TxFlow dans Tools (retour du propriétaire : « je ne vois pas TxFlow comme Extended dans Tools ») : panneau avec connexion (clé de trading approuvée par une signature), solde, positions avec fermeture, dépôt depuis Arbitrum et retrait. Corrigé : le contrôle de budget prenait la marge des jambes TxFlow sur le compte Hyperliquid ; un dépôt TxFlow est forcé sur Arbitrum ; le parseur local reconnaît « TxFlow ». Le refus « TxFlow is not a venue Meridian can execute » venait de la prod d'avant le merge de #61 | tests `budgetFit` |
+
 ---

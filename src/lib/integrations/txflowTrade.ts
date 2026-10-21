@@ -78,6 +78,11 @@ function saveTxflowAgent(user: Address, network: TxflowNetwork, agent: TxflowAge
   }
 }
 
+/** Forget the trading key kept in this browser (the next trade approves a new one). */
+export function forgetTxflowAgent(user: Address, network: TxflowNetwork = TXFLOW_NETWORK) {
+  saveTxflowAgent(user, network, null);
+}
+
 /** One wallet signature: authorize a fresh trading key (it replaces the earlier "meridian" key). */
 export async function approveTxflowAgent(p: { user: Address; walletSign: TxflowWalletSign; walletChainId: number; network?: TxflowNetwork }): Promise<TxflowAgent> {
   const network = p.network ?? TXFLOW_NETWORK;
