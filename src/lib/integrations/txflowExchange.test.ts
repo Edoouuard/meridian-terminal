@@ -99,3 +99,25 @@ describe("parseTxflowResponse", () => {
     expect(isUnauthorizedAgent("Insufficient margin in account")).toBe(false);
   });
 });
+
+describe("TxFlow position stop-loss / take-profit", () => {
+  it("builds reduce-only market triggers on the closing side, stop-loss first, in the node's key order", async () => {
+    const { txflowPositionTpslAction } = await import("@/lib/integrations/txflowExchange");
+    const a = txflowPositionTpslAction({ asset: 2, isLong: true, sl: "2850.00", tp: "3300.00", marginMode: "cross" });
+    expect(a.grouping).toBe("positionTpsl");
+    expect(a.orders.map((o) => o.t.trigger.tpsl)).toEqual(["sl", "tp"]);
+    expect(a.orders[0]).toEqual({ a: 2, b: false, p: "2850.00", s: "0", r: true, t: { trigger: { isMarket: true, triggerPx: "2850.00", tpsl: "sl" } }, m: "cross" });
+    expect(Object.keys(a.orders[0])).toEqual(["a", "b", "p", "s", "r", "t", "m"]);
+    expect(Object.keys(a.orders[0].t.trigger)).toEqual(["isMarket", "triggerPx", "tpsl"]);
+    // A short closes by buying; only the legs asked for are sent.
+    const short = txflowPositionTpslAction({ asset: 2, isLong: false, tp: "2700.00" });
+    expect(short.orders).toEqual([{ a: 2, b: true, p: "2700.00", s: "0", r: true, t: { trigger: { isMarket: true, triggerPx: "2700.00", tpsl: "tp" } } }]);
+  });
+
+  it("prices the stop against the position and the target with it, on the tick", async () => {
+    const { txflowProtectionPrices } = await import("@/lib/integrations/txflowTrade");
+    expect(txflowProtectionPrices(3000, true, "0.01", { stopLossPct: 5, takeProfitPct: 10 })).toEqual({ sl: "2850.00", tp: "3300.00" });
+    expect(txflowProtectionPrices(3000, false, "0.1", { stopLossPct: 5 })).toEqual({ sl: "3150.0", tp: undefined });
+    expect(txflowProtectionPrices(3000, true, "0.1", {})).toEqual({ sl: undefined, tp: undefined });
+  });
+});

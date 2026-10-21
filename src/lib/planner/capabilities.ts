@@ -57,7 +57,7 @@ export const CAPABILITIES: Capability[] = [
     venue: "TxFlow",
     operation: "Perp market order (crypto), and a two-venue neutral pair with Hyperliquid or Extended in one click",
     requires: "USDC free in the wallet's TxFlow account (see TXFLOW ACCOUNT), or a Deposit leg to TxFlow before it; balance unknown = not usable. The first trade asks one wallet signature (trading key).",
-    constraints: `IOC within ${TXFLOW_SLIPPAGE * 100}% of the mark; quantity on the market's size step. Taker fee ${pct(TAKER_FEE.TxFlow)} per side. No stop-loss / take-profit from Meridian yet.`,
+    constraints: `IOC within ${TXFLOW_SLIPPAGE * 100}% of the mark; quantity on the market's size step. Taker fee ${pct(TAKER_FEE.TxFlow)} per side. Optional stop-loss / take-profit, bound to the position after the fill.`,
   },
   {
     venue: "TxFlow",

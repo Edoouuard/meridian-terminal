@@ -294,7 +294,8 @@ async function fetchHlpVault(): Promise<VaultYield | null> {
     if (!res.ok) return null;
     const data = await res.json();
     if (typeof data.apr !== "number" || !Number.isFinite(data.apr)) return null;
-    return { name: "HLP (Hyperliquid Vault)", apr: data.apr };
+    // Hyperliquid reports the APR as a decimal (0.12 = 12%); the summary prints percent.
+    return { name: "HLP (Hyperliquid Vault)", apr: data.apr * 100 };
   } catch {
     return null;
   }

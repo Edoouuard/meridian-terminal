@@ -31,9 +31,17 @@ export function capitalShare(text: string): number | undefined {
   return undefined;
 }
 
-/** Does the request trade on a perp venue (where the size question matters)? */
+/**
+ * Does the request open perp positions (where the size question matters)?
+ * Naming a venue isn't enough: "put $10 into Hyperliquid's vault" is a
+ * deposit, not a trade.
+ */
 export function isPerpRequest(text: string): boolean {
-  return /\b(long|short|levier|leverage|lev|\d+\s*x|x\s*\d+|neutral|neutre|perps?|hyperliquid|extended|txflow|funding|volume|farm\w*)\b/i.test(text);
+  const trade = /\b(long|short|levier|leverage|lev|\d+\s*x|x\s*\d+|neutral|neutre|perps?|funding|volume|farm\w*)\b/i.test(text);
+  if (trade) return true;
+  const venue = /\b(hyperliquid|extended|txflow)\b/i.test(text);
+  const notATrade = /\b(hlp|vault|stake|staking|deposit|d[ée]pos\w*|withdraw|retir\w*|lend|supply)\b/i.test(text);
+  return venue && !notATrade;
 }
 
 export interface SizeQuestionInput {

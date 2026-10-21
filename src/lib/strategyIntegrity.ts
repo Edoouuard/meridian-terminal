@@ -237,7 +237,8 @@ export function fitHyperliquidDeposits(legs: LLMLeg[], ctx?: WalletContext): LLM
   const needed = legs
     .filter((l) => /^(long|short)$/i.test(l.side.trim()) && /hyperliquid/i.test(l.protocol))
     .reduce((s, l) => s + ((l.sizeUsd ?? 0) * 1.03) / Math.max(1, l.leverage ?? 1), 0);
-  const isDeposit = (l: LLMLeg) => /^deposit$/i.test(l.side.trim()) && /hyperliquid/i.test(l.protocol);
+  // Margin top-ups only: a deposit INTO HLP is the strategy itself, never a funding move to drop.
+  const isDeposit = (l: LLMLeg) => /^deposit$/i.test(l.side.trim()) && /hyperliquid/i.test(l.protocol) && !/\bhlp\b/i.test(l.asset);
   if (!legs.some(isDeposit)) return legs;
   const missing = Math.ceil(needed - have);
   if (missing <= 0) return legs.filter((l) => !isDeposit(l));
@@ -277,7 +278,8 @@ export function withdrawFromHyperliquid(strategy: LLMStrategy, ctx?: WalletConte
   const clamp = (l: LLMLeg): LLMLeg => ({ ...l, asset: "USDC", chain: "Arbitrum", sizeUsd: Math.floor(Math.min(l.sizeUsd ?? held, held) * 100) / 100 });
   if (strategy.legs.some(isHlWithdraw)) return { ...strategy, legs: strategy.legs.map((l) => (isHlWithdraw(l) ? clamp(l) : l)) };
   if (held <= HL_WITHDRAW_FEE_USD + MIN_BUDGET_USD || strategy.legs.some((l) => /^(long|short)$/i.test(l.side.trim()))) return strategy;
-  const missing = freshCapitalUsd(strategy.legs) - deployableUsd(ctx?.assets);
+  // Legs paid from the Hyperliquid account itself (HLP, spot buys) don't need the withdrawal.
+  const missing = freshCapitalUsd(strategy.legs, held) - deployableUsd(ctx?.assets);
   if (!(missing > 1)) return strategy;
   const size = Math.floor(Math.min(held, missing + HL_WITHDRAW_FEE_USD) * 100) / 100;
   const leg: LLMLeg = {
@@ -297,9 +299,16 @@ function cleanNumbers(l: LLMLeg): LLMLeg {
     const n = typeof v === "string" ? Number(v.replace(/[$,\s]/g, "")) : v;
     return typeof n === "number" && Number.isFinite(n) && n > 0 ? n : undefined;
   };
-  const protocol = typeof l.protocol === "string" ? l.protocol : "";
+  let protocol = typeof l.protocol === "string" ? l.protocol : "";
+  // HLP is Hyperliquid's vault: one shape for it ("HLP", "Hyperliquid HLP", "Hyperliquid vault"), the one its button runs.
+  const side0 = typeof l.side === "string" ? l.side.trim().toLowerCase() : "";
+  const isHlpLeg = /^(deposit|supply|stake|fund)$/.test(side0) && (/\bhlp\b/i.test(protocol) || (/hyperliquid/i.test(protocol) && /\b(hlp|vault)\b/i.test(`${l.asset} ${protocol}`)));
+  if (isHlpLeg) {
+    protocol = "Hyperliquid";
+    l = { ...l, side: "Deposit", asset: "HLP" };
+  }
   // Hyperliquid (Bridge2), Extended (Rhino.fi) and TxFlow (Bridge2) deposits only go from Arbitrum, whatever chain the model wrote.
-  const chain = /hyperliquid|extended|txflow/i.test(protocol) && /^deposit$/i.test(l.side.trim()) ? "Arbitrum" : l.chain;
+  const chain = (/hyperliquid|extended|txflow/i.test(protocol) && /^deposit$/i.test(l.side.trim())) || isHlpLeg ? "Arbitrum" : l.chain;
   return { ...l, protocol, chain, sizeUsd: num(l.sizeUsd), leverage: num(l.leverage), stopLossPct: num(l.stopLossPct), takeProfitPct: num(l.takeProfitPct) };
 }
 

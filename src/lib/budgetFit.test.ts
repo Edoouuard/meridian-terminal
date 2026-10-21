@@ -137,3 +137,21 @@ describe("TxFlow legs", () => {
     expect(fixed.legs[0].chain).toBe("Arbitrum");
   });
 });
+
+describe("HLP legs", () => {
+  it("take one shape whatever the model wrote, so the HLP button runs them", () => {
+    for (const leg of [
+      { side: "Deposit", asset: "USDC", protocol: "HLP", chain: "Hyperliquid", sizeUsd: 10 },
+      { side: "Supply", asset: "USDC", protocol: "Hyperliquid Vault", sizeUsd: 10 },
+      { side: "Deposit", asset: "HLP", protocol: "Hyperliquid", sizeUsd: 10 },
+    ]) {
+      const fixed = validateAndFixStrategy({ name: "HLP", risk: "moderate", summary: "", variantNote: "", legs: [leg as LLMLeg] }, { assets: [{ symbol: "USDC", venue: "Hyperliquid perps", chain: "Hyperliquid L1", usd: 40 }] });
+      // Paid from the Hyperliquid account: kept (not dropped as a margin top-up), no withdrawal to Arbitrum first.
+      expect(fixed.legs).toHaveLength(1);
+      expect(fixed.legs[0]).toMatchObject({ side: "Deposit", asset: "HLP", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 10 });
+    }
+    // A plain deposit of USDC to the Hyperliquid account stays one.
+    const plain = validateAndFixStrategy({ name: "x", risk: "low", summary: "", variantNote: "", legs: [{ side: "Deposit", asset: "USDC", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 10 } as LLMLeg] }, { assets: [{ symbol: "USDC", venue: "Wallet", chain: "Arbitrum", usd: 40 }] });
+    expect(plain.legs[0].asset).toBe("USDC");
+  });
+});

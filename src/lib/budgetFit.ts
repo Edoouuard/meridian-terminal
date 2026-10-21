@@ -87,7 +87,8 @@ export function freshCapitalUsd(legs: TradeLeg[], hlMarginUsd = 0): number {
       fresh += take(HL_MARGIN, size / Math.max(1, leg.leverage ?? 1));
       continue;
     }
-    if (isHlSpotBuyLeg(leg)) {
+    // A spot buy on Hyperliquid and a deposit into HLP are paid from the Hyperliquid account.
+    if (isHlSpotBuyLeg(leg) || (side === "deposit" && /hyperliquid/i.test(leg.protocol) && /\bhlp\b/i.test(leg.asset))) {
       fresh += take(HL_MARGIN, size);
       continue;
     }
