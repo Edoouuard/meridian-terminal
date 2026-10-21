@@ -6,7 +6,7 @@ import { useAccount, useSignTypedData } from "wagmi";
 import type { Address } from "viem";
 import { fmtUsd } from "@/lib/data";
 import { TXFLOW_MIN_DEPOSIT_USD, TXFLOW_NETWORK, fetchTxflowAccount, fetchTxflowMarkets } from "@/lib/integrations/txflow-live";
-import { approveTxflowAgent, forgetTxflowAgent, loadTxflowAgent, txflowMarketOrder, withTxflowAgent, type TxflowWalletSign } from "@/lib/integrations/txflowTrade";
+import { TXFLOW_APP_URL, TXFLOW_BUILDER_RESTRICTED, approveTxflowAgent, forgetTxflowAgent, loadTxflowAgent, txflowMarketOrder, withTxflowAgent, type TxflowWalletSign } from "@/lib/integrations/txflowTrade";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { TxflowDepositButton, TxflowWithdrawButton } from "@/components/execute/TxflowButtons";
 
@@ -158,6 +158,11 @@ export function TxflowPanel() {
 
       {busy && <p style={{ fontSize: 11, margin: "6px 0 0" }} className="text-muted">{busy}</p>}
       {error && <p style={{ fontSize: 11, margin: "6px 0 0", color: "var(--risk-bad, #c0392b)" }}>{error}</p>}
+      {error === TXFLOW_BUILDER_RESTRICTED && (
+        <a className="btn" style={{ fontSize: 12, marginTop: 6, display: "inline-block" }} href={TXFLOW_APP_URL} target="_blank" rel="noreferrer">
+          Open app.txflow.com ↗
+        </a>
+      )}
 
       {deposit !== null ? (
         <TxflowDepositButton leg={{ side: "Deposit", asset: "USDC", protocol: "TxFlow", chain: "Arbitrum", sizeUsd: deposit }} />

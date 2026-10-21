@@ -139,3 +139,13 @@ describe("TxFlow builder approval", () => {
     expect(hashTypedData(typedData)).toMatch(/^0x[0-9a-f]{64}$/);
   });
 });
+
+describe("TxFlow restricted builder", () => {
+  it("recognizes the mainnet limited-access refusal and nothing else", async () => {
+    const { isTxflowBuilderRestricted } = await import("@/lib/integrations/txflowTrade");
+    expect(isTxflowBuilderRestricted("This builder address is restricted by the platform and cannot be approved.")).toBe(true);
+    expect(isTxflowBuilderRestricted("You must approve at least one builder before using this interface.")).toBe(false);
+    expect(isTxflowBuilderRestricted("Insufficient margin in account")).toBe(false);
+    expect(isTxflowBuilderRestricted(undefined)).toBe(false);
+  });
+});

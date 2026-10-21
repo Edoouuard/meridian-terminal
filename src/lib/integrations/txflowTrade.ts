@@ -112,7 +112,26 @@ export async function ensureTxflowBuilder(p: { user: Address; walletSign: Txflow
   const { action, typedData, signatureChainId } = txflowApproveBuilderFee({ network, builder: TXFLOW_BUILDER, maxFeeRate: TXFLOW_BUILDER_MAX_FEE, nonce, walletChainId: p.walletChainId });
   const signature = txflowSignature(await p.walletSign(typedData));
   const out = await postExchange(network, { action, signature, nonce, vaultAddress: null, signatureChainId, confirm: "executed" });
-  if (!out.ok) throw new Error(`TxFlow didn't record the builder approval: ${out.error}`);
+  if (!out.ok) {
+    if (isTxflowBuilderRestricted(out.error)) throw new Error(TXFLOW_BUILDER_RESTRICTED);
+    throw new Error(`TxFlow didn't record the builder approval: ${out.error}`);
+  }
+}
+
+/** TxFlow's own app, where an account's first setup approves TxFlow's builder. */
+export const TXFLOW_APP_URL = "https://app.txflow.com/";
+
+/**
+ * Mainnet builder codes are in limited access (docs: "apply for a developer
+ * slot"): until TxFlow enables Meridian's, approving it is refused. An account
+ * set up once on TxFlow's own app already holds TxFlow's builder, and Meridian
+ * then skips this step.
+ */
+export const TXFLOW_BUILDER_RESTRICTED =
+  "TxFlow only accepts approved builder codes on mainnet for now, and Meridian's isn't enabled yet. One-time fix: open app.txflow.com with this wallet and enable trading there (it approves TxFlow's own builder), then click Connect TxFlow again: Meridian skips the builder step.";
+
+export function isTxflowBuilderRestricted(error: string | undefined): boolean {
+  return /builder/i.test(error ?? "") ? /restricted|not (?:allowed|whitelisted|eligible)|cannot be approved/i.test(error ?? "") : false;
 }
 
 /** Forget the trading key kept in this browser (the next trade approves a new one). */

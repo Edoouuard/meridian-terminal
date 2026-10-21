@@ -11,7 +11,7 @@ import { fundingAprForSide, marginNeededUsd } from "@/lib/integrations/hyperliqu
 import { ARBITRUM_USDC, HYPERLIQUID_DEPOSIT_CHAIN_ID } from "@/lib/integrations/hyperliquidDeposit";
 import { TXFLOW_MIN_WITHDRAW_USD, TXFLOW_WITHDRAW_FEE_USD } from "@/lib/integrations/txflowExchange";
 import { TXFLOW_MIN_DEPOSIT_USD, TXFLOW_NETWORK, fetchTxflowAccount, fetchTxflowBridge, fetchTxflowCtx, fetchTxflowMarkets, findTxflowMarket } from "@/lib/integrations/txflow-live";
-import { loadTxflowAgent, txflowMarketOrder, txflowProtectionPrices, withTxflowAgent, withdrawFromTxflow, type TxflowFillResult, type TxflowWalletSign } from "@/lib/integrations/txflowTrade";
+import { TXFLOW_APP_URL, TXFLOW_BUILDER_RESTRICTED, loadTxflowAgent, txflowMarketOrder, txflowProtectionPrices, withTxflowAgent, withdrawFromTxflow, type TxflowFillResult, type TxflowWalletSign } from "@/lib/integrations/txflowTrade";
 import { defaultStopLossPct } from "@/components/execute/PerpExecuteButtons";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
@@ -177,6 +177,11 @@ export function TxflowPerpExecuteButton({ leg, onFilled, baseQty, hedged = false
     <>
       {info}
       {state.status === "error" && <p style={errStyle}>TxFlow: {state.error}</p>}
+      {state.status === "error" && state.error === TXFLOW_BUILDER_RESTRICTED && (
+        <a className="btn" style={{ fontSize: 12, alignSelf: "flex-start" }} href={TXFLOW_APP_URL} target="_blank" rel="noreferrer">
+          Open app.txflow.com ↗
+        </a>
+      )}
       {short ? (
         <p style={muted}>
           Your TxFlow account needs ~{fmtUsd(needed - free)} more margin. Add a &ldquo;Deposit USDC to TxFlow&rdquo; step (USDC on Arbitrum, minimum {TXFLOW_MIN_DEPOSIT_USD} USDC), or deposit on txflow.com.
