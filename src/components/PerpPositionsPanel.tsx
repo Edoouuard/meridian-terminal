@@ -6,10 +6,12 @@ import { useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
 import { useExtendedAccount } from "@/hooks/useExtendedAccount";
 import { fetchClearinghouseState, fetchOpenOrders, HIP3_MAIN_DEX, hyperliquidEnv } from "@/lib/integrations/hyperliquid-live";
 import { fetchExtendedPositionViews } from "@/lib/integrations/extended-live";
+import { fetchTxflowAccount, fetchTxflowMarkets } from "@/lib/integrations/txflow-live";
 import {
   liqDistancePct,
   roePct,
   rowsFromExtended,
+  rowsFromTxflow,
   rowsFromHyperliquid,
   summarize,
   type PerpPositionRow,
@@ -42,6 +44,7 @@ const VENUE_SHORT: Record<PerpPositionRow["venue"], string> = {
   Hyperliquid: "HL",
   "Hyperliquid stocks": "HL · stocks",
   Extended: "Extended",
+  TxFlow: "TxFlow",
 };
 
 function Stat({ label, value, color, hint }: { label: string; value: string; color?: string; hint?: string }) {
@@ -98,7 +101,7 @@ function PositionRow({ row }: { row: PerpPositionRow }) {
 }
 
 /**
- * Perp positions across venues (Hyperliquid, its HIP-3 stocks dex, Extended)
+ * Perp positions across venues (Hyperliquid, its HIP-3 stocks dex, Extended, TxFlow)
  * with open PnL, funding since open, liquidation distance and SL/TP, so a
  * trader sees how every position is doing without opening each venue.
  * Read-only; closing and order edits live in Tools → each venue's panel.
@@ -131,10 +134,21 @@ export function PerpPositionsPanel() {
     queryFn: async () => rowsFromExtended(await fetchExtendedPositionViews(extended!)),
   });
 
-  const rows = [...(hl.data ?? []), ...(ext.data ?? [])].sort((a, b) => b.notional - a.notional);
+  // TxFlow positions belong to the wallet's address: read whenever a wallet is connected.
+  const tx = useQuery({
+    queryKey: ["perp-panel-txflow", address],
+    enabled: !!address,
+    refetchInterval: 15_000,
+    queryFn: async () => {
+      const [account, markets] = await Promise.all([fetchTxflowAccount(address!), fetchTxflowMarkets()]);
+      return rowsFromTxflow(account, markets);
+    },
+  });
+
+  const rows = [...(hl.data ?? []), ...(ext.data ?? []), ...(tx.data ?? [])].sort((a, b) => b.notional - a.notional);
   const s = summarize(rows);
   const loading = (hl.isLoading && !!address) || (ext.isLoading && !!extended);
-  const errors = [hl.error && "Hyperliquid", ext.error && "Extended"].filter(Boolean);
+  const errors = [hl.error && "Hyperliquid", ext.error && "Extended", tx.error && "TxFlow"].filter(Boolean);
 
   return (
     <section className="panel-card">
@@ -151,7 +165,7 @@ export function PerpPositionsPanel() {
         </p>
       ) : rows.length === 0 && !loading ? (
         <p className="text-muted" style={{ fontSize: 12, margin: "var(--space-2) 0 0" }}>
-          No open perp position on Hyperliquid{extended ? " or Extended" : ""}. Try &ldquo;short ETH 2x with a 20% stop&rdquo;.
+          No open perp position on Hyperliquid, TxFlow{extended ? " or Extended" : ""}. Try &ldquo;short ETH 2x with a 20% stop&rdquo;.
         </p>
       ) : (
         <>

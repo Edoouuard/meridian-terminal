@@ -10,7 +10,7 @@
  * is reported as exposed, with the quantity, never hidden.
  *
  * Pure orchestration: the venues are passed in (components/execute/PerpPairButton
- * wires Hyperliquid and Extended). Unit-tested.
+ * wires Hyperliquid, Extended and TxFlow). Unit-tested.
  */
 
 import type { TradeLeg, TradePlan } from "@/lib/tradePlan";
@@ -62,11 +62,11 @@ export function pairSequence(plan: Pick<TradePlan, "pair" | "execution">): [numb
   return [pair[0], pair[1]];
 }
 
-const PAIR_VENUE = /hyperliquid|extended/i;
-const venueOf = (l: TradeLeg) => (/hyperliquid/i.test(l.protocol || "") ? "hyperliquid" : "extended");
+const PAIR_VENUE = /hyperliquid|extended|txflow/i;
+const venueOf = (l: TradeLeg) => (l.protocol || "").toLowerCase().match(PAIR_VENUE)?.[0];
 const isPerpLeg = (l: TradeLeg | undefined) => !!l && PAIR_VENUE.test(l.protocol || "") && /^(long|short)$/i.test((l.side || "").trim());
 
-/** One-click pairs: a perp leg on Hyperliquid and one on Extended, opposite sides, each with a size. */
+/** One-click pairs: perp legs on two different venues (Hyperliquid, Extended, TxFlow), opposite sides, each with a size. */
 export function oneClickPair(plan: Pick<TradePlan, "pair" | "execution" | "legs">): [number, number] | null {
   const seq = pairSequence(plan);
   if (!seq) return null;

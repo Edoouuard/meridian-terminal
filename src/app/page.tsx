@@ -32,6 +32,7 @@ import { routeThesis, type TradePlan } from "@/lib/routeThesis";
 import { routeThesisAsync, threadHistory, type PortfolioContext } from "@/lib/intentEngine";
 import { useExtendedAccount } from "@/hooks/useExtendedAccount";
 import { fetchExtendedBalance } from "@/lib/integrations/extended-live";
+import { fetchTxflowAccount } from "@/lib/integrations/txflow-live";
 import type { Signer as ExtendedSigner } from "@blackcube/extended-sdk";
 import { fundPlan } from "@/lib/fundingPlanner";
 import { browserFundingDeps } from "@/lib/fundingDeps";
@@ -117,6 +118,17 @@ async function extendedSnapshot(signer: ExtendedSigner | null): Promise<Portfoli
     return { connected: true, network: signer.network, equityUsd: b?.equity ?? 0, availableUsd: b?.availableForTrade ?? 0 };
   } catch {
     return { connected: true, network: signer.network };
+  }
+}
+
+/** The wallet's TxFlow account as the planner sees it (null = not read; a slow read never holds the plan up). */
+async function txflowSnapshot(address: `0x${string}` | undefined): Promise<PortfolioContext["txflow"]> {
+  if (!address) return null;
+  try {
+    const a = await Promise.race([fetchTxflowAccount(address), new Promise<never>((_, rej) => setTimeout(() => rej(new Error("timeout")), 4000))]);
+    return { equityUsd: a.accountValue, availableUsd: a.withdrawable };
+  } catch {
+    return null;
   }
 }
 
@@ -222,6 +234,7 @@ export default function TerminalApp() {
           netDeltaEthTotal: live.netDeltaEthTotal,
           hyperliquid: live.hyperliquidAccount,
           extended: await extendedSnapshot(extendedSigner),
+          txflow: await txflowSnapshot(address),
         }
       : undefined;
 

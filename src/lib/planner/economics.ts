@@ -7,15 +7,16 @@
 
 import type { LLMLeg, LLMStrategy } from "@/lib/strategyIntegrity";
 import { marketBase } from "@/lib/perpVenues";
-import type { MarketQuote, MarketSnapshot } from "@/lib/planner/markets";
+import type { MarketQuote, MarketSnapshot, PerpVenueName } from "@/lib/planner/markets";
 import { DATA_POLICY, SIZING_POLICY } from "@/lib/planner/policy";
 import { HL_WITHDRAW_FEE_USD } from "@/lib/integrations/hyperliquidExchange";
+import { TXFLOW_WITHDRAW_FEE_USD } from "@/lib/integrations/txflowExchange";
 
 const HOURS_PER_YEAR = 24 * 365;
 
 export interface LegEconomics {
   legIndex: number;
-  venue: "Hyperliquid" | "Extended";
+  venue: PerpVenueName;
   market: string;
   side: "long" | "short";
   /** null when the plan has no size (blocked on an unknown amount). */
@@ -57,9 +58,10 @@ export interface Economics {
 
 const isPerp = (l: LLMLeg) => /^(long|short)$/i.test(l.side.trim());
 const isHlSpotBuy = (l: LLMLeg) => /hyperliquid/i.test(l.protocol) && /^(buy|swap)$/i.test(l.side.trim()) && /\b(UETH|UBTC|USOL)\b/i.test(l.asset);
-const venueOf = (l: LLMLeg): "Hyperliquid" | "Extended" | null => (/extended/i.test(l.protocol) ? "Extended" : /hyperliquid/i.test(l.protocol) ? "Hyperliquid" : null);
+const venueOf = (l: LLMLeg): PerpVenueName | null =>
+  /extended/i.test(l.protocol) ? "Extended" : /hyperliquid/i.test(l.protocol) ? "Hyperliquid" : /txflow/i.test(l.protocol) ? "TxFlow" : null;
 
-/** Does this plan trade on Hyperliquid or Extended (the venues the server can price)? */
+/** Does this plan trade on Hyperliquid, Extended or TxFlow (the venues the server can price)? */
 export function isVenuePlan(s: LLMStrategy): boolean {
   return (s.legs ?? []).some((l) => (isPerp(l) && venueOf(l) !== null) || isHlSpotBuy(l));
 }
@@ -102,6 +104,8 @@ export interface VenueBalances {
   hyperliquidFreeUsd: number | null;
   /** Free USDC on Extended; null = unknown, undefined = not connected (0). */
   extendedFreeUsd: number | null;
+  /** Free margin on TxFlow (public account read); null or absent = unknown. */
+  txflowFreeUsd?: number | null;
   /** Free wallet balance that Deposit legs can move to Hyperliquid. */
   walletDeployableUsd: number;
 }
@@ -186,10 +190,11 @@ export function computeVenueEconomics(
   }
 
   const sum = (xs: (number | null)[]) => (xs.some((x) => x === null) ? null : xs.reduce<number>((a, b) => a + (b as number), 0));
-  const capitalByVenue = (v: "Hyperliquid" | "Extended") => sum(legEcon.filter((l) => l.venue === v).map((l) => l.capitalUsd));
+  const capitalByVenue = (v: PerpVenueName) => sum(legEcon.filter((l) => l.venue === v).map((l) => l.capitalUsd));
   const hlCapital = capitalByVenue("Hyperliquid") ?? null;
   const extCapital = capitalByVenue("Extended") ?? null;
-  const capitalCommitted = sum([hlCapital, extCapital]);
+  const txCapital = capitalByVenue("TxFlow") ?? null;
+  const capitalCommitted = sum([hlCapital, extCapital, txCapital]);
 
   // What is already on each venue (plus what the plan's own Deposit legs bring to Hyperliquid, from the wallet).
   const deposits = legs.filter((l) => /^deposit$/i.test(l.side.trim()) && /hyperliquid/i.test(l.protocol)).reduce((a, l) => a + (l.sizeUsd ?? 0), 0);
@@ -203,15 +208,25 @@ export function computeVenueEconomics(
   const walletLeft = Math.max(0, balances.walletDeployableUsd - Math.min(deposits, balances.walletDeployableUsd));
   const extAvail = balances.extendedFreeUsd === null ? null : balances.extendedFreeUsd + Math.min(extDeposits, walletLeft);
   const extToAdd = toAdd(extCapital, extAvail, hasExt);
-  const capitalToAdd = sum([hlToAdd, extToAdd]);
+  // A deposit to TxFlow in the plan (Arbitrum USDC to its Bridge2) adds to what is on TxFlow.
+  const hasTx = legEcon.some((l) => l.venue === "TxFlow");
+  const txDeposits = legs.filter((l) => /^(deposit|fund)$/i.test(l.side.trim()) && /txflow/i.test(l.protocol)).reduce((a, l) => a + (l.sizeUsd ?? 0), 0);
+  const walletAfterExt = Math.max(0, walletLeft - Math.min(extDeposits, walletLeft));
+  const txFree = balances.txflowFreeUsd ?? null;
+  const txAvail = txFree === null ? null : txFree + Math.min(txDeposits, walletAfterExt);
+  const txToAdd = toAdd(txCapital, txAvail, hasTx);
+  const capitalToAdd = sum([hlToAdd, extToAdd, txToAdd]);
   const capitalAvailable = capitalCommitted === null || capitalToAdd === null ? null : capitalCommitted - capitalToAdd;
   if (hasHl && hlToAdd !== null && hlToAdd > 0.5) blockers.push(`Hyperliquid needs ~$${Math.ceil(hlToAdd)} more free margin than the account and the plan's deposits provide.`);
   if (hasHl && hlToAdd === null && hlCapital !== null) blockers.push("Hyperliquid free margin unknown right now: the plan isn't treated as executable.");
+  if (hasTx && txToAdd !== null && txToAdd > 0.5) blockers.push(`TxFlow needs ~$${Math.ceil(txToAdd)} more free margin than the account and the plan's deposits provide. Add a deposit to TxFlow (USDC on Arbitrum, minimum $5).`);
+  if (hasTx && txToAdd === null && txCapital !== null) blockers.push("TxFlow free margin unknown right now: the plan isn't treated as executable.");
 
   const withdrawals = legs.filter((l) => /^withdraw$/i.test(l.side.trim()) && /hyperliquid/i.test(l.protocol)).length;
+  const txWithdrawals = legs.filter((l) => /^withdraw$/i.test(l.side.trim()) && /txflow/i.test(l.protocol)).length;
   const hasBridge = legs.some((l) => /^bridge$/i.test(l.side.trim()));
   // The Rhino.fi fee of a deposit to Extended is only known from its quote, just before signing.
-  const transferFees = hasBridge || extDeposits > 0 ? null : withdrawals * HL_WITHDRAW_FEE_USD;
+  const transferFees = hasBridge || extDeposits > 0 ? null : withdrawals * HL_WITHDRAW_FEE_USD + txWithdrawals * TXFLOW_WITHDRAW_FEE_USD;
 
   const volume = sum(legEcon.map((l) => (l.notionalUsd === null ? null : l.notionalUsd * 2)));
   const carry = sum(legEcon.map((l) => l.annualizedCarryUsd));

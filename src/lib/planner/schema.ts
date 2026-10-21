@@ -14,7 +14,7 @@ import { belowMinimum } from "@/lib/strategyIntegrity";
 import type { ExplicitPerpOrder } from "@/lib/explicitOrder";
 import { marketBase } from "@/lib/perpVenues";
 import { EXECUTION_POLICY, SIZING_POLICY } from "@/lib/planner/policy";
-import type { MarketSnapshot } from "@/lib/planner/markets";
+import type { MarketSnapshot, PerpVenueName } from "@/lib/planner/markets";
 import { computeVenueEconomics, findQuote, isVenuePlan, type Economics, type VenueBalances } from "@/lib/planner/economics";
 import { sizePerpLegs } from "@/lib/planner/sizing";
 
@@ -63,7 +63,7 @@ export interface ConformanceContext {
   /** The order the user typed, when there is one. */
   order: ExplicitPerpOrder | null;
   /** Perp venues the user named ("entre Extended et Hyperliquid"). */
-  namedVenues: ("Hyperliquid" | "Extended")[];
+  namedVenues: PerpVenueName[];
   /** Extended account as the server knows it; undefined balance = unknown. */
   extended?: { connected: boolean; network?: string; availableUsd?: number };
   /** Market quotes for venue plans; without them venue plans can't be sized here. */
@@ -76,15 +76,16 @@ export interface ConformanceContext {
 }
 
 /** Perp venues named in the request. */
-export function namedVenues(thesis: string): ("Hyperliquid" | "Extended")[] {
-  const out: ("Hyperliquid" | "Extended")[] = [];
+export function namedVenues(thesis: string): PerpVenueName[] {
+  const out: PerpVenueName[] = [];
   if (/\b(hyperliquid|hl)\b/i.test(thesis)) out.push("Hyperliquid");
   if (/\b(extended|x10)\b/i.test(thesis)) out.push("Extended");
+  if (/\btxflow\b/i.test(thesis)) out.push("TxFlow");
   return out;
 }
 
 const isPerp = (l: LLMLeg) => /^(long|short)$/i.test(l.side.trim());
-const venueOf = (l: LLMLeg) => (/extended/i.test(l.protocol) ? "Extended" : /hyperliquid/i.test(l.protocol) ? "Hyperliquid" : l.protocol);
+const venueOf = (l: LLMLeg) => (/extended/i.test(l.protocol) ? "Extended" : /hyperliquid/i.test(l.protocol) ? "Hyperliquid" : /txflow/i.test(l.protocol) ? "TxFlow" : l.protocol);
 
 /** How a strategy departs from the user's hard constraints (empty = it answers the request). */
 export function deviations(s: LLMStrategy, ctx: ConformanceContext): string[] {
@@ -203,7 +204,10 @@ function sequencePair(s: PlannerStrategy, markets: MarketSnapshot | undefined): 
 
 function executionFor(s: PlannerStrategy, pair: [number, number]): PairExecution {
   const [x, y] = pair[0] < pair[1] ? pair : [pair[1], pair[0]];
-  const slip = (i: number) => EXECUTION_POLICY.maxSlippagePct[venueOf(s.legs[i]) === "Extended" ? "Extended" : "Hyperliquid"];
+  const slip = (i: number) => {
+    const v = venueOf(s.legs[i]);
+    return EXECUTION_POLICY.maxSlippagePct[v === "Extended" || v === "TxFlow" ? v : "Hyperliquid"];
+  };
   return {
     sequence: [x, y],
     orderType: EXECUTION_POLICY.orderType,

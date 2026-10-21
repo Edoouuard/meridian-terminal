@@ -10,6 +10,8 @@ import { runPerpPair, type PairFill, type PairRun, type PairStep, type PairVenue
 import { fetchPerpAccount, hyperliquidEnv, marginNeededUsd, perpMarketOrder, withAgent, type WalletSign } from "@/lib/integrations/hyperliquidTrade";
 import { executeExtendedPerp, fetchExtendedBalance } from "@/lib/integrations/extended-live";
 import { repairExtendedVault, useExtendedAccount } from "@/hooks/useExtendedAccount";
+import { TXFLOW_NETWORK, fetchTxflowAccount } from "@/lib/integrations/txflow-live";
+import { txflowMarketOrder, withTxflowAgent, type TxflowWalletSign } from "@/lib/integrations/txflowTrade";
 import { useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
 import type { PriceEntry } from "@/lib/quote";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -18,10 +20,11 @@ import { recordExecution } from "@/lib/history";
 const muted = { margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" } as const;
 const bad = "var(--risk-bad, #c0392b)";
 const isHl = (l: TradeLeg) => /hyperliquid/i.test(l.protocol || "");
+const isTx = (l: TradeLeg) => /txflow/i.test(l.protocol || "");
 const isLong = (l: TradeLeg) => /^long$/i.test(l.side.trim());
 const hlCoin = (l: TradeLeg) => (l.asset || "").replace(/[-\s]?PERP$/i, "").trim().toUpperCase();
 const extSymbol = (l: TradeLeg) => (l.asset || "").replace(/PERP$/i, "").trim() || "ETH";
-const venueName = (l: TradeLeg) => (isHl(l) ? "Hyperliquid" : "Extended");
+const venueName = (l: TradeLeg) => (isHl(l) ? "Hyperliquid" : isTx(l) ? "TxFlow" : "Extended");
 const lev = (l: TradeLeg) => Math.max(1, Math.round(l.leverage ?? 1));
 const declined = (msg: string) => (/user rejected|denied/i.test(msg) ? "Signature declined in the wallet." : msg.split("\n")[0]);
 
@@ -54,7 +57,8 @@ export function PerpPairButton({
 
   const legs = seq.map((i) => plan.legs[i]) as [TradeLeg, TradeLeg];
   const hlLeg = legs.find(isHl);
-  const extLeg = legs.find((l) => !isHl(l));
+  const txLeg = legs.find(isTx);
+  const extLeg = legs.find((l) => !isHl(l) && !isTx(l));
   const needsExtended = !!extLeg;
 
   // Free margin on each venue against what its leg needs.
@@ -63,7 +67,8 @@ export function PerpPairButton({
     queryFn: async () => {
       const hl = hlLeg ? (await fetchPerpAccount(env, address as Address, hlCoin(hlLeg))).freeMargin : undefined;
       const ext = extLeg && signer ? ((await fetchExtendedBalance(signer).catch(() => null))?.availableForTrade ?? 0) : undefined;
-      return { hl, ext };
+      const tx = txLeg ? ((await fetchTxflowAccount(address as Address).catch(() => null))?.withdrawable ?? 0) : undefined;
+      return { hl, ext, tx };
     },
     enabled: !!address && (!needsExtended || !!signer),
     refetchInterval: 15_000,
@@ -75,13 +80,14 @@ export function PerpPairButton({
 
   const short = legs
     .map((l) => {
-      const free = isHl(l) ? margin.data.hl : margin.data.ext;
+      const free = isHl(l) ? margin.data.hl : isTx(l) ? margin.data.tx : margin.data.ext;
       const need = marginNeededUsd(l.sizeUsd ?? 0, lev(l));
       return free !== undefined && free < need ? `${venueName(l)} has ${fmtUsd(free)} free, needs ~${fmtUsd(need)}` : null;
     })
     .filter(Boolean);
 
   const walletSign: WalletSign = (td) => signTypedDataAsync(td as Parameters<typeof signTypedDataAsync>[0]);
+  const txWalletSign: TxflowWalletSign = (td) => signTypedDataAsync(td as Parameters<typeof signTypedDataAsync>[0]);
   const hlFill = (coin: string, o: { ok: boolean; filled?: { totalSz: number; avgPx: number }; error?: string }): PairFill =>
     o.ok && o.filled ? { ok: true, filledQty: o.filled.totalSz, avgPx: o.filled.avgPx, ref: `hyperliquid:${coin}:${o.filled.totalSz}@${o.filled.avgPx}` } : { ok: false, error: o.error ?? "The order didn't fill (no liquidity within 5% of the mid)." };
 
@@ -93,6 +99,14 @@ export function PerpPairButton({
         perpMarketOrder(env, key, { coin, isBuy, sizeUsd: reduceOnly ? 0 : (l.sizeUsd ?? 0), coinQty: qty, leverage: lev(l), reduceOnly, user: address }),
       );
       return hlFill(coin, out);
+    }
+    if (isTx(l)) {
+      const out = await withTxflowAgent({ user: address, walletSign: txWalletSign, walletChainId: chainId }, (key) =>
+        txflowMarketOrder(TXFLOW_NETWORK, key, { user: address, symbol: hlCoin(l), isBuy, sizeUsd: reduceOnly ? 0 : (l.sizeUsd ?? 0), coinQty: qty, leverage: lev(l), reduceOnly }),
+      );
+      return out.ok && out.filled
+        ? { ok: true, filledQty: out.filled.totalSz, avgPx: out.filled.avgPx, ref: `txflow:${out.market?.name ?? hlCoin(l)}:${out.filled.totalSz}@${out.filled.avgPx}` }
+        : { ok: false, error: out.error ?? "TxFlow didn't report a fill." };
     }
     const r = await executeExtendedPerp({ signer: signer!, symbol: extSymbol(l), isBuy, sizeUsd: l.sizeUsd ?? 0, prices, leverage: lev(l), reduceOnly, qtyOverride: qty });
     if (r.repairedVaultId) repairExtendedVault(r.repairedVaultId);
@@ -113,6 +127,10 @@ export function PerpPairButton({
       if (hlLeg) {
         setStep("approving");
         await withAgent({ user: address!, env, walletSign, walletChainId: chainId! }, async () => ({ ok: true }));
+      }
+      if (txLeg) {
+        setStep("approving");
+        await withTxflowAgent({ user: address!, walletSign: txWalletSign, walletChainId: chainId! }, async () => ({ ok: true }));
       }
       const out = await runPerpPair(seq, venue, setStep);
       setRun(out);
@@ -189,7 +207,7 @@ export function PerpPairButton({
           </div>
         }
         confirmLabel="Open both legs"
-        warning={envName === "testnet" && !needsExtended ? "TESTNET — no real funds." : "Real funds. Market orders: expect fees and a little slippage on each leg."}
+        warning={envName === "testnet" && !needsExtended && !txLeg ? "TESTNET — no real funds." : "Real funds. Market orders: expect fees and a little slippage on each leg."}
         onConfirm={() => void start()}
         onCancel={() => setConfirming(false)}
       />

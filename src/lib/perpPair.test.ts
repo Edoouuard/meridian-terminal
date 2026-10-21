@@ -43,6 +43,9 @@ describe("pairSequence / oneClickPair", () => {
     expect(oneClickPair({ ...pairPlan, legs: [leg("Buy", "Hyperliquid"), leg("Short", "Hyperliquid")] })).toBeNull();
     expect(oneClickPair({ ...pairPlan, legs: [leg("Long", "Hyperliquid", 0), leg("Short", "Extended")] })).toBeNull();
     expect(oneClickPair({ ...pairPlan, legs: [leg("Long", "Lighter"), leg("Short", "Extended")] })).toBeNull();
+    // TxFlow pairs with either venue.
+    expect(oneClickPair({ ...pairPlan, legs: [leg("Long", "TxFlow"), leg("Short", "Hyperliquid")] })).toEqual([0, 1]);
+    expect(oneClickPair({ ...pairPlan, legs: [leg("Long", "TxFlow"), leg("Short", "TxFlow")] })).toBeNull();
     // Same account: the two legs would just net out.
     expect(oneClickPair({ ...pairPlan, legs: [leg("Long", "Hyperliquid"), leg("Short", "Hyperliquid")] })).toBeNull();
   });

@@ -1,5 +1,6 @@
-import { crossVenueFunding, crossVenueSummary, extendedSummary, marketBase, parseExtendedMarketRows, type ExtendedMarketRow } from "@/lib/perpVenues";
-import { extendedQuote, hlQuote, type MarketQuote, type MarketSnapshot } from "@/lib/planner/markets";
+import { crossVenueFunding, crossVenueSummary, extendedSummary, marketBase, parseExtendedMarketRows, txflowCrossVenue, txflowCrossVenueSummary, txflowSummary, type ExtendedMarketRow } from "@/lib/perpVenues";
+import { fetchTxflowMarketRows, type TxflowMarketRow } from "@/lib/integrations/txflow-live";
+import { extendedQuote, hlQuote, txflowQuote, type MarketQuote, type MarketSnapshot } from "@/lib/planner/markets";
 import { EXTENDED_HOSTS } from "@/lib/integrations/extendedProxy";
 import { NextResponse } from "next/server";
 import { parseOpportunities, type Opportunity } from "@/lib/protocols/opportunities";
@@ -634,6 +635,16 @@ async function fetchExtendedMarkets(): Promise<ExtendedMarketRow[]> {
   }
 }
 
+/* ---------- TxFlow: markets and funding ---------- */
+
+async function fetchTxflowMarkets(): Promise<TxflowMarketRow[]> {
+  try {
+    return await Promise.race([fetchTxflowMarketRows(), new Promise<TxflowMarketRow[]>((resolve) => setTimeout(() => resolve([]), TIMEOUT))]);
+  } catch {
+    return [];
+  }
+}
+
 /* ---------- Hyperliquid spot (UETH, UBTC, USOL) ---------- */
 
 async function fetchHlSpotQuotes(): Promise<MarketQuote[]> {
@@ -670,7 +681,7 @@ async function fetchHlSpotQuotes(): Promise<MarketQuote[]> {
 
 export async function GET() {
   // Fetch ALL sources in parallel — each is independently null-safe
-  const [defiLlama, funding, hlp, lighterVaults, philidor, aaveReserves, haikuYields, pendleMarkets, morphoVaults, hip3, extended, hlSpot] = await Promise.all([
+  const [defiLlama, funding, hlp, lighterVaults, philidor, aaveReserves, haikuYields, pendleMarkets, morphoVaults, hip3, extended, hlSpot, txflow] = await Promise.all([
     fetchDefiLlama(),
     fetchFundingRates(),
     fetchHlpVault(),
@@ -683,6 +694,7 @@ export async function GET() {
     fetchHip3Markets(),
     fetchExtendedMarkets(),
     fetchHlSpotQuotes(),
+    fetchTxflowMarkets(),
   ]);
 
   const vaults: VaultYield[] = [
@@ -727,6 +739,7 @@ export async function GET() {
     `- Hyperliquid funding: ${status(funding.length > 0)}`,
     `- Hyperliquid stock/index/commodity perps (HIP-3): ${status(hip3.length > 0)}`,
     `- Extended markets: ${status(extended.length > 0)}`,
+    `- TxFlow markets: ${status(txflow.length > 0)}`,
     `- Lending & staking yields (DefiLlama): ${status(defiLlama.lending.length + defiLlama.staking.length > 0)}`,
     `- Pendle markets: ${status(pendleMarkets.length > 0)}`,
     `- Aave reserves: ${status(aaveReserves.length > 0)}`,
@@ -747,6 +760,14 @@ export async function GET() {
         extended.filter((m) => m.dayVolumeUsd >= 1_000_000),
       ).sort((a, b) => b.spreadPct - a.spreadPct),
     ) +
+    txflowSummary(txflow) +
+    txflowCrossVenueSummary(
+      txflowCrossVenue(
+        [...funding, ...hip3.map((m) => ({ coin: m.coin, hourlyRate: m.fundingAnnualizedPct / 100 / (24 * 365) }))],
+        extended.filter((m) => m.dayVolumeUsd >= 1_000_000),
+        txflow.filter((m) => m.dayVolumeUsd >= 100_000),
+      ),
+    ) +
     (aaveMcp ? `\n${aaveMcp}` : "");
 
   // Structured quotes for the server checks of the planner (lib/planner/markets.ts).
@@ -761,6 +782,7 @@ export async function GET() {
       ...extended
         .filter((m) => m.sizeStep > 0)
         .map((m) => extendedQuote({ market: m.name, base: m.base, markUsd: m.mark, fundingHourly: m.fundingHourly, sizeStep: m.sizeStep, minQty: m.minQty, maxLeverage: m.maxLeverage, dayVolumeUsd: m.dayVolumeUsd })),
+      ...txflow.map((m) => txflowQuote({ market: m.name, base: m.base, markUsd: m.mark, fundingHourly: m.fundingHourly, szDecimals: m.szDecimals, maxLeverage: m.maxLeverage, dayVolumeUsd: m.dayVolumeUsd })),
     ],
   };
 

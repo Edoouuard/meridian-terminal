@@ -7,8 +7,11 @@
 
 import { HL_SPOT_TAKER_FEE, TAKER_FEE } from "@/lib/perpVenues";
 
+/** The perp venues the server can price and size. */
+export type PerpVenueName = "Hyperliquid" | "Extended" | "TxFlow";
+
 export interface MarketQuote {
-  venue: "Hyperliquid" | "Extended";
+  venue: PerpVenueName;
   kind: "perp" | "spot";
   /** Exact market name ("ETH", "xyz:AMD", "AMD_24_5-USD", "UETH"). */
   market: string;
@@ -48,6 +51,24 @@ export function hlQuote(p: { market: string; base: string; markUsd: number; fund
     minQty: 0,
     minNotionalUsd: HL_MIN_NOTIONAL_USD,
     takerFee: p.kind === "spot" ? HL_SPOT_TAKER_FEE : TAKER_FEE.Hyperliquid,
+    maxLeverage: p.maxLeverage,
+    dayVolumeUsd: p.dayVolumeUsd,
+  };
+}
+
+/** TxFlow: quantity on szDecimals, no published minimum beyond the size step. */
+export function txflowQuote(p: { market: string; base: string; markUsd: number; fundingHourly: number; szDecimals: number; maxLeverage: number; dayVolumeUsd: number }): MarketQuote {
+  return {
+    venue: "TxFlow",
+    kind: "perp",
+    market: p.market,
+    base: p.base,
+    markUsd: p.markUsd,
+    fundingHourly: p.fundingHourly,
+    sizeStep: 10 ** -p.szDecimals,
+    minQty: 0,
+    minNotionalUsd: 0,
+    takerFee: TAKER_FEE.TxFlow,
     maxLeverage: p.maxLeverage,
     dayVolumeUsd: p.dayVolumeUsd,
   };

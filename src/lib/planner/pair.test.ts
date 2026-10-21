@@ -3,7 +3,7 @@ import { buildPairStrategy, mentionedBases, pairAssetQuestion, parsePairRequest 
 import { effectiveRequest } from "./conversation";
 import { enforceConformance } from "./schema";
 import { capitalShare, sizeQuestion } from "./sizing";
-import { extendedQuote, hlQuote, type MarketSnapshot } from "./markets";
+import { extendedQuote, hlQuote, txflowQuote, type MarketSnapshot } from "./markets";
 import { parseExplicitPerpOrder } from "@/lib/explicitOrder";
 import { validateAndFixStrategy } from "@/lib/strategyIntegrity";
 
@@ -85,5 +85,55 @@ describe("the owner's SPCX conversation (2026-10-16)", () => {
     const q = pairAssetQuestion(markets)!;
     expect(q.question).toMatch(/Which asset/);
     expect(q.options.map((o) => o.split(" ")[0])).toEqual(["SPCX", "ETH"]);
+  });
+});
+
+describe("pairs with TxFlow", () => {
+  const withTx: MarketSnapshot = {
+    ...markets,
+    quotes: [...markets.quotes, txflowQuote({ market: "ETH-USDC", base: "ETH", markUsd: 3000.5, fundingHourly: 0.00003, szDecimals: 3, maxLeverage: 25, dayVolumeUsd: 4e7 })],
+  };
+
+  it("pairs TxFlow with the other venue named, short where funding is higher", () => {
+    const req = parsePairRequest("delta neutral ETH entre TxFlow et Hyperliquid 3x", withTx)!;
+    expect(req).toEqual({ base: "ETH", leverage: 3, venues: ["Hyperliquid", "TxFlow"] });
+    const pair = buildPairStrategy({ ...req, base: "ETH" }, withTx)!;
+    expect(pair.legs.map((l) => [l.side, l.protocol, l.asset])).toEqual([
+      ["Long", "Hyperliquid", "ETH PERP"],
+      ["Short", "TxFlow", "ETH-USDC PERP"],
+    ]);
+    // All three venues named: the model plans it.
+    expect(parsePairRequest("neutral ETH on TxFlow, Hyperliquid and Extended", withTx)).toBeNull();
+  });
+
+  it("asks which asset among those both venues list", () => {
+    const q = pairAssetQuestion(withTx, ["Hyperliquid", "TxFlow"]);
+    // One shared asset only: no choice to offer.
+    expect(q).toBeNull();
+    expect(parsePairRequest("neutral pair between txflow and extended", withTx)).toEqual({ base: undefined, leverage: undefined, venues: ["Extended", "TxFlow"] });
+  });
+
+  it("prices and sizes a TxFlow pair from both accounts, blocked while the TxFlow balance is unknown", () => {
+    const pair = validateAndFixStrategy(buildPairStrategy({ base: "ETH", leverage: 1, venues: ["Hyperliquid", "TxFlow"] }, withTx)!, { assets: [] });
+    const ctx = {
+      order: null,
+      namedVenues: ["Hyperliquid", "TxFlow"] as ("Hyperliquid" | "TxFlow")[],
+      markets: withTx,
+      sizeShare: 1,
+      now: NOW,
+    };
+    const sized = enforceConformance([pair], "neutral_carry", { ...ctx, balances: { hyperliquidFreeUsd: 500, extendedFreeUsd: 0, txflowFreeUsd: 400, walletDeployableUsd: 0 } }).strategies[0];
+    expect(sized.status).toBe("executable");
+    // The thinner market (TxFlow here) is sent first.
+    expect(sized.legs[0].protocol).toBe("TxFlow");
+    const hl = sized.economics!.legs!.find((l) => l.venue === "Hyperliquid")!;
+    const tx = sized.economics!.legs!.find((l) => l.venue === "TxFlow")!;
+    expect(hl.baseQuantity).toBe(tx.baseQuantity);
+    expect(tx).toMatchObject({ venue: "TxFlow", market: "ETH-USDC", side: "short" });
+    expect(sized.economics!.annualizedGrossCarryUsd).toBeGreaterThan(0);
+
+    const unknown = enforceConformance([pair], "neutral_carry", { ...ctx, balances: { hyperliquidFreeUsd: 500, extendedFreeUsd: 0, txflowFreeUsd: null, walletDeployableUsd: 0 } }).strategies[0];
+    expect(unknown.status).toBe("blocked");
+    expect(unknown.blockers?.join(" ")).toMatch(/TxFlow/);
   });
 });

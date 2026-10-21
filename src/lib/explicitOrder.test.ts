@@ -108,3 +108,27 @@ describe("stop-loss convention", () => {
     expect(s.summary).toContain("stop-loss at a 10% price move (your 20% of margin ÷ 2x)");
   });
 });
+
+describe("explicit order on TxFlow", () => {
+  it("keeps the order on TxFlow, deposits from Arbitrum when short of margin, and doesn't claim a stop it can't place", () => {
+    const order = parseExplicitPerpOrder("short ETH 3x sur txflow avec un SL 10%")!;
+    expect(order).toMatchObject({ side: "Short", asset: "ETH", venue: "TxFlow", leverage: 3, stopLossPct: 10 });
+    const arb = [{ symbol: "USDC", venue: "Wallet", chain: "Arbitrum", usd: 100 }];
+    // A Hyperliquid short of the same asset doesn't count: the order comes first on TxFlow.
+    const hl = { name: "HL short", risk: "aggressive", summary: "", variantNote: "", legs: [{ side: "Short", asset: "ETH PERP", protocol: "Hyperliquid", chain: "Arbitrum", sizeUsd: 50 }] };
+    const [s, alt] = enforceExplicitOrder([hl], order, arb, undefined, 0);
+    expect(alt.name).toBe("HL short");
+    expect(s.legs.map((l) => [l.side, l.protocol])).toEqual([["Deposit", "TxFlow"], ["Short", "TxFlow"]]);
+    expect(s.legs[0].sizeUsd).toBeGreaterThanOrEqual(5);
+    expect(s.summary).not.toMatch(/stop-loss/);
+    expect(s.legs[1].note).not.toMatch(/stop-loss/);
+    expect(s.fundingNotes?.join(" ")).toMatch(/doesn't place TxFlow stop-loss/);
+  });
+
+  it("leaves the size unset when the TxFlow balance is unknown", () => {
+    const order = parseExplicitPerpOrder("long BTC 2x on TxFlow")!;
+    const [s] = enforceExplicitOrder([], order, [], undefined, undefined);
+    expect(s.legs).toEqual([expect.objectContaining({ side: "Long", protocol: "TxFlow", sizeUsd: undefined })]);
+    expect(s.fundingNotes?.[0]).toMatch(/TxFlow balance couldn't be read/);
+  });
+});

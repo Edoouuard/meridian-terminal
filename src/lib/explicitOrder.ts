@@ -11,6 +11,7 @@ import type { LLMLeg, LLMStrategy } from "@/lib/strategyIntegrity";
 import { marketBase } from "@/lib/perpVenues";
 import { SIZING_POLICY } from "@/lib/planner/policy";
 import { EXTENDED_MIN_DEPOSIT_USD } from "@/lib/integrations/extendedBridge";
+import { TXFLOW_MIN_DEPOSIT_USD } from "@/lib/integrations/txflow-live";
 
 export interface ExplicitPerpOrder {
   side: "Long" | "Short";
@@ -22,7 +23,7 @@ export interface ExplicitPerpOrder {
   /** Position size in USD when the user gave one. */
   sizeUsd?: number;
   /** The venue the user named; Hyperliquid when none. */
-  venue?: "Hyperliquid" | "Extended";
+  venue?: "Hyperliquid" | "Extended" | "TxFlow";
   /**
    * How the stop-loss was given. Meridian's convention is a price move from
    * the entry; "SL 20% of margin" is converted to 20% / leverage of price and
@@ -73,7 +74,13 @@ export function parseExplicitPerpOrder(thesis: string): ExplicitPerpOrder | null
   const stopLossPct = slTyped === undefined ? undefined : marginBasis ? Math.round((slTyped / levForConversion) * 100) / 100 : slTyped;
   const takeProfitPct = num(tp?.[1]);
   const sizeUsd = size ? Number((size[1] ?? size[2]).replace(/,/g, "")) : undefined;
-  const venue = /\b(extended|x10)\b/i.test(text) ? ("Extended" as const) : /\b(hyperliquid|hl)\b/i.test(text) ? ("Hyperliquid" as const) : undefined;
+  const venue = /\b(extended|x10)\b/i.test(text)
+    ? ("Extended" as const)
+    : /\btxflow\b/i.test(text)
+      ? ("TxFlow" as const)
+      : /\b(hyperliquid|hl)\b/i.test(text)
+        ? ("Hyperliquid" as const)
+        : undefined;
   return {
     venue,
     side,
@@ -101,8 +108,9 @@ function protectionText(order: ExplicitPerpOrder, lev: number): string {
 const MIN_NOTIONAL_USD = 11;
 
 /** The order as Meridian executes it: margin deposited on Hyperliquid when needed, then the position. */
-export function strategyForOrder(order: ExplicitPerpOrder, assets?: BudgetAsset[], extendedFreeUsd?: number): LLMStrategy {
-  if (order.venue === "Extended") return extendedOrder(order, extendedFreeUsd, arbitrumUsdcUsd(assets));
+export function strategyForOrder(order: ExplicitPerpOrder, assets?: BudgetAsset[], extendedFreeUsd?: number, txflowFreeUsd?: number): LLMStrategy {
+  if (order.venue === "Extended") return venueOrder(order, "Extended", extendedFreeUsd, arbitrumUsdcUsd(assets));
+  if (order.venue === "TxFlow") return venueOrder(order, "TxFlow", txflowFreeUsd, arbitrumUsdcUsd(assets));
   const lev = order.leverage ?? SIZING_POLICY.defaultLeverage.directional;
   const capital = deployableUsd(assets) + hyperliquidMarginOnlyUsd(assets);
   // Without a size: most of what the user can put up as margin (the budget fit trims it to the wallet).
@@ -135,18 +143,35 @@ export function arbitrumUsdcUsd(assets: BudgetAsset[] | undefined): number {
   return (assets ?? []).filter((a) => /^wallet$/i.test(a.venue) && /arbitrum/i.test(a.chain) && a.symbol.toUpperCase() === "USDC").reduce((t, a) => t + a.usd, 0);
 }
 
+/** What differs between the venues an order can name besides Hyperliquid. */
+const VENUE_ORDER = {
+  Extended: {
+    minDeposit: EXTENDED_MIN_DEPOSIT_USD,
+    depositNote: "Margin for the order: USDC from Arbitrum to your Extended account (Rhino.fi bridge, a few minutes).",
+    unknownBalance: "Your Extended balance is unknown right now, so the size isn't set: connect or reload Extended, or give a size.",
+    protection: undefined as string | undefined,
+  },
+  TxFlow: {
+    minDeposit: TXFLOW_MIN_DEPOSIT_USD,
+    depositNote: "Margin for the order: USDC from Arbitrum to your TxFlow account (TxFlow's bridge, credited in a minute or two).",
+    unknownBalance: "Your TxFlow balance couldn't be read just now, so the size isn't set: try again, or give a size.",
+    protection: "Meridian doesn't place TxFlow stop-loss / take-profit orders yet: set them on txflow.com once the position is open.",
+  },
+} as const;
+
 /**
- * The order on Extended, sized from the Extended account's free margin (plus
- * Arbitrum USDC the wallet can deposit) when the user gave no size. When the
- * account lacks margin and the wallet holds enough USDC on Arbitrum, a
- * deposit step (Rhino.fi bridge) comes first; otherwise the plan says what's
- * missing rather than moving the order to another venue.
+ * The order on Extended or TxFlow, sized from that account's free margin
+ * (plus Arbitrum USDC the wallet can deposit) when the user gave no size.
+ * When the account lacks margin and the wallet holds enough USDC on Arbitrum,
+ * a deposit step comes first; otherwise the plan says what's missing rather
+ * than moving the order to another venue.
  */
-function extendedOrder(order: ExplicitPerpOrder, freeUsd: number | undefined, arbUsdc: number): LLMStrategy {
+function venueOrder(order: ExplicitPerpOrder, venue: "Extended" | "TxFlow", freeUsd: number | undefined, arbUsdc: number): LLMStrategy {
+  const cfg = VENUE_ORDER[venue];
   const lev = order.leverage ?? SIZING_POLICY.defaultLeverage.directional;
   const reserve = SIZING_POLICY.feeReserveUsd;
-  // A deposit is only possible from a known (connected) account; its bridge fee is covered by the reserve.
-  const depositable = freeUsd !== undefined && arbUsdc >= EXTENDED_MIN_DEPOSIT_USD + reserve ? arbUsdc - reserve : 0;
+  // A deposit is only possible from a known account; its fee is covered by the reserve.
+  const depositable = freeUsd !== undefined && arbUsdc >= cfg.minDeposit + reserve ? arbUsdc - reserve : 0;
   // No size given and nothing known to size from: the size stays unknown (the plan is blocked), never invented.
   const sizingFrom = freeUsd === undefined ? 0 : Math.max(0, freeUsd - reserve) + depositable;
   const notional =
@@ -158,36 +183,37 @@ function extendedOrder(order: ExplicitPerpOrder, freeUsd: number | undefined, ar
   const protection = protectionText(order, lev);
   const needs = notional === undefined ? undefined : Math.ceil((notional * (1 + SIZING_POLICY.marginBufferPct / 100)) / lev);
   const shortfall = needs !== undefined && freeUsd !== undefined ? needs - freeUsd : 0;
-  const deposit = shortfall > 0 && depositable >= shortfall ? Math.min(depositable, Math.max(EXTENDED_MIN_DEPOSIT_USD, Math.ceil(shortfall + reserve))) : 0;
+  const deposit = shortfall > 0 && depositable >= shortfall ? Math.min(depositable, Math.max(cfg.minDeposit, Math.ceil(shortfall + reserve))) : 0;
   const covered = needs !== undefined && freeUsd !== undefined && freeUsd + deposit >= needs;
   const perp: LLMLeg = {
     side: order.side,
     asset: `${order.asset} PERP`,
-    protocol: "Extended",
+    protocol: venue,
     chain: "Arbitrum",
     sizeUsd: notional,
     leverage: lev,
     stopLossPct: order.stopLossPct,
     takeProfitPct: order.takeProfitPct,
-    note: `${order.side} ${order.asset} on Extended at ${lev}x${protection ? `, ${protection}` : ""}, as you asked.`,
+    // A venue whose stop-loss Meridian doesn't place never shows one as part of the order.
+    note: `${order.side} ${order.asset} on ${venue} at ${lev}x${protection && !cfg.protection ? `, ${protection}` : ""}, as you asked.`,
   };
-  return {
-    name: `${order.side} ${order.asset} ${lev}x (Extended)`,
-    risk: "aggressive",
-    summary: `Your order: ${order.side.toLowerCase()} ${order.asset} on Extended, ${lev}x${protection ? `, ${protection}` : ""}.`,
-    variantNote: `Directional ${order.side.toLowerCase()}: a ${(100 / lev).toFixed(0)}% move against you approaches liquidation; funding is paid or earned every hour.`,
-    fundingNotes: covered
+  const notes = [
+    covered
       ? undefined
-      : [
-          freeUsd === undefined
-            ? "Your Extended balance is unknown right now, so the size isn't set: connect or reload Extended, or give a size."
-            : needs === undefined
-              ? `Your Extended account has $${Math.floor(freeUsd)} free and the wallet has no USDC on Arbitrum to deposit: add USDC on Arbitrum, or give a size.`
-              : `Your Extended account has $${Math.floor(freeUsd)} free; this order needs ~$${needs} of margin there and the wallet holds $${Math.floor(arbUsdc)} USDC on Arbitrum to deposit.`,
-        ],
-    legs: deposit > 0
-      ? [{ side: "Deposit", asset: "USDC", protocol: "Extended", chain: "Arbitrum", sizeUsd: deposit, note: "Margin for the order: USDC from Arbitrum to your Extended account (Rhino.fi bridge, a few minutes)." }, perp]
-      : [perp],
+      : freeUsd === undefined
+        ? cfg.unknownBalance
+        : needs === undefined
+          ? `Your ${venue} account has $${Math.floor(freeUsd)} free and the wallet has no USDC on Arbitrum to deposit: add USDC on Arbitrum, or give a size.`
+          : `Your ${venue} account has $${Math.floor(freeUsd)} free; this order needs ~$${needs} of margin there and the wallet holds $${Math.floor(arbUsdc)} USDC on Arbitrum to deposit.`,
+    protection && cfg.protection ? cfg.protection : undefined,
+  ].filter((n): n is string => !!n);
+  return {
+    name: `${order.side} ${order.asset} ${lev}x (${venue})`,
+    risk: "aggressive",
+    summary: `Your order: ${order.side.toLowerCase()} ${order.asset} on ${venue}, ${lev}x${protection && !cfg.protection ? `, ${protection}` : ""}.`,
+    variantNote: `Directional ${order.side.toLowerCase()}: a ${(100 / lev).toFixed(0)}% move against you approaches liquidation; funding is paid or earned every hour.`,
+    fundingNotes: notes.length ? notes : undefined,
+    legs: deposit > 0 ? [{ side: "Deposit", asset: "USDC", protocol: venue, chain: "Arbitrum", sizeUsd: deposit, note: cfg.depositNote }, perp] : [perp],
   };
 }
 
@@ -202,12 +228,14 @@ export function enforceExplicitOrder(
   order: ExplicitPerpOrder | null,
   assets?: BudgetAsset[],
   extendedFreeUsd?: number,
+  txflowFreeUsd?: number,
 ): LLMStrategy[] {
   if (!order) return strategies;
-  const venueOk = (l: LLMLeg) => (order.venue === "Extended" ? /extended/i.test(l.protocol) : !/extended/i.test(l.protocol));
+  const venueOk = (l: LLMLeg) =>
+    order.venue === "Extended" ? /extended/i.test(l.protocol) : order.venue === "TxFlow" ? /txflow/i.test(l.protocol) : !/extended|txflow/i.test(l.protocol);
   const matches = (l: LLMLeg) => l.side.trim().toLowerCase() === order.side.toLowerCase() && marketBase(l.asset) === marketBase(order.asset) && venueOk(l);
   const i = strategies.findIndex((s) => Array.isArray(s.legs) && s.legs.some(matches));
-  if (i < 0) return [strategyForOrder(order, assets, extendedFreeUsd), ...strategies].slice(0, 3);
+  if (i < 0) return [strategyForOrder(order, assets, extendedFreeUsd, txflowFreeUsd), ...strategies].slice(0, 3);
   const fixed: LLMStrategy = {
     ...strategies[i],
     legs: strategies[i].legs.map((l) =>
