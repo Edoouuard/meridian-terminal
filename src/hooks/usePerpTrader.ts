@@ -5,7 +5,7 @@ import type { Address } from "viem";
 import type { PairFill } from "@/lib/perpPair";
 import type { PerpVenueName } from "@/lib/planner/markets";
 import type { PriceEntry } from "@/lib/quote";
-import { fetchPerpAccount, hyperliquidEnv, perpMarketOrder, withAgent, type WalletSign } from "@/lib/integrations/hyperliquidTrade";
+import { cancelTriggerOrders, fetchPerpAccount, hyperliquidEnv, perpMarketOrder, withAgent, type WalletSign } from "@/lib/integrations/hyperliquidTrade";
 import { executeExtendedPerp, fetchExtendedBalance, fetchExtendedPositionViews } from "@/lib/integrations/extended-live";
 import { repairExtendedVault, useExtendedAccount } from "@/hooks/useExtendedAccount";
 import { TXFLOW_NETWORK, fetchTxflowAccount, fetchTxflowMarkets, findTxflowMarket } from "@/lib/integrations/txflow-live";
@@ -23,6 +23,8 @@ export interface PerpOrder {
   qty?: number;
   leverage: number;
   reduceOnly: boolean;
+  /** Reduce-only stop on the venue, this far (%) from the fill: Hyperliquid and TxFlow (Extended: not yet). */
+  stopLossPct?: number;
 }
 
 export interface PerpTrader {
@@ -70,16 +72,19 @@ export function usePerpTrader(prices?: PriceEntry[]): PerpTrader {
     const w = need();
     const sizeUsd = o.reduceOnly ? 0 : (o.sizeUsd ?? 0);
     if (venue === "Hyperliquid") {
-      const out = await withAgent({ ...w, env, walletSign }, (key) =>
-        perpMarketOrder(env, key, { coin: o.market, isBuy: o.isBuy, sizeUsd, coinQty: o.qty, leverage: o.leverage, reduceOnly: o.reduceOnly, user: w.user }),
-      );
+      const out = await withAgent({ ...w, env, walletSign }, async (key) => {
+        const r = await perpMarketOrder(env, key, { coin: o.market, isBuy: o.isBuy, sizeUsd, coinQty: o.qty, leverage: o.leverage, reduceOnly: o.reduceOnly, stopLossPct: o.stopLossPct, user: w.user });
+        // A closed position's stop must not act on the next one: clear it once the coin is flat.
+        if (r.ok && o.reduceOnly && Math.abs((await fetchPerpAccount(env, w.user, o.market)).position) === 0) await cancelTriggerOrders(env, key, { user: w.user, coin: o.market }).catch(() => null);
+        return r;
+      });
       return out.ok && out.filled
         ? { ok: true, filledQty: out.filled.totalSz, avgPx: out.filled.avgPx, ref: `hyperliquid:${o.market}:${out.filled.totalSz}@${out.filled.avgPx}` }
         : { ok: false, error: out.error ?? "The order didn't fill (no liquidity within 5% of the mid)." };
     }
     if (venue === "TxFlow") {
       const out = await withTxflowAgent({ ...w, walletSign: txWalletSign }, (key) =>
-        txflowMarketOrder(TXFLOW_NETWORK, key, { user: w.user, symbol: o.market, isBuy: o.isBuy, sizeUsd, coinQty: o.qty, leverage: o.leverage, reduceOnly: o.reduceOnly }),
+        txflowMarketOrder(TXFLOW_NETWORK, key, { user: w.user, symbol: o.market, isBuy: o.isBuy, sizeUsd, coinQty: o.qty, leverage: o.leverage, reduceOnly: o.reduceOnly, stopLossPct: o.stopLossPct }),
       );
       return out.ok && out.filled
         ? { ok: true, filledQty: out.filled.totalSz, avgPx: out.filled.avgPx, ref: `txflow:${out.market?.name ?? o.market}:${out.filled.totalSz}@${out.filled.avgPx}` }

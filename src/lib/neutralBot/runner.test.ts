@@ -15,7 +15,7 @@ const cfg: BotConfig = { ...DEFAULT_BOT_CONFIG, base: "ETH", venues: ["Hyperliqu
 const mid = () => 0.5;
 
 /** Venues that fill every order at 2500 and keep positions, optionally failing one venue's openings. */
-function fakeVenues(opts: { failOpen?: PerpVenueName; failClose?: PerpVenueName; margin?: number } = {}) {
+function fakeVenues(opts: { failOpen?: PerpVenueName; failClose?: PerpVenueName; margin?: number; marginOf?: Partial<Record<PerpVenueName, number>> } = {}) {
   const pos: Record<string, number> = { Hyperliquid: 0, Extended: 0 };
   const log: string[] = [];
   const v: BotVenues = {
@@ -24,11 +24,11 @@ function fakeVenues(opts: { failOpen?: PerpVenueName; failClose?: PerpVenueName;
       if (o.reduceOnly && opts.failClose === venue) return { ok: false, error: "rejected" };
       const qty = o.qty ?? Math.floor(((o.sizeUsd ?? 0) / 2500) * 1000) / 1000;
       pos[venue] += o.isBuy ? qty : -qty;
-      log.push(`${venue} ${o.isBuy ? "buy" : "sell"} ${qty}${o.reduceOnly ? " ro" : ""}`);
+      log.push(`${venue} ${o.isBuy ? "buy" : "sell"} ${qty}${o.reduceOnly ? " ro" : ""}${o.stopLossPct ? ` sl${o.stopLossPct}` : ""}`);
       return { ok: true, filledQty: qty, avgPx: 2500 };
     },
     position: async (venue) => pos[venue],
-    freeMargin: async () => opts.margin ?? 100,
+    freeMargin: async (venue) => opts.marginOf?.[venue] ?? opts.margin ?? 100,
   };
   return { v, pos, log };
 }
@@ -37,7 +37,8 @@ describe("neutral bot tick", () => {
   it("opens the pair: thinner book first, long where funding is lowest, counting volume and fees", async () => {
     const f = fakeVenues();
     const r = await runTick(cfg, EMPTY_STATS, snapshot, f.v, 1000, mid);
-    expect(f.log).toEqual(["Extended buy 0.02", "Hyperliquid sell 0.02"]);
+    // Each opening leg carries a stop on its venue, short of liquidation (3x: 22.5%).
+    expect(f.log).toEqual(["Extended buy 0.02 sl22.5", "Hyperliquid sell 0.02 sl22.5"]);
     expect(f.pos).toEqual({ Hyperliquid: -0.02, Extended: 0.02 });
     expect(r.stats).toMatchObject({ volumeUsd: 100, openedAt: 1000, longVenue: "Extended", closeAt: 1000 + 60 * 60_000 });
     expect(r.stats.legs).toEqual([
@@ -57,6 +58,15 @@ describe("neutral bot tick", () => {
     // Waiting on a deposit is not a failure: the bot keeps checking.
     expect(r.error).toBeUndefined();
     expect(r.needsMargin?.map((m) => m.venue)).toEqual(["Extended", "Hyperliquid"]);
+  });
+
+  it("opens what the thinner venue's margin covers, rather than stall, above the markets' minimum", async () => {
+    // $10 free on Extended at 3x covers ~$29 a side, not the $50 asked.
+    const f = fakeVenues({ marginOf: { Extended: 10, Hyperliquid: 100 } });
+    const r = await runTick(cfg, EMPTY_STATS, snapshot, f.v, 1000, mid);
+    expect(r.message).toMatch(/Sized down from ~\$50\.00: Extended has \$10\.00 free/);
+    expect(f.pos.Extended).toBeCloseTo(0.011);
+    expect(r.needsMargin).toBeUndefined();
   });
 
   it("unwinds when the second leg fails", async () => {
@@ -85,7 +95,7 @@ describe("neutral bot tick", () => {
     f.log.length = 0;
     const r = await runTick(cfg, opened.stats, snapshot, f.v, 61 * 60_000, mid);
     expect(r.action.kind).toBe("rotate");
-    expect(f.log).toEqual(["Hyperliquid buy 0.02 ro", "Extended sell 0.02 ro", "Extended buy 0.02", "Hyperliquid sell 0.02"]);
+    expect(f.log).toEqual(["Hyperliquid buy 0.02 ro", "Extended sell 0.02 ro", "Extended buy 0.02 sl22.5", "Hyperliquid sell 0.02 sl22.5"]);
     expect(r.stats).toMatchObject({ cycles: 1, volumeUsd: 300, openedAt: 61 * 60_000 });
     expect(r.stats.history.map((p) => p.volumeUsd)).toEqual([100, 300]);
   });

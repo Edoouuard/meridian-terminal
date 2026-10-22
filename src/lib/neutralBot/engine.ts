@@ -56,6 +56,12 @@ export interface BotConfig {
   maxFeesUsd: number;
   /** Stop once this much volume is made, USD (0: no target). */
   volumeTargetUsd: number;
+  /**
+   * Safety close: the pair is closed when the price has moved this far (%)
+   * from its entry, either way, before the losing leg nears liquidation.
+   * 0: automatic, from the leverage (`safetyStopPct`).
+   */
+  safetyStopPct: number;
 }
 
 /** What the runner reads before each decision. */
@@ -160,6 +166,34 @@ export function budgetReached(cfg: BotConfig, stats: BotStats): string | null {
   return null;
 }
 
+/**
+ * How far the price can move against one leg before it is liquidated, in %
+ * (isolated margin at this leverage, with the venues' maintenance margin;
+ * cross margin with spare collateral holds a little longer).
+ */
+export const liquidationMovePct = (leverage: number) => 90 / Math.max(1, leverage);
+
+/** The bot's own safety close (% move from entry): the setting, or about half the liquidation distance. */
+export function safetyStopPct(cfg: Pick<BotConfig, "safetyStopPct" | "leverage">): number {
+  return cfg.safetyStopPct > 0 ? cfg.safetyStopPct : Math.round(50 / Math.max(1, cfg.leverage));
+}
+
+/**
+ * The stop-loss each leg gets on its venue (% from entry), for when the tab
+ * is closed and the bot can't act: past the bot's own safety close, short of
+ * liquidation.
+ */
+export function venueStopPct(cfg: Pick<BotConfig, "safetyStopPct" | "leverage">): number {
+  const liq = liquidationMovePct(cfg.leverage);
+  return Math.round(Math.min(liq * 0.85, Math.max(liq * 0.75, safetyStopPct(cfg) + 2)) * 10) / 10;
+}
+
+/** The pair's entry price: the legs' average fill. */
+export function entryPx(legs: HeldLeg[]): number | null {
+  const q = legs.reduce((s, l) => s + l.qty, 0);
+  return q > 0 ? legs.reduce((s, l) => s + l.entryPx * l.qty, 0) / q : null;
+}
+
 const clock = (t: number) => new Date(t).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
 const minutesUntil = (t: number, now: number) => Math.max(0, Math.ceil((t - now) / 60_000));
 
@@ -215,6 +249,12 @@ export function decide(cfg: BotConfig, stats: BotStats, obs: BotObservation): Bo
   // A balanced pair: hold, rotate, or close.
   const longVenue = sa > 0 ? a : b;
   const shortVenue = longVenue === a ? b : a;
+  // The price ran far from the entry: one leg nears liquidation (the other gains as much). Close both first.
+  const entry = entryPx(stats.legs);
+  const moved = entry ? (Math.abs(obs.markUsd / entry - 1) * 100) : 0;
+  if (entry && moved >= safetyStopPct(cfg)) {
+    return { kind: "close", reason: `${cfg.base} moved ${moved.toFixed(1)}% since entry: safety close before a leg nears liquidation`, scheduled: cfg.mode === "farm" };
+  }
   if (budget) return { kind: "close", reason: budget, thenStop: budget };
   const held = spreadAprPct(obs, longVenue, shortVenue);
   if (cfg.mode === "carry") {
@@ -317,6 +357,7 @@ export const DEFAULT_BOT_CONFIG: Omit<BotConfig, "base" | "venues" | "notionalUs
   maxCycles: 24,
   maxFeesUsd: 5,
   volumeTargetUsd: 0,
+  safetyStopPct: 0,
 };
 
 /** A config saved before random schedules (one `rotateMinutes`) or missing newer fields, made whole. */
