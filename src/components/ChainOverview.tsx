@@ -3,6 +3,10 @@
 import { useQuery } from "@tanstack/react-query";
 import type { LiveChainOverview } from "@/app/api/chains/route";
 import { AskButton } from "@/components/AskButton";
+import { executableCoverage, PERP_VENUES } from "@/lib/coverage";
+import { FEATURES } from "@/lib/features";
+
+const COVERAGE = executableCoverage();
 
 /** Compact USD formatting: $900, $12.3k, $456M, $2.1B. */
 function fmtUsd(n?: number): string {
@@ -15,9 +19,10 @@ function fmtUsd(n?: number): string {
 }
 
 /**
- * ChainOverview — live chain x protocol coverage, real numbers from DefiLlama's
- * free API (via /api/chains). Each chain shows its total TVL and its biggest
- * protocols by TVL. Falls back gracefully if the upstream API is down.
+ * ChainOverview — what Meridian executes on each chain (lib/coverage.ts, read
+ * from the execution code's own tables) next to the chain's live TVL and
+ * biggest protocols from DefiLlama's free API (via /api/chains). Falls back
+ * to the coverage alone if the upstream API is down.
  */
 export function ChainOverview({ hideDivider }: { hideDivider?: boolean } = {}) {
   const { data, isLoading } = useQuery<LiveChainOverview[]>({
@@ -26,7 +31,9 @@ export function ChainOverview({ hideDivider }: { hideDivider?: boolean } = {}) {
     staleTime: 5 * 60_000,
   });
 
-  const chains = Array.isArray(data) ? data : [];
+  // DefiLlama down or slow: the chains Meridian executes on still show, with their protocols.
+  const fetched = Array.isArray(data) ? data : [];
+  const chains: LiveChainOverview[] = fetched.length > 0 || isLoading ? fetched : COVERAGE.chains.map((c) => ({ id: String(c.chainId), name: c.name, chainId: c.chainId, topProtocols: [], live: false }));
   const live = chains.some((c) => c.live);
 
   return (
@@ -38,6 +45,24 @@ export function ChainOverview({ hideDivider }: { hideDivider?: boolean } = {}) {
           {live ? "DefiLlama · live" : isLoading ? "loading…" : "offline"}
         </span>
       </div>
+
+      <div className="coverage-summary">
+        <div>
+          <strong>{COVERAGE.chains.length}</strong> chains
+        </div>
+        <div>
+          <strong>{COVERAGE.protocols.length}</strong> protocols
+        </div>
+        {FEATURES.perps && (
+          <div>
+            <strong>{PERP_VENUES.length}</strong> perp venues
+          </div>
+        )}
+      </div>
+      <p className="text-muted" style={{ fontSize: 10, margin: "4px 0 0" }}>
+        Executable from Meridian today: {COVERAGE.protocols.join(", ")}
+        {FEATURES.perps ? `; perps on ${PERP_VENUES.join(", ")}` : ""}.
+      </p>
 
       <div style={{ display: "flex", flexDirection: "column", marginTop: "var(--space-2)" }}>
         {!live && !isLoading && chains.length > 0 && (
@@ -51,6 +76,7 @@ export function ChainOverview({ hideDivider }: { hideDivider?: boolean } = {}) {
               <span className="chain-row__name">{chain.name}</span>
               {chain.tvlUsd ? <span className="chain-row__tvl">TVL {fmtUsd(chain.tvlUsd)}</span> : null}
             </div>
+            <ExecutableOn chainId={chain.chainId} />
             {chain.topProtocols.length > 0 && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}>
                 {chain.topProtocols.map((p) => (
@@ -70,8 +96,25 @@ export function ChainOverview({ hideDivider }: { hideDivider?: boolean } = {}) {
         )}
       </div>
       <p className="text-muted" style={{ fontSize: 10, margin: "var(--space-2) 0 0" }}>
-        TVL + biggest protocols per chain from DefiLlama (free API). Prices for orders come from CoinGecko (free API).
+        &quot;Meridian&quot;: protocols Meridian signs into on that chain (from its own contract tables). TVL and biggest protocols per chain from DefiLlama (free API). Prices for orders come from CoinGecko (free API).
       </p>
     </>
+  );
+}
+/** The protocols Meridian signs into on a chain. */
+function ExecutableOn({ chainId }: { chainId?: number }) {
+  const exec = COVERAGE.chains.find((c) => c.chainId === chainId)?.protocols ?? [];
+  if (exec.length === 0) return null;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }} title="Protocols Meridian signs into on this chain">
+      <span className="text-muted" style={{ fontSize: 10, alignSelf: "center" }}>
+        Meridian · {exec.length}
+      </span>
+      {exec.map((p) => (
+        <span key={p} className="protocol-pill protocol-pill--exec">
+          {p}
+        </span>
+      ))}
+    </div>
   );
 }

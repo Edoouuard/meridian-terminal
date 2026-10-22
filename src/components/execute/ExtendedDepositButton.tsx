@@ -7,6 +7,7 @@ import type { Order } from "@/lib/execution";
 import { useExtendedAccount } from "@/hooks/useExtendedAccount";
 import {
   EXTENDED_DEPOSIT_CHAIN_ID,
+  EXTENDED_APP_URL,
   EXTENDED_DEPOSIT_TOKEN,
   EXTENDED_MIN_DEPOSIT_USD,
   RHINO_ARBITRUM_BRIDGE,
@@ -15,6 +16,7 @@ import {
   depositForTx,
   fetchArbitrumBridge,
   fetchRecentDeposits,
+  isBridgeServerError,
   quoteArbitrumDeposit,
   usdcUnits,
   type BridgeQuote,
@@ -37,6 +39,8 @@ export function ExtendedDepositButton({ leg }: { leg: TradeLeg }) {
   const [committed, setCommitted] = useState(false);
   const [busy, setBusy] = useState<"quote" | "commit" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Extended's bridge failed on its side: offer its own app (same wallet, same account) next to the retry.
+  const [bridgeDown, setBridgeDown] = useState(false);
   const [txHash, setTxHash] = useState<`0x${string}` | null>(null);
 
   const deposit = useQuery({
@@ -74,11 +78,13 @@ export function ExtendedDepositButton({ leg }: { leg: TradeLeg }) {
     if (!signer) return;
     setBusy("quote");
     setError(null);
+    setBridgeDown(false);
     try {
       await fetchArbitrumBridge(signer);
       setQuote(await quoteArbitrumDeposit(signer, amount));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      setBridgeDown(isBridgeServerError(e));
     } finally {
       setBusy(null);
     }
@@ -111,9 +117,14 @@ export function ExtendedDepositButton({ leg }: { leg: TradeLeg }) {
       <>
         {rows}
         <button type="button" className="btn btn-primary" style={{ marginTop: 6 }} disabled={busy !== null} onClick={() => void getQuote()}>
-          {busy === "quote" ? "Getting a bridge quote…" : "Get the bridge quote"}
+          {busy === "quote" ? "Getting a bridge quote…" : error ? "Try the bridge quote again" : "Get the bridge quote"}
         </button>
         {errorLine}
+        {bridgeDown && (
+          <a className="btn btn-secondary" style={{ marginTop: 6, display: "inline-block", fontSize: 12 }} href={EXTENDED_APP_URL} target="_blank" rel="noreferrer">
+            Deposit on app.extended.exchange ↗
+          </a>
+        )}
       </>
     );
   }

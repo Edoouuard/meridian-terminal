@@ -94,3 +94,35 @@ describe("Extended relay — refused order log", () => {
     expect(orderForLog("{bad")).toBe("(not JSON, 4 chars)");
   });
 });
+
+describe("bridge quote when Extended's server fails (owner report: HTTP 500, code 1006)", () => {
+  const signer = { network: "mainnet", apiKey: "k" } as never;
+  const err500 = () => new Response(JSON.stringify({ status: "ERROR", error: { code: 1006, message: "Internal Server Error" } }), { status: 500 });
+  const okQuote = () => new Response(JSON.stringify({ status: "OK", data: { id: "68aaa", fee: "0.1" } }), { status: 200 });
+
+  it("tries the other documented forms and quotes the amount of the form that answered", async () => {
+    const { quoteArbitrumDeposit } = await import("./extendedBridge");
+    const urls: string[] = [];
+    const fetchImpl = vi.fn(async (url: string) => {
+      urls.push(url);
+      return urls.length < 3 ? err500() : okQuote();
+    });
+    const q = await quoteArbitrumDeposit(signer, 20.5, fetchImpl as never);
+    expect(urls.map((u) => u.split("quote?")[1])).toEqual([
+      "chainIn=ARB&chainOut=STRK&amount=20.50&asset=USD",
+      "chainIn=ARB&chainOut=STRK&amount=20.50",
+      "chainIn=ARB&chainOut=STRK&amount=20&asset=USD",
+    ]);
+    expect(q).toEqual({ id: "68aaa", feeUsd: 0.1, amountUsd: 20 });
+  });
+
+  it("says what to do when every form fails, and never retries a refusal", async () => {
+    const { quoteArbitrumDeposit } = await import("./extendedBridge");
+    const all500 = vi.fn(async () => err500());
+    await expect(quoteArbitrumDeposit(signer, 20, all500 as never)).rejects.toThrow(/failed on its side .*Nothing was sent.*extended\.exchange/);
+    expect(all500).toHaveBeenCalledTimes(4);
+    const refused = vi.fn(async () => new Response(JSON.stringify({ status: "ERROR", error: { message: "AssetIsNotSupported" } }), { status: 400 }));
+    await expect(quoteArbitrumDeposit(signer, 20, refused as never)).rejects.toThrow("AssetIsNotSupported");
+    expect(refused).toHaveBeenCalledTimes(1);
+  });
+});
