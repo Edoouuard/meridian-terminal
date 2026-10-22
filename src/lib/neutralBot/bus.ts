@@ -20,6 +20,13 @@ export function takePendingBot(): BotPrefill | null {
   return p;
 }
 
+/** Show the bot's view, without changing its settings. */
+export const SHOW_BOT_EVENT = "meridian:show-neutral-bot";
+export function openNeutralBotView(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(SHOW_BOT_EVENT));
+}
+
 export function openNeutralBot(prefill: BotPrefill): void {
   if (typeof window === "undefined") return;
   pending = prefill;
@@ -36,4 +43,12 @@ export function onOpenNeutralBot(handler: (prefill: BotPrefill) => void): () => 
   };
   window.addEventListener(OPEN_BOT_EVENT, listener);
   return () => window.removeEventListener(OPEN_BOT_EVENT, listener);
+}
+
+/** "Deposit on Extended" from the bot: the page opens Tools at that venue's panel. */
+export const OPEN_TOOLS_EVENT = "meridian:open-tools";
+
+export function openToolsAt(anchor: string): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent<string>(OPEN_TOOLS_EVENT, { detail: anchor }));
 }

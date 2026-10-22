@@ -11,7 +11,8 @@ const snapshot = {
     extendedQuote({ market: "ETH-USD", base: "ETH", markUsd: 2500, fundingHourly: hourly(-2), sizeStep: 0.001, minQty: 0.01, maxLeverage: 50, dayVolumeUsd: 80e6 }),
   ],
 };
-const cfg: BotConfig = { ...DEFAULT_BOT_CONFIG, base: "ETH", venues: ["Hyperliquid", "Extended"], notionalUsd: 50, leverage: 3 };
+const cfg: BotConfig = { ...DEFAULT_BOT_CONFIG, base: "ETH", venues: ["Hyperliquid", "Extended"], notionalUsd: 50, leverage: 3, holdMinMinutes: 60, holdMaxMinutes: 60, gapMinMinutes: 0, gapMaxMinutes: 0, sizeJitterPct: 0 };
+const mid = () => 0.5;
 
 /** Venues that fill every order at 2500 and keep positions, optionally failing one venue's openings. */
 function fakeVenues(opts: { failOpen?: PerpVenueName; failClose?: PerpVenueName; margin?: number } = {}) {
@@ -35,24 +36,32 @@ function fakeVenues(opts: { failOpen?: PerpVenueName; failClose?: PerpVenueName;
 describe("neutral bot tick", () => {
   it("opens the pair: thinner book first, long where funding is lowest, counting volume and fees", async () => {
     const f = fakeVenues();
-    const r = await runTick(cfg, EMPTY_STATS, snapshot, f.v, 1000);
+    const r = await runTick(cfg, EMPTY_STATS, snapshot, f.v, 1000, mid);
     expect(f.log).toEqual(["Extended buy 0.02", "Hyperliquid sell 0.02"]);
     expect(f.pos).toEqual({ Hyperliquid: -0.02, Extended: 0.02 });
-    expect(r.stats).toMatchObject({ volumeUsd: 100, openedAt: 1000, longVenue: "Extended" });
+    expect(r.stats).toMatchObject({ volumeUsd: 100, openedAt: 1000, longVenue: "Extended", closeAt: 1000 + 60 * 60_000 });
+    expect(r.stats.legs).toEqual([
+      { venue: "Extended", side: "long", qty: 0.02, entryPx: 2500 },
+      { venue: "Hyperliquid", side: "short", qty: 0.02, entryPx: 2500 },
+    ]);
+    expect(r.view).toMatchObject({ sizes: { Extended: 0.02, Hyperliquid: -0.02 }, markets: { Hyperliquid: "ETH", Extended: "ETH-USD" } });
     expect(r.stats.feesUsd).toBeCloseTo(50 * 0.00025 + 50 * 0.00045);
     expect(r.error).toBeUndefined();
   });
 
   it("refuses to open without the margin on both venues", async () => {
     const f = fakeVenues({ margin: 5 });
-    const r = await runTick(cfg, EMPTY_STATS, snapshot, f.v, 1000);
+    const r = await runTick(cfg, EMPTY_STATS, snapshot, f.v, 1000, mid);
     expect(f.log).toEqual([]);
-    expect(r.message).toMatch(/Not enough margin/);
+    expect(r.message).toMatch(/Waiting for margin/);
+    // Waiting on a deposit is not a failure: the bot keeps checking.
+    expect(r.error).toBeUndefined();
+    expect(r.needsMargin?.map((m) => m.venue)).toEqual(["Extended", "Hyperliquid"]);
   });
 
   it("unwinds when the second leg fails", async () => {
     const f = fakeVenues({ failOpen: "Hyperliquid" });
-    const r = await runTick(cfg, EMPTY_STATS, snapshot, f.v, 1000);
+    const r = await runTick(cfg, EMPTY_STATS, snapshot, f.v, 1000, mid);
     expect(f.pos).toEqual({ Hyperliquid: 0, Extended: 0 });
     expect(r.message).toMatch(/first was closed/);
     expect(r.stats.stopReason).toBeNull();
@@ -61,22 +70,35 @@ describe("neutral bot tick", () => {
   it("stops when a leg is left exposed", async () => {
     const opts: { failOpen?: PerpVenueName; failClose?: PerpVenueName } = { failOpen: "Hyperliquid", failClose: "Extended" };
     const f = fakeVenues(opts);
-    const r = await runTick(cfg, EMPTY_STATS, snapshot, f.v, 1000);
+    const r = await runTick(cfg, EMPTY_STATS, snapshot, f.v, 1000, mid);
     expect(r.stats.stopReason).toMatch(/exposed/);
     // "Stop & close" afterwards closes the bot's own lone leg.
     opts.failClose = undefined;
-    const closing = await runTick({ ...cfg, maxCycles: 1 }, { ...r.stats, cycles: 1, stopReason: null }, snapshot, f.v, 2000);
+    const closing = await runTick({ ...cfg, maxCycles: 1 }, { ...r.stats, cycles: 1, stopReason: null }, snapshot, f.v, 2000, mid);
     expect(closing.action).toMatchObject({ kind: "reduce", venue: "Extended" });
     expect(f.pos).toEqual({ Hyperliquid: 0, Extended: 0 });
   });
 
   it("rotates on schedule: closes both, reopens, one more cycle", async () => {
     const f = fakeVenues();
-    const opened = await runTick(cfg, EMPTY_STATS, snapshot, f.v, 0);
+    const opened = await runTick(cfg, EMPTY_STATS, snapshot, f.v, 0, mid);
     f.log.length = 0;
-    const r = await runTick(cfg, opened.stats, snapshot, f.v, 61 * 60_000);
+    const r = await runTick(cfg, opened.stats, snapshot, f.v, 61 * 60_000, mid);
     expect(r.action.kind).toBe("rotate");
     expect(f.log).toEqual(["Hyperliquid buy 0.02 ro", "Extended sell 0.02 ro", "Extended buy 0.02", "Hyperliquid sell 0.02"]);
     expect(r.stats).toMatchObject({ cycles: 1, volumeUsd: 300, openedAt: 61 * 60_000 });
+    expect(r.stats.history.map((p) => p.volumeUsd)).toEqual([100, 300]);
+  });
+
+  it("with a pause: closes on schedule, stays flat until the drawn time, then reopens", async () => {
+    const paused = { ...cfg, gapMinMinutes: 10, gapMaxMinutes: 10 };
+    const f = fakeVenues();
+    const opened = await runTick(paused, EMPTY_STATS, snapshot, f.v, 0, mid);
+    const closed = await runTick(paused, opened.stats, snapshot, f.v, 61 * 60_000, mid);
+    expect(closed.action).toMatchObject({ kind: "close", scheduled: true });
+    expect(closed.stats.reopenAt).toBe(71 * 60_000);
+    expect(f.pos).toEqual({ Hyperliquid: 0, Extended: 0 });
+    expect((await runTick(paused, closed.stats, snapshot, f.v, 65 * 60_000, mid)).action.kind).toBe("wait");
+    expect((await runTick(paused, closed.stats, snapshot, f.v, 72 * 60_000, mid)).action.kind).toBe("open");
   });
 });

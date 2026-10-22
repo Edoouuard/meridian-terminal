@@ -19,7 +19,10 @@ import { ExtendedConnectPanel } from "@/components/ExtendedConnectPanel";
 import { TxflowPanel } from "@/components/TxflowPanel";
 import { PerpVenuesSummary, VENUE_ANCHOR } from "@/components/PerpVenuesSummary";
 import { NeutralBotPanel } from "@/components/NeutralBotPanel";
-import { BOT_ANCHOR, OPEN_BOT_EVENT } from "@/lib/neutralBot/bus";
+import { OPEN_BOT_EVENT, OPEN_TOOLS_EVENT, SHOW_BOT_EVENT } from "@/lib/neutralBot/bus";
+import { NeutralBotHost } from "@/components/NeutralBotHost";
+import { NeutralBotView } from "@/components/NeutralBotView";
+import { BotStatusChip } from "@/components/BotStatusChip";
 import { LifiPerpsConnectPanel } from "@/components/LifiPerpsConnectPanel";
 import { LidoWithdrawalsPanel } from "@/components/LidoWithdrawalsPanel";
 import { PerpPositionsPanel } from "@/components/PerpPositionsPanel";
@@ -159,14 +162,26 @@ export default function TerminalApp() {
     window.addEventListener(OPEN_STRATEGIES_EVENT, open);
     return () => window.removeEventListener(OPEN_STRATEGIES_EVENT, open);
   }, []);
-  // "Run it as a bot" from a plan opens Tools at the neutral bot.
+  // The neutral bot has its own view in the centre column; "Run it as a bot" from a plan opens it.
+  const [centerView, setCenterView] = useState<"terminal" | "bot">("terminal");
   useEffect(() => {
-    const open = () => {
-      setLeftTab("venues");
-      setTimeout(() => document.getElementById(BOT_ANCHOR)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
-    };
+    const open = () => setCenterView("bot");
     window.addEventListener(OPEN_BOT_EVENT, open);
-    return () => window.removeEventListener(OPEN_BOT_EVENT, open);
+    window.addEventListener(SHOW_BOT_EVENT, open);
+    return () => {
+      window.removeEventListener(OPEN_BOT_EVENT, open);
+      window.removeEventListener(SHOW_BOT_EVENT, open);
+    };
+  }, []);
+  // "Deposit on Extended" from the bot: Tools, at that venue's panel.
+  useEffect(() => {
+    const open = (e: Event) => {
+      const anchor = (e as CustomEvent<unknown>).detail;
+      setLeftTab("venues");
+      if (typeof anchor === "string") setTimeout(() => document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+    };
+    window.addEventListener(OPEN_TOOLS_EVENT, open);
+    return () => window.removeEventListener(OPEN_TOOLS_EVENT, open);
   }, []);
   // A tour step pointing inside a side tab opens it first.
   useEffect(() => {
@@ -216,6 +231,7 @@ export default function TerminalApp() {
 
   // Submit a thesis to the LLM engine (used by both input and quick prompts)
   async function submitThesis(text: string) {
+    setCenterView("terminal");
     const typed = text.trim();
     if (!typed || isAnalyzing) return;
     // A reply to the planner's question carries the original request with it.
@@ -329,6 +345,7 @@ export default function TerminalApp() {
   return (
     <div className="app-shell" style={{ background: "var(--color-bg)", color: "var(--color-text)", height: "100vh", display: "flex", flexDirection: "column" }}>
       <TickerBanner />
+      {FEATURES.perps && <NeutralBotHost />}
       <Celebration />
       <ProductTour />
       <div className="nav topbar" style={{ background: "var(--color-surface)", flex: "none" }}>
@@ -342,6 +359,7 @@ export default function TerminalApp() {
           {ACTIVE_CHAIN_IDS.length} chains
         </span>
         <span className="topbar__spacer" />
+        {FEATURES.perps && <BotStatusChip onOpen={() => setCenterView("bot")} />}
         {portfolioValue !== null && (
           <span className="topbar__value" title="Wallet balances plus tracked positions">
             <span className="topbar__value-label">Portfolio</span>
@@ -481,15 +499,30 @@ export default function TerminalApp() {
 
         {/* Trade column — chat-first layout */}
         <div className="app-col-trade" style={{ display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0 }}>
+          {FEATURES.perps && (
+            <div className="center-switch" role="tablist" aria-label="Main view">
+              <button type="button" role="tab" aria-selected={centerView === "terminal"} className={`center-switch__tab${centerView === "terminal" ? " is-on" : ""}`} onClick={() => setCenterView("terminal")}>
+                Terminal
+              </button>
+              <button type="button" role="tab" aria-selected={centerView === "bot"} className={`center-switch__tab${centerView === "bot" ? " is-on" : ""}`} onClick={() => setCenterView("bot")}>
+                Neutral bot <span className="center-switch__badge">farm points</span>
+              </button>
+            </div>
+          )}
+          {centerView === "bot" && (
+            <div className="col-scroll" style={{ flex: 1, minHeight: 0, minWidth: 0, padding: "var(--space-4)" }}>
+              <NeutralBotView />
+            </div>
+          )}
           {/* Scrollable thread area */}
           <div
             ref={scrollContainerRef}
             className="col-scroll"
             style={{
+              display: centerView === "bot" ? "none" : "flex",
               flex: 1,
               minHeight: 0,
               minWidth: 0,
-              display: "flex",
               flexDirection: "column",
               gap: "var(--space-3)",
               padding: "var(--space-4)",
@@ -532,6 +565,14 @@ export default function TerminalApp() {
                     </p>
                   )}
                 </div>
+                {FEATURES.perps && (
+                  <button type="button" className="bot-promo" onClick={() => setCenterView("bot")}>
+                    <span className="bot-promo__tag">Neutral bot</span>
+                    <span className="bot-promo__title">Farm points and airdrops on autopilot</span>
+                    <span className="bot-promo__text">Delta-neutral volume and open interest across Hyperliquid, Extended and TxFlow, at random times and sizes, monitored live.</span>
+                    <span className="bot-promo__go" aria-hidden="true">Open →</span>
+                  </button>
+                )}
                 <div style={{
                   display: "grid",
                   gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
