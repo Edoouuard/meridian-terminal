@@ -402,6 +402,32 @@ export async function perpLimitOrder(
   return { ...out, mid: px, size };
 }
 
+/** Best bid and ask on a perp market's book (null when a side is empty or the read fails). */
+export async function fetchBestBidAsk(env: HyperliquidEnv, coin: string): Promise<{ bid: number; ask: number } | null> {
+  const market = await fetchPerpMarket(env, coin).catch(() => null);
+  if (!market) return null;
+  const book = await infoPost<{ levels?: { px: string }[][] }>(env, { type: "l2Book", coin: market.coin }).catch(() => null);
+  return parseBestBidAsk(book);
+}
+
+export function parseBestBidAsk(book: { levels?: { px: string }[][] } | null): { bid: number; ask: number } | null {
+  const bid = Number(book?.levels?.[0]?.[0]?.px);
+  const ask = Number(book?.levels?.[1]?.[0]?.px);
+  return bid > 0 && ask > 0 && ask >= bid ? { bid, ask } : null;
+}
+
+/** A reduce-only stop-loss on an open position, `stopLossPct` from `entry`. */
+export async function protectPosition(
+  env: HyperliquidEnv,
+  agentKey: Hex,
+  o: { coin: string; isLong: boolean; size: number; entry: number; stopLossPct: number },
+): Promise<ExchangeOutcome> {
+  const market = await fetchPerpMarket(env, o.coin);
+  if (!market) return { ok: false, error: `${o.coin} isn't listed on Hyperliquid.` };
+  const { sl } = protectionPrices(o.entry, o.isLong, { stopLossPct: o.stopLossPct });
+  return placeProtection(env, agentKey, { asset: market.asset, szDecimals: market.szDecimals, isLong: o.isLong, size: o.size, sl });
+}
+
 /** Cancel a resting order (limit, stop-loss or take-profit). */
 export async function cancelPerpOrder(env: HyperliquidEnv, agentKey: Hex, o: { coin: string; oid: number }): Promise<ExchangeOutcome> {
   const market = await fetchPerpMarket(env, o.coin);

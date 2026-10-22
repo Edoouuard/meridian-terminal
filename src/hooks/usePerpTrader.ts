@@ -5,7 +5,7 @@ import type { Address } from "viem";
 import type { PairFill } from "@/lib/perpPair";
 import type { PerpVenueName } from "@/lib/planner/markets";
 import type { PriceEntry } from "@/lib/quote";
-import { cancelTriggerOrders, fetchPerpAccount, hyperliquidEnv, perpMarketOrder, withAgent, type WalletSign } from "@/lib/integrations/hyperliquidTrade";
+import { cancelPerpOrder, cancelTriggerOrders, fetchBestBidAsk, fetchPerpAccount, hyperliquidEnv, perpLimitOrder, perpMarketOrder, protectPosition, withAgent, type WalletSign } from "@/lib/integrations/hyperliquidTrade";
 import { executeExtendedPerp, fetchExtendedBalance, fetchExtendedPositionViews } from "@/lib/integrations/extended-live";
 import { repairExtendedVault, useExtendedAccount } from "@/hooks/useExtendedAccount";
 import { TXFLOW_NETWORK, fetchTxflowAccount, fetchTxflowMarkets, findTxflowMarket } from "@/lib/integrations/txflow-live";
@@ -38,6 +38,13 @@ export interface PerpTrader {
   position: (venue: PerpVenueName, market: string) => Promise<number>;
   /** Margin free for a new order, USD. */
   freeMargin: (venue: PerpVenueName, market: string) => Promise<number>;
+  /** Post-only orders on Hyperliquid (the neutral bot's maker mode). */
+  maker: {
+    book: (market: string) => Promise<{ bid: number; ask: number } | null>;
+    post: (market: string, o: { isBuy: boolean; qty: number; px: number; reduceOnly: boolean; leverage: number }) => Promise<{ ok: boolean; oid?: number; error?: string }>;
+    cancel: (market: string, oid: number) => Promise<void>;
+    protect: (market: string, o: { isLong: boolean; qty: number; entry: number; stopLossPct: number }) => Promise<void>;
+  };
 }
 
 /**
@@ -121,5 +128,24 @@ export function usePerpTrader(prices?: PriceEntry[]): PerpTrader {
     return (await fetchExtendedBalance(signer).catch(() => null))?.availableForTrade ?? 0;
   };
 
-  return { address, ready, prepare, order, position, freeMargin };
+  const maker: PerpTrader["maker"] = {
+    book: (market) => fetchBestBidAsk(env, market),
+    post: async (market, o) => {
+      const w = need();
+      const out = await withAgent({ ...w, env, walletSign }, (key) =>
+        perpLimitOrder(env, key, { coin: market, isBuy: o.isBuy, px: o.px, coinQty: o.qty, leverage: o.leverage, reduceOnly: o.reduceOnly, postOnly: true, user: w.user }),
+      );
+      return out.ok && out.resting ? { ok: true, oid: out.resting.oid } : { ok: false, error: out.error ?? (out.filled ? "filled at once" : "not resting") };
+    },
+    cancel: async (market, oid) => {
+      const w = need();
+      await withAgent({ ...w, env, walletSign }, (key) => cancelPerpOrder(env, key, { coin: market, oid })).catch(() => undefined);
+    },
+    protect: async (market, o) => {
+      const w = need();
+      await withAgent({ ...w, env, walletSign }, (key) => protectPosition(env, key, { coin: market, isLong: o.isLong, size: o.qty, entry: o.entry, stopLossPct: o.stopLossPct }));
+    },
+  };
+
+  return { address, ready, prepare, order, position, freeMargin, maker };
 }
