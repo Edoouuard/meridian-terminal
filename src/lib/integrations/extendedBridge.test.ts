@@ -119,32 +119,11 @@ describe("bridge quote when Extended's server fails (owner report: HTTP 500, cod
   it("says what to do when every form fails, and never retries a refusal", async () => {
     const { quoteArbitrumDeposit } = await import("./extendedBridge");
     const all500 = vi.fn(async () => err500());
-    await expect(quoteArbitrumDeposit(signer, 20, all500 as never)).rejects.toThrow(/failing on its side .*Nothing was sent.*app\.extended\.exchange/);
-    // Three quote forms, then the account read that tells an outage from a missing bridge account.
-    expect(all500).toHaveBeenCalledTimes(4);
+    await expect(quoteArbitrumDeposit(signer, 20, all500 as never)).rejects.toThrow(/failing .*Arc.*Nothing was sent.*app\.extended\.exchange/);
+    expect(all500).toHaveBeenCalledTimes(3);
     const refused = vi.fn(async () => new Response(JSON.stringify({ status: "ERROR", error: { message: "AssetIsNotSupported" } }), { status: 400 }));
     await expect(quoteArbitrumDeposit(signer, 20, refused as never)).rejects.toThrow("AssetIsNotSupported");
     expect(refused).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe("bridge quote for an account without a bridge account", () => {
-  const signer = { network: "mainnet", apiKey: "k" } as never;
-  const err500 = () => new Response(JSON.stringify({ status: "ERROR", error: { code: 1006, message: "Internal Server Error" } }), { status: 500 });
-  const info = (bridgeStarknetAddress: unknown) => new Response(JSON.stringify({ status: "OK", data: { status: "ACTIVE", accountId: 392459, bridgeStarknetAddress } }), { status: 200 });
-
-  it("says to make a first deposit on Extended's app when the account has no bridge address", async () => {
-    const { quoteArbitrumDeposit } = await import("./extendedBridge");
-    for (const empty of [null, "", "0x0"]) {
-      const fetchImpl = vi.fn(async (url: string) => (url.includes("/user/account/info") ? info(empty) : err500()));
-      await expect(quoteArbitrumDeposit(signer, 20, fetchImpl as never)).rejects.toThrow(/no bridge account yet.*Nothing was sent.*app\.extended\.exchange/);
-    }
-  });
-
-  it("keeps the outage message when the bridge address is there", async () => {
-    const { quoteArbitrumDeposit } = await import("./extendedBridge");
-    const fetchImpl = vi.fn(async (url: string) => (url.includes("/user/account/info") ? info("0x21be84f913dbddbfc0a3993e1f949933139f427f88eb6bfd247ab3ef7174487") : err500()));
-    await expect(quoteArbitrumDeposit(signer, 20, fetchImpl as never)).rejects.toThrow(/failing on its side/);
   });
 });
 
