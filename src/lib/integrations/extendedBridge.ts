@@ -153,10 +153,34 @@ export async function quoteArbitrumDeposit(signer: ExtendedSigner, amountUsd: nu
       last = e;
     }
   }
+  // Extended's bridge quotes for the account's own Starknet bridge account: without one, the quote fails as a bare 500.
+  if (!(await hasBridgeAccount(signer, fetchImpl))) {
+    throw new ExtendedBridgeError(
+      "Your Extended account has no bridge account yet, so Extended can't quote a deposit from Arbitrum (it answers \"Internal Server Error\"). Nothing was sent. Make one deposit with this same wallet on app.extended.exchange (it sets the bridge up), then deposits from Meridian work.",
+      last instanceof ExtendedBridgeError ? last.status : 500,
+    );
+  }
   throw new ExtendedBridgeError(
     `Extended's deposit service is failing on its side ("${last instanceof Error ? last.message : "server error"}" on every quote). Nothing was sent. Deposit with this same wallet on app.extended.exchange instead: Meridian reads the balance as soon as it lands, and the bot uses it.`,
     last instanceof ExtendedBridgeError ? last.status : 500,
   );
+}
+
+/**
+ * Whether the account has the Starknet address Extended bridges EVM deposits
+ * to (GET /user/account/info → bridgeStarknetAddress). Unknown (the read
+ * failed, or the field isn't there at all) counts as yes: only an empty
+ * address is evidence.
+ */
+export async function hasBridgeAccount(signer: ExtendedSigner, fetchImpl: FetchImpl = fetch): Promise<boolean> {
+  try {
+    const info = (await call(signer, "GET", "/user/account/info", fetchImpl)) as { bridgeStarknetAddress?: unknown } | null;
+    if (!info || !("bridgeStarknetAddress" in info)) return true;
+    const a = info.bridgeStarknetAddress;
+    return typeof a === "string" && /^0x0*[1-9a-f]/i.test(a.trim());
+  } catch {
+    return true;
+  }
 }
 
 export async function commitQuote(signer: ExtendedSigner, quoteId: string, fetchImpl: FetchImpl = fetch): Promise<void> {

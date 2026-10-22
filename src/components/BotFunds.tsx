@@ -141,7 +141,7 @@ export function BotFunds({ trader, funds, pair, neededUsd }: { trader: PerpTrade
       {funds && funds.hlVaults >= 0.01 && <p className="text-muted bot-footnote">Also {usd(funds.hlVaults)} in Hyperliquid vaults (HLP…): it earns there, but can&apos;t margin a trade until you withdraw it from the vault.</p>}
       {pair.includes("Extended") && (
         <p className="text-muted bot-footnote">
-          Extended&apos;s bridge deposit has been failing on their side lately. If it does, deposit with this same wallet on{" "}
+          If the deposit from Meridian fails (Extended answers &quot;Internal Server Error&quot;), deposit once with this same wallet on{" "}
           <a href={EXTENDED_APP_URL} target="_blank" rel="noreferrer">
             app.extended.exchange
           </a>
