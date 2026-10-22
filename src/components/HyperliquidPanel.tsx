@@ -9,10 +9,12 @@ import { setSharedHlAccount, useSharedHlAccount } from "@/hooks/useLivePortfolio
 import { setSharedHlEnv, useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
 import {
   fetchClearinghouseState,
+  fetchHlHoldings,
   fetchOpenOrders,
   HIP3_MAIN_DEX,
   hyperliquidEnv,
   type HlAccount,
+  type HlHoldings,
   type HlOpenOrder,
 } from "@/lib/integrations/hyperliquid-live";
 
@@ -33,6 +35,8 @@ export function HyperliquidPanel() {
   const [orders, setOrders] = useState<HlOpenOrder[]>([]);
   // Stock / commodity positions live on the HIP-3 dex, outside the main account the portfolio reads.
   const [hip3Positions, setHip3Positions] = useState<HlAccount["positions"]>([]);
+  // Money outside the perp account: spot (the margin itself on a unified account), vaults such as HLP, staked HYPE.
+  const [holdings, setHoldings] = useState<HlHoldings | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,12 +51,14 @@ export function HyperliquidPanel() {
     setError(null);
     try {
       const e = hyperliquidEnv(env === "testnet");
-      const [acc, ord, hip3Acc, hip3Ord] = await Promise.all([
+      const [acc, ord, hip3Acc, hip3Ord, held] = await Promise.all([
         fetchClearinghouseState(address, e),
         fetchOpenOrders(address, e),
         fetchClearinghouseState(address, e, HIP3_MAIN_DEX).catch(() => null),
         fetchOpenOrders(address, e, HIP3_MAIN_DEX).catch(() => [] as HlOpenOrder[]),
+        fetchHlHoldings(address, e).catch(() => null),
       ]);
+      setHoldings(held);
       // Push into the shared store so the portfolio and this panel agree.
       setSharedHlAccount(acc);
       setHip3Positions(hip3Acc?.positions ?? []);
@@ -139,6 +145,7 @@ export function HyperliquidPanel() {
             <span className="text-muted">Margin used</span>
             <span style={{ fontVariantNumeric: "tabular-nums" }}>{fmtUsd(account.totalMarginUsed)}</span>
           </div>
+          {holdings && <HlOtherBalances holdings={holdings} perpValue={account.accountValue} />}
 
           {account.positions.length === 0 && hip3Positions.length === 0 && (
             <p style={{ fontSize: 11, margin: "4px 0 0" }} className="text-muted">
@@ -282,6 +289,48 @@ export function HyperliquidPanel() {
         }}
         onCancel={() => setClosing(null)}
       />
+    </>
+  );
+}
+
+/**
+ * What the wallet holds on Hyperliquid outside the perp account: the perp
+ * "Account value" alone reads $0 for money sitting in spot (on a unified
+ * account that spot USDC is the margin itself), in a vault such as HLP, or
+ * staked as HYPE.
+ */
+function HlOtherBalances({ holdings, perpValue }: { holdings: HlHoldings; perpValue: number }) {
+  const usdc = holdings.spot.find((b) => b.coin === "USDC")?.free ?? 0;
+  const tokens = holdings.spot.filter((b) => b.coin !== "USDC").reduce((s, b) => s + b.free * b.px, 0);
+  const vaults = holdings.vaults.reduce((s, v) => s + v.equity, 0);
+  const staked = holdings.stakedHype * holdings.hypePx;
+  const rows = [
+    { label: holdings.unified ? "Spot USDC (usable as margin)" : "Spot USDC", value: usdc },
+    { label: "Spot tokens", value: tokens },
+    { label: "In vaults (HLP…)", value: vaults },
+    { label: "Staked HYPE", value: staked },
+  ].filter((r) => r.value >= 0.01);
+  if (rows.length === 0) return null;
+  // On a unified account the perp value already counts the spot USDC it uses as margin.
+  const total = (holdings.unified ? Math.max(perpValue, usdc) : perpValue + usdc) + tokens + vaults + staked;
+  const line = { display: "flex", justifyContent: "space-between", fontSize: 12 } as const;
+  return (
+    <>
+      {rows.map((r) => (
+        <div key={r.label} style={line}>
+          <span className="text-muted">{r.label}</span>
+          <span style={{ fontVariantNumeric: "tabular-nums" }}>{fmtUsd(r.value)}</span>
+        </div>
+      ))}
+      <div style={{ ...line, fontWeight: 600 }}>
+        <span>Total on Hyperliquid</span>
+        <span style={{ fontVariantNumeric: "tabular-nums" }}>{fmtUsd(total)}</span>
+      </div>
+      {vaults > 0 && (
+        <p className="text-muted" style={{ fontSize: 10, margin: 0 }}>
+          Vault funds can&apos;t margin a trade: withdraw them from the vault first to trade or run the bot with them.
+        </p>
+      )}
     </>
   );
 }

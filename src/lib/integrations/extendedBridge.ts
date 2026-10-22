@@ -123,7 +123,8 @@ export async function fetchArbitrumBridge(signer: ExtendedSigner, fetchImpl: Fet
  * Extended answers with a server error (owner report 2026-10-22: HTTP 500,
  * code 1006, on the documented form): `asset` is optional, and the amount is
  * a number. The quoted amount is the one deposited, so a whole-dollar form
- * quotes (and later deposits) the whole dollars.
+ * quotes (and later deposits) the whole dollars. USD is Extended's only
+ * collateral symbol ("USDC" answers "Asset not found").
  */
 export function quoteAttempts(amountUsd: number): { query: string; amountUsd: number }[] {
   const cents = (Math.floor(amountUsd * 100) / 100).toFixed(2);
@@ -133,7 +134,6 @@ export function quoteAttempts(amountUsd: number): { query: string; amountUsd: nu
     { query: `${base}&amount=${cents}&asset=USD`, amountUsd: Number(cents) },
     { query: `${base}&amount=${cents}`, amountUsd: Number(cents) },
     { query: `${base}&amount=${whole}&asset=USD`, amountUsd: whole },
-    { query: `${base}&amount=${whole}&asset=USDC`, amountUsd: whole },
   ].filter((a, i, all) => a.amountUsd >= EXTENDED_MIN_DEPOSIT_USD && all.findIndex((b) => b.query === a.query) === i);
 }
 
@@ -144,13 +144,17 @@ export async function quoteArbitrumDeposit(signer: ExtendedSigner, amountUsd: nu
     try {
       return parseQuote(await call(signer, "GET", a.query, fetchImpl), a.amountUsd);
     } catch (e) {
-      // A refusal (geo-restriction, unsupported asset, bad amount) is an answer: only a server error tries the next form.
-      if (!isBridgeServerError(e)) throw e;
+      // A refusal (geo-restriction, bad amount) is an answer: only a server error tries the next form.
+      // After a server error, a later form's refusal is not the story: Extended's outage is.
+      if (!isBridgeServerError(e)) {
+        if (last) break;
+        throw e;
+      }
       last = e;
     }
   }
   throw new ExtendedBridgeError(
-    `Extended's bridge (Rhino.fi) failed on its side for this quote (${last instanceof Error ? last.message : "server error"}). Nothing was sent. Try again in a minute, or deposit with this same wallet on app.extended.exchange: Meridian reads the balance as soon as it lands.`,
+    `Extended's deposit service is failing on its side ("${last instanceof Error ? last.message : "server error"}" on every quote). Nothing was sent. Deposit with this same wallet on app.extended.exchange instead: Meridian reads the balance as soon as it lands, and the bot uses it.`,
     last instanceof ExtendedBridgeError ? last.status : 500,
   );
 }
