@@ -14,11 +14,8 @@ import type { PerpVenueName } from "@/lib/planner/markets";
 import { DEFAULT_BOT_CONFIG, EMPTY_STATS, migrateConfig, type BotConfig, type BotStats } from "@/lib/neutralBot/engine";
 import type { BotView, TickResult } from "@/lib/neutralBot/runner";
 
-export interface BotLogLine {
-  at: number;
-  text: string;
-  tone: "ok" | "info" | "warn" | "bad";
-}
+import type { BotLogLine } from "@/lib/neutralBot/tickState";
+export type { BotLogLine } from "@/lib/neutralBot/tickState";
 
 export interface BotState {
   address: string | null;
@@ -34,12 +31,14 @@ export interface BotState {
   failures: number;
   /** When the next tick is due (ms), while running. */
   nextTickAt: number | null;
+  /** The bot runs on Meridian's server (24/7) rather than in this tab. */
+  onServer: boolean;
 }
 
 export const DEFAULT_CONFIG: BotConfig = { ...DEFAULT_BOT_CONFIG, base: "ETH", venues: ["Hyperliquid", "Extended"] as [PerpVenueName, PerpVenueName], notionalUsd: 50 };
 const LOG_LINES = 200;
 
-let state: BotState = { address: null, cfg: DEFAULT_CONFIG, stats: EMPTY_STATS, log: [], running: false, busy: false, view: null, needsMargin: null, failures: 0, nextTickAt: null };
+let state: BotState = { address: null, cfg: DEFAULT_CONFIG, stats: EMPTY_STATS, log: [], running: false, busy: false, view: null, needsMargin: null, failures: 0, nextTickAt: null, onServer: false };
 const listeners = new Set<() => void>();
 
 const storeKey = (address: string) => `meridian:neutralBot:${address.toLowerCase()}`;
@@ -47,7 +46,7 @@ const storeKey = (address: string) => `meridian:neutralBot:${address.toLowerCase
 function persist() {
   if (!state.address) return;
   try {
-    localStorage.setItem(storeKey(state.address), JSON.stringify({ cfg: state.cfg, stats: state.stats, log: state.log.slice(0, LOG_LINES) }));
+    localStorage.setItem(storeKey(state.address), JSON.stringify({ cfg: state.cfg, stats: state.stats, log: state.log.slice(0, LOG_LINES), onServer: state.onServer }));
   } catch {
     /* storage full or blocked: the bot keeps running, without memory across reloads */
   }
@@ -60,14 +59,14 @@ export function getBotState(): BotState {
 export function setBotState(patch: Partial<BotState> | ((s: BotState) => Partial<BotState>)) {
   const p = typeof patch === "function" ? patch(state) : patch;
   state = { ...state, ...p };
-  if ("cfg" in p || "stats" in p || "log" in p) persist();
+  if ("cfg" in p || "stats" in p || "log" in p || "onServer" in p) persist();
   for (const l of listeners) l();
 }
 
 /** The wallet changed: load its bot (a running bot of another wallet stops first). */
 export function loadBotFor(address: string | null) {
   if (address === state.address) return;
-  type Saved = { cfg?: Partial<BotConfig> & { rotateMinutes?: number }; stats?: Partial<BotStats>; log?: BotLogLine[] };
+  type Saved = { cfg?: Partial<BotConfig> & { rotateMinutes?: number }; stats?: Partial<BotStats>; log?: BotLogLine[]; onServer?: boolean };
   const read = (): Saved | null => {
     try {
       return address ? (JSON.parse(localStorage.getItem(storeKey(address)) ?? "null") as Saved | null) : null;
@@ -88,6 +87,7 @@ export function loadBotFor(address: string | null) {
     cfg: saved?.cfg ? migrateConfig(saved.cfg, DEFAULT_CONFIG) : DEFAULT_CONFIG,
     stats: { ...EMPTY_STATS, ...(saved?.stats ?? {}) },
     log: (saved?.log ?? []).map((l) => ({ ...l, tone: l.tone ?? "info" })),
+    onServer: !!saved?.onServer,
   };
   for (const l of listeners) l();
 }
@@ -108,7 +108,10 @@ export function useBotState(): BotState {
 /** The actions the host binds (it holds the venues' trading keys). */
 export interface BotRunner {
   start: () => Promise<void>;
+  pause: () => Promise<void>;
   closeNow: () => Promise<void>;
+  /** Remove the bot and its trading keys from the server. */
+  forgetServer: () => Promise<void>;
 }
 
 let runner: BotRunner | null = null;

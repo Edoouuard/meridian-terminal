@@ -5,7 +5,9 @@ import { BETA_COOKIE, betaPassword, betaToken, safeEqual } from "@/lib/betaGate"
 const checkRateLimit = createRateLimiter();
 
 /** Paths reachable without the beta cookie. */
-const PUBLIC_PATHS = new Set(["/beta", "/api/beta-login"]);
+const PUBLIC_PATHS = new Set(["/beta", "/api/beta-login", "/api/bot/tick"]);
+/** Server-to-server routes with their own check (a token in the path, a signature): no cookie, no per-IP limit. */
+const SERVER_PREFIXES = ["/api/extended-srv/"];
 
 function clientIp(req: NextRequest): string {
   return (
@@ -18,6 +20,8 @@ function clientIp(req: NextRequest): string {
 export async function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
   const isApi = pathname.startsWith("/api/");
+
+  if (SERVER_PREFIXES.some((p) => pathname.startsWith(p))) return NextResponse.next();
 
   // 1. Rate limit API routes (per IP, per route family).
   if (isApi) {
