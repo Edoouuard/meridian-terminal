@@ -14,6 +14,9 @@
  */
 export const TAKER_FEE = { Hyperliquid: 0.00045, Extended: 0.00025, TxFlow: 0.00045 } as const;
 
+/** Maker (post-only) fee, base tier, where Meridian can post one: Hyperliquid. */
+export const MAKER_FEE = { Hyperliquid: 0.00015 } as const;
+
 /** Hyperliquid spot taker fee (base tier), as a fraction of notional. */
 export const HL_SPOT_TAKER_FEE = 0.0007;
 

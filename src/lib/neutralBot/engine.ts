@@ -62,6 +62,14 @@ export interface BotConfig {
    * 0: automatic, from the leverage (`safetyStopPct`).
    */
   safetyStopPct: number;
+  /**
+   * taker: both legs at market. maker: the Hyperliquid leg as a post-only
+   * order at the best price, the other leg hedged at market as it fills
+   * (lib/neutralBot/maker.ts); a pair without Hyperliquid stays taker.
+   */
+  execution: "taker" | "maker";
+  /** maker: how long the post-only order may wait for fills, seconds. */
+  makerTimeoutSec: number;
 }
 
 /** What the runner reads before each decision. */
@@ -358,6 +366,8 @@ export const DEFAULT_BOT_CONFIG: Omit<BotConfig, "base" | "venues" | "notionalUs
   maxFeesUsd: 5,
   volumeTargetUsd: 0,
   safetyStopPct: 0,
+  execution: "taker",
+  makerTimeoutSec: 60,
 };
 
 /** A config saved before random schedules (one `rotateMinutes`) or missing newer fields, made whole. */
@@ -374,7 +384,12 @@ export function migrateConfig(saved: Partial<BotConfig> & { rotateMinutes?: numb
   return cfg;
 }
 
-/** The fees one cycle costs (both legs opened and closed at taker), for the config preview. */
-export function rotationFeeUsd(cfg: Pick<BotConfig, "notionalUsd">, takerFees: [number, number]): number {
-  return 2 * cfg.notionalUsd * (takerFees[0] + takerFees[1]);
+/** The fees one cycle costs (both legs opened and closed), for the config preview: `fees` are the two legs' rates. */
+export function rotationFeeUsd(cfg: Pick<BotConfig, "notionalUsd">, fees: [number, number]): number {
+  return 2 * cfg.notionalUsd * (fees[0] + fees[1]);
+}
+
+/** The venue whose leg goes on the book in maker mode (null: the pair trades at taker). */
+export function makerVenueOf(cfg: Pick<BotConfig, "execution" | "venues">): PerpVenueName | null {
+  return cfg.execution === "maker" && cfg.venues.includes("Hyperliquid") ? "Hyperliquid" : null;
 }

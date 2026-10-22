@@ -111,4 +111,48 @@ describe("neutral bot tick", () => {
     expect((await runTick(paused, closed.stats, snapshot, f.v, 65 * 60_000, mid)).action.kind).toBe("wait");
     expect((await runTick(paused, closed.stats, snapshot, f.v, 72 * 60_000, mid)).action.kind).toBe("open");
   });
+
+  it("maker mode: posts the Hyperliquid leg at the best price and hedges Extended at taker, at the maker fee", async () => {
+    const f = fakeVenues();
+    let t = 0;
+    let resting: { isBuy: boolean; qty: number; px: number } | null = null;
+    const posted: string[] = [];
+    f.v.maker = {
+      book: async () => ({ bid: 2499.9, ask: 2500.1 }),
+      post: async (_m, o) => {
+        resting = o;
+        posted.push(`${o.isBuy ? "buy" : "sell"} ${o.qty}@${o.px}${o.reduceOnly ? " ro" : ""}`);
+        return { ok: true, oid: posted.length };
+      },
+      cancel: async () => {
+        resting = null;
+      },
+      protect: async () => undefined,
+    };
+    // The resting order fills in full at the first poll.
+    f.v.sleep = async (ms) => {
+      t += ms;
+      if (resting) {
+        f.pos.Hyperliquid += resting.isBuy ? resting.qty : -resting.qty;
+        resting = null;
+      }
+    };
+    f.v.clock = () => t;
+    const r = await runTick({ ...cfg, execution: "maker" }, EMPTY_STATS, snapshot, f.v, 1000, mid);
+    // Long Extended / short Hyperliquid: the short is posted at the ask, Extended bought at taker.
+    expect(posted).toEqual(["sell 0.02@2500.1"]);
+    expect(f.log).toEqual(["Extended buy 0.02 sl22.5"]);
+    expect(f.pos).toEqual({ Hyperliquid: -0.02, Extended: 0.02 });
+    expect(r.stats.legs.map((l) => `${l.venue} ${l.side} ${l.qty}`)).toEqual(["Extended long 0.02", "Hyperliquid short 0.02"]);
+    // Hyperliquid at 0.015% (maker), Extended at 0.025% (taker).
+    expect(r.stats.feesUsd).toBeCloseTo(0.02 * 2500.1 * 0.00015 + 0.02 * 2500 * 0.00025, 6);
+
+    // Closing: the Hyperliquid leg buys back as maker, Extended sells at taker.
+    const later = r.stats.closeAt as number;
+    const closed = await runTick({ ...cfg, execution: "maker", gapMaxMinutes: 5, gapMinMinutes: 1 }, r.stats, snapshot, f.v, later + 1, mid);
+    expect(closed.action.kind).toBe("close");
+    expect(posted[1]).toBe("buy 0.02@2499.9 ro");
+    expect(f.pos).toEqual({ Hyperliquid: 0, Extended: 0 });
+  });
 });
+

@@ -1867,3 +1867,17 @@ body {
 .bot-activity > summary { cursor: pointer; list-style: none; }
 .bot-activity > summary::-webkit-details-marker { display: none; }
 .bot-guard { display: flex; flex-direction: column; gap: 2px; font-size: 12px; padding: 8px 10px; border-radius: var(--radius-md); border-left: 3px solid var(--risk-good); background: color-mix(in srgb, var(--risk-good) 7%, var(--color-bg)); }
+.bot-exec { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.bot-exec__label { font-size: 11px; font-weight: 600; }
+.bot-exec .bot-hint { flex: 1 1 260px; }
+
+/* Arbitrage */
+.center-switch__badge--hot { background: color-mix(in srgb, var(--risk-good) 18%, transparent); color: var(--risk-good); }
+.arb-controls { display: flex; gap: 8px; align-items: flex-end; flex-wrap: wrap; }
+.arb-controls .bot-field { width: 120px; }
+.arb-table-wrap { overflow-x: auto; }
+.arb-table td, .arb-table th { white-space: nowrap; }
+.arb-row--hot td { background: color-mix(in srgb, var(--risk-good) 7%, transparent); }
+.arb-steps { margin: 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.arb-open { padding: 6px 0; border-bottom: 1px solid var(--color-divider); }
+.arb-open__line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; }

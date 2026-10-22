@@ -8,12 +8,13 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { BotVolumeChart } from "@/components/BotVolumeChart";
 import { BotFunds, VENUE_ANCHOR_OF, useVenueFunds } from "@/components/BotFunds";
 import { rankForCarry, rankForFarming, scanPairs, type PairOpportunity } from "@/lib/neutralBot/opportunities";
-import { EMPTY_STATS, entryPx, liquidationMovePct, openPnlUsd, safetyStopPct, spreadAprPct, venueStopPct, type BotConfig, type BotMode } from "@/lib/neutralBot/engine";
+import { EMPTY_STATS, entryPx, liquidationMovePct, makerVenueOf, openPnlUsd, safetyStopPct, spreadAprPct, venueStopPct, type BotConfig, type BotMode } from "@/lib/neutralBot/engine";
 import { marketOn } from "@/lib/neutralBot/runner";
 import { botRunner, getBotState, setBotState, useBotState } from "@/lib/neutralBot/store";
 import { botHealth, volumeLast24h } from "@/lib/neutralBot/health";
 import { dayEstimate, feesPer10kUsd, INTENSITY, intensityOf, maxPerSideUsd, type Intensity } from "@/lib/neutralBot/guide";
 import { marginNeededUsd } from "@/lib/integrations/hyperliquidTrade";
+import { MAKER_FEE, TAKER_FEE } from "@/lib/perpVenues";
 import { BOT_ANCHOR, onOpenNeutralBot, openToolsAt, takePendingBot } from "@/lib/neutralBot/bus";
 
 const VENUES: PerpVenueName[] = ["Hyperliquid", "Extended", "TxFlow"];
@@ -154,7 +155,9 @@ export function NeutralBotView() {
   const freeA = funds.data?.free[va] ?? null;
   const freeB = funds.data?.free[vb] ?? null;
   const maxSize = freeA !== null && freeB !== null ? maxPerSideUsd(freeA, freeB, cfg.leverage) : null;
-  const day = qa && qb && cfg.mode === "farm" ? dayEstimate(cfg, [qa.takerFee, qb.takerFee]) : null;
+  const feeOf = (v: PerpVenueName, taker: number) => (makerVenueOf(cfg) === v ? MAKER_FEE.Hyperliquid : taker);
+  const day = qa && qb && cfg.mode === "farm" ? dayEstimate(cfg, [feeOf(va, qa.takerFee), feeOf(vb, qb.takerFee)]) : null;
+  const takerDay = qa && qb && cfg.mode === "farm" && makerVenueOf(cfg) ? dayEstimate(cfg, [qa.takerFee, qb.takerFee]) : null;
   const pace = intensityOf(cfg);
 
   // What stands between the setup and Start, in the order the steps fix it.
@@ -321,6 +324,23 @@ export function NeutralBotView() {
                 </>
               )}
             </p>
+            <div className="bot-exec">
+              <span className="bot-exec__label">Orders</span>
+              <div className="bot-seg" role="group" aria-label="Order type">
+                {(["taker", "maker"] as const).map((x) => (
+                  <button key={x} type="button" className={`btn ${cfg.execution === x ? "btn-primary" : "btn-secondary"} bot-mini`} aria-pressed={cfg.execution === x} onClick={() => set("execution", x)}>
+                    {x === "taker" ? "Taker: instant" : "Maker: cheaper"}
+                  </button>
+                ))}
+              </div>
+              <span className="text-muted bot-hint">
+                {cfg.execution === "maker"
+                  ? cfg.venues.includes("Hyperliquid")
+                    ? `The Hyperliquid leg waits on the book at the best price (fee ${(MAKER_FEE.Hyperliquid * 100).toFixed(3)}% instead of ${(TAKER_FEE.Hyperliquid * 100).toFixed(3)}%); the other leg is bought or sold at market as it fills. Up to ${cfg.makerTimeoutSec}s per opening; a close finishes at market after that.`
+                    : "Maker needs Hyperliquid in the pair: this pair trades at taker."
+                  : "Both legs at market: filled at once, at the taker fee on both venues."}
+              </span>
+            </div>
             <div className="bot-guard">
               <strong>Liquidation protection</strong>
               <span>
@@ -357,7 +377,7 @@ export function NeutralBotView() {
                       <span className="bot-estimate__label">Pairs a day</span>
                       <strong>~{Math.round(Math.min(day.cyclesPerDay, cfg.maxCycles || Infinity))}</strong>
                     </div>
-                    <p className="text-muted">{day.stopsAfterHours !== null ? `The fee budget (or the ${cfg.maxCycles}-pair cap) stops it after ~${hours(day.stopsAfterHours)}: raise it to run longer.` : "Times and sizes are drawn at random within the ranges, so each day differs a little."}</p>
+                    <p className="text-muted">{takerDay && takerDay.feesUsd > day.feesUsd ? `Maker saves ~${usd(takerDay.feesUsd - day.feesUsd)} a day against taker (${Math.round((1 - day.feesUsd / takerDay.feesUsd) * 100)}% less). ` : ""}{day.stopsAfterHours !== null ? `The fee budget (or the ${cfg.maxCycles}-pair cap) stops it after ~${hours(day.stopsAfterHours)}: raise it to run longer.` : "Times and sizes are drawn at random within the ranges, so each day differs a little."}</p>
                   </div>
                 )}
               </>
@@ -418,6 +438,9 @@ export function NeutralBotView() {
                 )}
                 <Field label="Max pairs (cycles)">
                   <input type="number" min={1} value={cfg.maxCycles} onChange={(e) => set("maxCycles", Math.round(num(e.target.value, 1)))} />
+                </Field>
+                <Field label="Maker wait per order (s)">
+                  <input type="number" min={10} max={600} value={cfg.makerTimeoutSec} onChange={(e) => set("makerTimeoutSec", Math.min(600, num(e.target.value, 10)))} />
                 </Field>
                 <Field label="Safety close at (% move, 0 = auto)">
                   <input type="number" min={0} max={90} step={1} value={cfg.safetyStopPct} onChange={(e) => set("safetyStopPct", Math.min(90, num(e.target.value)))} />

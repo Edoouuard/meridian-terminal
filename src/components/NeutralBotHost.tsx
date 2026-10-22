@@ -5,6 +5,7 @@ import { useAccount } from "wagmi";
 import type { MarketSnapshot } from "@/lib/planner/markets";
 import { usePerpTrader } from "@/hooks/usePerpTrader";
 import { runTick } from "@/lib/neutralBot/runner";
+import { makerVenueOf } from "@/lib/neutralBot/engine";
 import { bindBotRunner, botLog, getBotState, loadBotFor, setBotState, useBotState } from "@/lib/neutralBot/store";
 
 /** Seconds between two ticks (a background tab may run them less often). */
@@ -102,9 +103,9 @@ export function NeutralBotHost() {
           await traderRef.current.prepare(cfg.venues);
           setBotState({ failures: 0, stats: { ...stats, stopReason: null, startedAt: stats.startedAt ?? Date.now() }, running: true });
           botLog(
-            cfg.mode === "farm"
+            (cfg.mode === "farm"
               ? `Started: farming ${cfg.base} on ${cfg.venues.join(" + ")}, each pair held ${cfg.holdMinMinutes}–${cfg.holdMaxMinutes} min${cfg.gapMaxMinutes > 0 ? `, ${cfg.gapMinMinutes}–${cfg.gapMaxMinutes} min apart` : ""}.`
-              : `Started: carry on ${cfg.base}, opening above ${cfg.minSpreadAprPct}%/yr.`,
+              : `Started: carry on ${cfg.base}, opening above ${cfg.minSpreadAprPct}%/yr.`) + (makerVenueOf(cfg) ? " Orders: maker on Hyperliquid, the other leg at market." : " Orders: market on both venues."),
             "ok",
           );
         } catch (err) {
