@@ -1866,3 +1866,4 @@ body {
 .bot-subline { font-size: 11px; margin: -4px 0 0; font-variant-numeric: tabular-nums; }
 .bot-activity > summary { cursor: pointer; list-style: none; }
 .bot-activity > summary::-webkit-details-marker { display: none; }
+.bot-guard { display: flex; flex-direction: column; gap: 2px; font-size: 12px; padding: 8px 10px; border-radius: var(--radius-md); border-left: 3px solid var(--risk-good); background: color-mix(in srgb, var(--risk-good) 7%, var(--color-bg)); }

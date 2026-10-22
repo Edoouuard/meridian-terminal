@@ -410,6 +410,21 @@ export async function cancelPerpOrder(env: HyperliquidEnv, agentKey: Hex, o: { c
   return out;
 }
 
+/**
+ * Cancel the reduce-only trigger orders (stop-loss, take-profit) left on a
+ * coin once its position is closed: a leftover stop would otherwise act on
+ * the next position opened on the coin.
+ */
+export async function cancelTriggerOrders(env: HyperliquidEnv, agentKey: Hex, o: { user: Address; coin: string }): Promise<ExchangeOutcome> {
+  const market = await fetchPerpMarket(env, o.coin);
+  if (!market) return { ok: false, error: `${o.coin} isn't listed on Hyperliquid.` };
+  type Row = { coin?: string; oid?: number; isTrigger?: boolean; reduceOnly?: boolean };
+  const rows = await infoPost<Row[]>(env, market.dex ? { type: "frontendOpenOrders", user: o.user, dex: market.dex } : { type: "frontendOpenOrders", user: o.user });
+  const stale = (rows ?? []).filter((r) => r.coin === market.coin && r.isTrigger && r.reduceOnly && typeof r.oid === "number");
+  if (stale.length === 0) return { ok: true };
+  return sendL1(env, agentKey, cancelAction(stale.map((r) => ({ asset: market.asset, oid: r.oid as number }))));
+}
+
 /** Move a resting limit order to a new price, same side and size. */
 export async function modifyPerpLimit(
   env: HyperliquidEnv,

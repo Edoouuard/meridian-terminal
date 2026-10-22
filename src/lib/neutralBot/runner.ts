@@ -17,6 +17,7 @@ import type { MarketQuote, MarketSnapshot, PerpVenueName } from "@/lib/planner/m
 import type { PairFill } from "@/lib/perpPair";
 import { runPerpPair } from "@/lib/perpPair";
 import { marginNeededUsd } from "@/lib/integrations/hyperliquidTrade";
+import { maxPerSideUsd } from "@/lib/neutralBot/guide";
 import {
   accrueFunding,
   bestOrientation,
@@ -25,6 +26,7 @@ import {
   planNext,
   recordFills,
   spreadAprPct,
+  venueStopPct,
   type BotAction,
   type BotConfig,
   type BotStats,
@@ -33,7 +35,8 @@ import {
 } from "@/lib/neutralBot/engine";
 
 export interface BotVenues {
-  order: (venue: PerpVenueName, o: { market: string; isBuy: boolean; sizeUsd?: number; qty?: number; leverage: number; reduceOnly: boolean }) => Promise<PairFill>;
+  /** `stopLossPct`: a reduce-only stop on the venue, that far from the fill, where the venue supports one (Hyperliquid, TxFlow). */
+  order: (venue: PerpVenueName, o: { market: string; isBuy: boolean; sizeUsd?: number; qty?: number; leverage: number; reduceOnly: boolean; stopLossPct?: number }) => Promise<PairFill>;
   position: (venue: PerpVenueName, market: string) => Promise<number>;
   freeMargin: (venue: PerpVenueName, market: string) => Promise<number>;
 }
@@ -105,7 +108,7 @@ export async function runTick(
   const action = decide(cfg, stats, obs);
   const sizes: Partial<Record<PerpVenueName, number>> = { [a]: sa, [b]: sb };
   const fills: Fill[] = [];
-  const send = async (venue: PerpVenueName, o: { isBuy: boolean; sizeUsd?: number; qty?: number; reduceOnly: boolean }): Promise<PairFill> => {
+  const send = async (venue: PerpVenueName, o: { isBuy: boolean; sizeUsd?: number; qty?: number; reduceOnly: boolean; stopLossPct?: number }): Promise<PairFill> => {
     const out = await venues.order(venue, { market: quote(venue).market, leverage: cfg.leverage, ...o });
     if (out.ok && out.filledQty && out.filledQty > 0) {
       fills.push({ venue, isBuy: o.isBuy, qty: out.filledQty, px: out.avgPx ?? quote(venue).markUsd, takerFee: quote(venue).takerFee });
@@ -140,9 +143,14 @@ export async function runTick(
   // Open the pair long on `longVenue`: the thinner book first, the other at the quantity it filled.
   type Opening = { opened: boolean; message: string; exposed?: boolean; legs?: HeldLeg[]; needsMargin?: TickResult["needsMargin"] };
   const openPair = async (longVenue: PerpVenueName, shortVenue: PerpVenueName): Promise<Opening> => {
-    const size = openingSize(cfg, minNotionalUsd, rand);
-    const need = marginNeededUsd(size, cfg.leverage);
+    const drawn = openingSize(cfg, minNotionalUsd, rand);
     const [fl, fs] = await Promise.all([venues.freeMargin(longVenue, quote(longVenue).market), venues.freeMargin(shortVenue, quote(shortVenue).market)]);
+    // Each closed pair moves its PnL from one venue's margin to the other's: when the thinner venue no longer
+    // covers the drawn size, open what it covers (above the markets' minimum) rather than stall.
+    const fits = maxPerSideUsd(fl, fs, cfg.leverage);
+    const size = fits < drawn && fits >= minNotionalUsd ? fits : drawn;
+    const sizedDown = size < drawn ? ` Sized down from ~${fmt(drawn)}: ${fl < fs ? longVenue : shortVenue} has ${fmt(Math.min(fl, fs))} free.` : "";
+    const need = marginNeededUsd(size, cfg.leverage);
     const missing = [
       fl < need ? { venue: longVenue, freeUsd: fl, neededUsd: need } : null,
       fs < need ? { venue: shortVenue, freeUsd: fs, neededUsd: need } : null,
@@ -153,7 +161,7 @@ export async function runTick(
     const venuesOf: PerpVenueName[] = [longVenue, shortVenue];
     const first = quote(longVenue).dayVolumeUsd <= quote(shortVenue).dayVolumeUsd ? 0 : 1;
     const run = await runPerpPair([first, 1 - first], {
-      open: (i, qty) => send(venuesOf[i], { isBuy: i === 0, sizeUsd: size, qty, reduceOnly: false }),
+      open: (i, qty) => send(venuesOf[i], { isBuy: i === 0, sizeUsd: size, qty, reduceOnly: false, stopLossPct: venueStopPct(cfg) }),
       close: (i, qty) => send(venuesOf[i], { isBuy: i !== 0, qty, reduceOnly: true }),
     });
     if (run.status === "neutral") {
@@ -163,7 +171,7 @@ export async function runTick(
         qty: f.qty,
         entryPx: f.avgPx ?? quote(venuesOf[f.legIndex]).markUsd,
       });
-      return { opened: true, legs: [leg(run.first), leg(run.second)], message: `Opened ${run.first.qty} ${cfg.base} (~${fmt(size)} a leg): long ${longVenue}, short ${shortVenue}.` };
+      return { opened: true, legs: [leg(run.first), leg(run.second)], message: `Opened ${run.first.qty} ${cfg.base} (~${fmt(size)} a leg): long ${longVenue}, short ${shortVenue}.${sizedDown}` };
     }
     if (run.status === "first_failed") return { opened: false, message: `Opening failed, nothing traded: ${run.error}` };
     if (run.status === "unwound") return { opened: false, message: `Second leg failed (${run.error}); the first was closed.` };

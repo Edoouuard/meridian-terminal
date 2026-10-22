@@ -8,7 +8,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { BotVolumeChart } from "@/components/BotVolumeChart";
 import { BotFunds, VENUE_ANCHOR_OF, useVenueFunds } from "@/components/BotFunds";
 import { rankForCarry, rankForFarming, scanPairs, type PairOpportunity } from "@/lib/neutralBot/opportunities";
-import { EMPTY_STATS, openPnlUsd, spreadAprPct, type BotConfig, type BotMode } from "@/lib/neutralBot/engine";
+import { EMPTY_STATS, entryPx, liquidationMovePct, openPnlUsd, safetyStopPct, spreadAprPct, venueStopPct, type BotConfig, type BotMode } from "@/lib/neutralBot/engine";
 import { marketOn } from "@/lib/neutralBot/runner";
 import { botRunner, getBotState, setBotState, useBotState } from "@/lib/neutralBot/store";
 import { botHealth, volumeLast24h } from "@/lib/neutralBot/health";
@@ -164,8 +164,9 @@ export function NeutralBotView() {
     va === vb ? "The pair needs two different venues." : null,
     trader.address && (!trader.ready(va) || !trader.ready(vb)) ? `Connect ${[va, vb].filter((v) => !trader.ready(v)).join(" and ")} (step 1).` : null,
     markets.data && (!qa || !qb) ? `${cfg.base} isn't listed on ${!qa ? va : vb}: pick another pair (step 2).` : null,
-    qa && qb && cfg.notionalUsd * (1 - (cfg.mode === "farm" ? cfg.sizeJitterPct : 0) / 100) < minNotional ? `Size per side: at least ${usd(minNotional * (cfg.mode === "farm" ? 1 / (1 - cfg.sizeJitterPct / 100) : 1))} (the markets' minimum, size variation included).` : null,
+    qa && qb && cfg.notionalUsd * (1 - (cfg.mode === "farm" ? cfg.sizeJitterPct : 0) / 100) < minNotional ? `Position per side: at least ${usd(minNotional * (cfg.mode === "farm" ? 1 / (1 - cfg.sizeJitterPct / 100) : 1))} (the markets' minimum, size variation included).` : null,
     qa && qb && cfg.leverage > maxLev ? `${maxLev}x is the most both markets allow.` : null,
+    safetyStopPct(cfg) >= liquidationMovePct(cfg.leverage) * 0.85 ? `The safety close (${safetyStopPct(cfg)}%) must come before liquidation (~${Math.round(liquidationMovePct(cfg.leverage))}% at ${cfg.leverage}x): lower it or the leverage.` : null,
     cfg.holdMaxMinutes < cfg.holdMinMinutes || cfg.gapMaxMinutes < cfg.gapMinMinutes ? "Each range in the advanced settings needs its maximum at or above its minimum." : null,
     !(cfg.maxFeesUsd > 0) ? "Set a fee budget (step 3): the bot stops once it is spent." : null,
   ].filter((x): x is string => !!x);
@@ -288,7 +289,10 @@ export function NeutralBotView() {
 
           <Step n={3} title="How much, and how fast">
             <div className="bot-fields bot-fields--main">
-              <Field label="Size per side ($)">
+              <Field label="Margin per venue ($, your money)">
+                <input type="number" min={1} step={1} value={Math.round((cfg.notionalUsd / Math.max(1, cfg.leverage)) * 100) / 100} onChange={(e) => set("notionalUsd", Math.round(num(e.target.value, 0.01) * cfg.leverage * 100) / 100)} />
+              </Field>
+              <Field label={`Position per side ($, margin × ${cfg.leverage}x)`}>
                 <input type="number" min={1} value={cfg.notionalUsd} onChange={(e) => set("notionalUsd", num(e.target.value, 1))} />
               </Field>
               <Field label="Leverage">
@@ -305,19 +309,25 @@ export function NeutralBotView() {
               </Field>
             </div>
             <p className="text-muted bot-hint">
-              {minNotional > 0 && `Minimum ${usd(minNotional)} a side. `}
-              Each venue locks ~{usd(marginPerVenue)} of margin
+              You put ~{usd(cfg.notionalUsd / Math.max(1, cfg.leverage))} of margin on {va} and the same on {vb}; at {cfg.leverage}x each holds a {usd(cfg.notionalUsd)} position (long on one, short on the other), so {usd(cfg.notionalUsd * 4)} of volume per pair opened and closed.
+              {minNotional > 0 && ` Minimum ${usd(minNotional)} a side.`}
               {maxSize !== null && maxSize > 0 && (
                 <>
                   {" "}
-                  · your deposits allow up to {usd(maxSize)} a side{" "}
+                  Your deposits allow up to {usd(maxSize)} a side{" "}
                   <button type="button" className="btn btn-secondary bot-mini" onClick={() => set("notionalUsd", maxSize)}>
                     Use {usd(maxSize)}
                   </button>
                 </>
               )}
-              . At {cfg.leverage}x, a leg is liquidated if the price moves ~{Math.round(90 / Math.max(1, cfg.leverage))}% against it (the other leg gains the same).
             </p>
+            <div className="bot-guard">
+              <strong>Liquidation protection</strong>
+              <span>
+                At {cfg.leverage}x a leg is liquidated if {cfg.base} moves ~{Math.round(liquidationMovePct(cfg.leverage))}% against it. The bot closes both legs once {cfg.base} has moved <strong>±{safetyStopPct(cfg)}%</strong> from the entry, and each leg on Hyperliquid or TxFlow also carries a stop on the venue at {venueStopPct(cfg)}%, which works with this tab closed.
+                {(va === "Extended" || vb === "Extended") && " The Extended leg has no venue stop yet: it relies on the bot, so keep the tab open."}
+              </span>
+            </div>
 
             {cfg.mode === "farm" ? (
               <>
@@ -408,6 +418,9 @@ export function NeutralBotView() {
                 )}
                 <Field label="Max pairs (cycles)">
                   <input type="number" min={1} value={cfg.maxCycles} onChange={(e) => set("maxCycles", Math.round(num(e.target.value, 1)))} />
+                </Field>
+                <Field label="Safety close at (% move, 0 = auto)">
+                  <input type="number" min={0} max={90} step={1} value={cfg.safetyStopPct} onChange={(e) => set("safetyStopPct", Math.min(90, num(e.target.value)))} />
                 </Field>
                 <Field label="Volume target ($, 0 = none)">
                   <input type="number" min={0} value={cfg.volumeTargetUsd} onChange={(e) => set("volumeTargetUsd", num(e.target.value))} />
@@ -515,6 +528,11 @@ export function NeutralBotView() {
                   <>Opens above {cfg.minSpreadAprPct}%/yr of spread, closes under {cfg.exitSpreadAprPct}%/yr.</>
                 )}
                 {view?.heldSpreadAprPct !== null && view?.heldSpreadAprPct !== undefined && ` Spread held now ${pct(view.heldSpreadAprPct)}/yr.`}
+                {(() => {
+                  const e = entryPx(stats.legs);
+                  const m = view && e ? (Object.values(view.marks).reduce((x, y) => x + (y ?? 0), 0) / Math.max(1, Object.values(view.marks).length)) : null;
+                  return e && m ? ` ${cfg.base} ${m >= e ? "+" : "−"}${Math.abs((m / e - 1) * 100).toFixed(1)}% since entry; safety close at ±${safetyStopPct(cfg)}%.` : "";
+                })()}
                 {" "}To change the settings, {running ? "Pause, then " : ""}Stop &amp; close.
               </div>
             </div>
@@ -555,7 +573,7 @@ export function NeutralBotView() {
             <p style={{ marginBottom: 6 }}>
               Stops on its own after {cfg.maxCycles} pairs or {usd(cfg.maxFeesUsd)} of fees{cfg.volumeTargetUsd > 0 ? `, or at ${usd(cfg.volumeTargetUsd)} of volume` : ""}, closing the pair first. A failed second leg is unwound at once; a leg it can&apos;t close stops the bot.
             </p>
-            <p>Market (taker) orders sent by the venues&apos; trading keys from this tab, without a wallet popup each time. Each leg can be liquidated on its own venue if the price moves far: at {cfg.leverage}x, about {Math.round(90 / Math.max(1, cfg.leverage))}% against it.</p>
+            <p>Market (taker) orders sent by the venues&apos; trading keys from this tab, without a wallet popup each time. Each leg can be liquidated on its own venue if the price moves ~{Math.round(liquidationMovePct(cfg.leverage))}% against it at {cfg.leverage}x: the bot closes both at ±{safetyStopPct(cfg)}%, and the Hyperliquid and TxFlow legs carry a venue stop at {venueStopPct(cfg)}%.</p>
           </div>
         }
         confirmLabel="Start trading"

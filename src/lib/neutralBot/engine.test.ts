@@ -11,6 +11,8 @@ import {
   openingSize,
   planNext,
   recordFills,
+  safetyStopPct,
+  venueStopPct,
   type BotConfig,
   type BotObservation,
 } from "@/lib/neutralBot/engine";
@@ -83,6 +85,29 @@ describe("neutral bot decisions", () => {
 
   it("ignores dust", () => {
     expect(decide(cfg, EMPTY_STATS, obs({ Extended: 0.0001, Hyperliquid: 0 }))).toMatchObject({ kind: "open" });
+  });
+});
+
+describe("liquidation guard", () => {
+  const legs = [
+    { venue: "Extended" as const, side: "long" as const, qty: 0.02, entryPx: 2400 },
+    { venue: "Hyperliquid" as const, side: "short" as const, qty: 0.02, entryPx: 2400 },
+  ];
+  it("closes both legs when the price runs half-way to a leg's liquidation, either way", () => {
+    // 3x: liquidation ~30% away, safety close at 17%.
+    expect(safetyStopPct(cfg)).toBe(17);
+    expect(decide(cfg, held({ legs }), obs(pair, { markUsd: 2400 * 1.16 }))).toMatchObject({ kind: "wait" });
+    expect(decide(cfg, held({ legs }), obs(pair, { markUsd: 2400 * 1.18 }))).toMatchObject({ kind: "close", scheduled: true, reason: expect.stringMatching(/safety close/) });
+    expect(decide(cfg, held({ legs }), obs(pair, { markUsd: 2400 * 0.82 }))).toMatchObject({ kind: "close" });
+    expect(decide({ ...cfg, safetyStopPct: 8 }, held({ legs }), obs(pair, { markUsd: 2400 * 1.09 }))).toMatchObject({ kind: "close" });
+  });
+  it("puts the venue stops past the bot's close and short of liquidation", () => {
+    for (const leverage of [1, 2, 3, 5]) {
+      const v = venueStopPct({ ...cfg, leverage });
+      expect(v).toBeGreaterThan(safetyStopPct({ ...cfg, leverage }));
+      expect(v).toBeLessThan(90 / leverage);
+    }
+    expect(venueStopPct(cfg)).toBe(22.5);
   });
 });
 
