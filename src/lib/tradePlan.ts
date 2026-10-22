@@ -93,6 +93,8 @@ export interface TradePlan {
   exitOf?: string;
   /** Planner contract (lib/planner/schema.ts): answers the request, or changes a hard constraint. */
   kind?: "requested" | "alternative";
+  /** What the request is for, as the planner classified it ("farming": points and airdrops from volume and open interest). */
+  objective?: string;
   /** For an alternative: each hard constraint it changes. */
   changes?: string[];
   /** Blocked: something prevents execution now (see blockers). */

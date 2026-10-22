@@ -1,7 +1,6 @@
-import { crossVenueFunding, crossVenueSummary, extendedSummary, marketBase, parseExtendedMarketRows, txflowCrossVenue, txflowCrossVenueSummary, txflowSummary, type ExtendedMarketRow } from "@/lib/perpVenues";
-import { fetchTxflowMarketRows, type TxflowMarketRow } from "@/lib/integrations/txflow-live";
+import { crossVenueFunding, crossVenueSummary, extendedSummary, marketBase, txflowCrossVenue, txflowCrossVenueSummary, txflowSummary } from "@/lib/perpVenues";
+import { fetchExtendedMarkets, fetchFundingRates, fetchTxflowMarkets, type FundingRow } from "@/lib/perpFeed";
 import { extendedQuote, hlQuote, txflowQuote, type MarketQuote, type MarketSnapshot } from "@/lib/planner/markets";
-import { EXTENDED_HOSTS } from "@/lib/integrations/extendedProxy";
 import { NextResponse } from "next/server";
 import { parseOpportunities, type Opportunity } from "@/lib/protocols/opportunities";
 import { aaveYieldSummary, fetchAaveReservesByChain, type AaveReserve } from "@/lib/mcp/aave";
@@ -63,15 +62,6 @@ interface YieldRow {
   kind: string;
 }
 
-interface FundingRow {
-  coin: string;
-  hourlyRate: number;
-  annualizedPct: number;
-  markUsd: number;
-  szDecimals: number;
-  maxLeverage: number;
-  dayVolumeUsd: number;
-}
 
 interface VaultYield {
   name: string;
@@ -244,41 +234,6 @@ async function fetchDefiLlama(): Promise<{ lending: YieldRow[]; staking: YieldRo
 }
 
 /* ---------- Hyperliquid: ALL funding rates ---------- */
-
-async function fetchFundingRates(): Promise<FundingRow[]> {
-  try {
-    const res = await fetch(HYPERLIQUID_INFO, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "metaAndAssetCtxs" }),
-      signal: AbortSignal.timeout(TIMEOUT),
-      cache: "no-store",
-    });
-    if (!res.ok) return [];
-    const raw = await res.json();
-    const universe = raw?.[0]?.universe ?? [];
-    const ctxs = raw?.[1] ?? [];
-    const rates: FundingRow[] = [];
-    for (let i = 0; i < universe.length; i++) {
-      const name = universe[i]?.name;
-      const funding = parseFloat(ctxs[i]?.funding ?? "");
-      if (!name || !Number.isFinite(funding)) continue;
-      rates.push({
-        coin: name,
-        hourlyRate: funding,
-        annualizedPct: funding * 24 * 365 * 100,
-        markUsd: Number(ctxs[i]?.markPx ?? 0),
-        szDecimals: Number(universe[i]?.szDecimals ?? 0),
-        maxLeverage: Number(universe[i]?.maxLeverage ?? 1),
-        dayVolumeUsd: Number(ctxs[i]?.dayNtlVlm ?? 0),
-      });
-    }
-    // Return ALL coins sorted by absolute annualized rate
-    return rates.sort((a, b) => Math.abs(b.annualizedPct) - Math.abs(a.annualizedPct));
-  } catch {
-    return [];
-  }
-}
 
 /* ---------- Protocol vaults ---------- */
 
@@ -618,32 +573,6 @@ function hip3Summary(markets: Hip3Market[]): string {
     );
   }
   return lines.join("\n");
-}
-
-/* ---------- Extended: markets and funding ---------- */
-
-async function fetchExtendedMarkets(): Promise<ExtendedMarketRow[]> {
-  try {
-    const res = await fetch(`${EXTENDED_HOSTS.mainnet}/api/v1/info/markets`, {
-      headers: { "user-agent": "meridian-terminal" },
-      signal: AbortSignal.timeout(TIMEOUT),
-      cache: "no-store",
-    });
-    if (!res.ok) return [];
-    return parseExtendedMarketRows(((await res.json()) as { data?: Parameters<typeof parseExtendedMarketRows>[0] }).data);
-  } catch {
-    return [];
-  }
-}
-
-/* ---------- TxFlow: markets and funding ---------- */
-
-async function fetchTxflowMarkets(): Promise<TxflowMarketRow[]> {
-  try {
-    return await Promise.race([fetchTxflowMarketRows(), new Promise<TxflowMarketRow[]>((resolve) => setTimeout(() => resolve([]), TIMEOUT))]);
-  } catch {
-    return [];
-  }
 }
 
 /* ---------- Hyperliquid spot (UETH, UBTC, USOL) ---------- */

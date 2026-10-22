@@ -12,8 +12,9 @@ import { enforceConformance, namedVenues, type Objective } from "@/lib/planner/s
 import type { VenueBalances } from "@/lib/planner/economics";
 import type { MarketSnapshot } from "@/lib/planner/markets";
 import { completionText } from "@/lib/planner/completion";
-import { capitalShare, sizeQuestion } from "@/lib/planner/sizing";
-import { buildPairStrategy, mentionedBases, pairAssetQuestion, parsePairRequest } from "@/lib/planner/pair";
+import { addPairDeposits, capitalShare, isFarmingIntent, mentionsLeverage, sizeQuestion } from "@/lib/planner/sizing";
+import { buildPairStrategy, mentionedBases, pairAssetQuestion, parsePairRequest, suggestPairStrategies } from "@/lib/planner/pair";
+import type { PerpVenueName } from "@/lib/planner/markets";
 import { cleanHistory, conversationSection, effectiveRequest } from "@/lib/planner/conversation";
 import { marketBase } from "@/lib/perpVenues";
 import { parseAmount } from "@/lib/tradePlan";
@@ -21,7 +22,7 @@ import { ANSWER_SYSTEM, cleanAnswer, marketSection, wantsAnswer, type PriceRow }
 import { chartsSection, fetchDefiCharts, pickCharts, priceMovesChart, type MarketChart } from "@/lib/planner/marketCharts";
 import type { NewsItem } from "@/lib/news";
 import { EXPLAIN_SYSTEM, explainPayload, mergeExplanations, type Explanation } from "@/lib/planner/explain";
-import { hyperliquidMarginUsd, validateAndFixStrategy } from "@/lib/strategyIntegrity";
+import { hyperliquidMarginUsd, validateAndFixStrategy, type LLMStrategy } from "@/lib/strategyIntegrity";
 
 const OBJECTIVES = new Set(["explicit_order", "farming", "neutral_carry", "yield", "hedge", "directional", "move"]);
 
@@ -150,7 +151,7 @@ A strategy described as "delta-neutral", "beta-neutral", "market-neutral", or "n
 - CRITICAL: Supplying a STABLECOIN (USDC, DAI, USDT) to a lending protocol is NOT a long position on any volatile asset. "Supply USDC on Morpho + Short ETH PERP" is a NAKED SHORT, not delta-neutral.
 - A single short perp WITHOUT an offsetting long ON THE SAME ASSET is a DIRECTIONAL SHORT, not delta-neutral. NEVER label it neutral.
 - The long and short legs SHOULD be on different venues when possible (e.g. spot on-chain + perp on Hyperliquid).
-- Ideal delta-neutral for airdrop farming: Buy spot asset → optionally stake for yield (Lido/Aave) → short same asset perp on venue with points/funding.
+- "Maximize volume / OI", "boost volume", "farm points", "airdrop" = farming the perp venues' points and airdrops (objective "farming"): they reward volume and open interest. Best structure: a delta-neutral perp pair across two venues (long one, short the other, same quantity), which makes volume and open interest on both while price moves cancel; the neutral bot in Tools rotates it for more volume. Spot + short perp also works when one venue is not a perp venue.
 
 ### Rule 2: Funding rate harvesting requires spot + perp on the SAME asset
 Earning funding rates (basis trade / cash-and-carry) requires:
@@ -599,7 +600,9 @@ export async function POST(req: NextRequest) {
 
     // Questions the server asks itself, before any plan: which asset for a two-venue neutral position, then how much capital.
     const pairReq = FEATURES.perps ? parsePairRequest(request, yieldContext.markets, { extendedConnected: !!snapshot?.extended?.connected && snapshot.extended.network !== "testnet" }) : null;
-    if (pairReq && !pairReq.base) {
+    const farming = isFarmingIntent(request);
+    // Farming names no asset more often than not ("maximize volume and OI"): the server picks the pairs instead of asking.
+    if (pairReq && !pairReq.base && !farming) {
       const q = pairAssetQuestion(yieldContext.markets, pairReq.venues);
       if (q && answered !== q.question) {
         const [va, vb] = pairReq.venues ?? ["Hyperliquid", "Extended"];
@@ -633,7 +636,20 @@ export async function POST(req: NextRequest) {
     const userMessage = sections.join("\n\n---\n\n");
 
     // The two-venue neutral position on a named asset is built by the server (lib/planner/pair.ts), not proposed by the model.
-    const serverPair = pairReq?.base && yieldContext.markets ? buildPairStrategy({ ...pairReq, base: pairReq.base }, yieldContext.markets) : null;
+    const serverPair = pairReq?.base && yieldContext.markets ? buildPairStrategy({ ...pairReq, base: pairReq.base, leverage: pairReq.leverage ?? (farming ? SIZING_POLICY.defaultLeverage.farming : undefined) }, yieldContext.markets) : null;
+    // A neutral or farming goal with no asset named: the best pairs on the venues this wallet trades, from live funding.
+    const neutralGoal = farming || /\b(neutral|neutre|beta|delta|pair|paire)\b/i.test(request);
+    const tradableVenues: PerpVenueName[] = [
+      ...(snapshot?.hyperliquid ? (["Hyperliquid"] as const) : []),
+      ...(snapshot?.extended?.connected && snapshot.extended.network !== "testnet" ? (["Extended"] as const) : []),
+      ...(snapshot?.txflow && snapshot.txflow.availableUsd > 0 ? (["TxFlow"] as const) : []),
+    ];
+    const named = namedVenues(request);
+    const suggestVenues = pairReq?.venues ?? (named.length >= 2 ? named : tradableVenues);
+    const suggested =
+      !serverPair && FEATURES.perps && neutralGoal && yieldContext.markets && suggestVenues.length >= 2 && (pairReq ? !pairReq.base : named.length === 0 && mentionedBases(request, yieldContext.markets).length === 0)
+        ? suggestPairStrategies(yieldContext.markets, suggestVenues, farming ? "farming" : "neutral_carry", pairReq?.leverage ?? (farming ? SIZING_POLICY.defaultLeverage.farming : undefined))
+        : [];
     // A dollar size is the position per leg (as for a single order); without one the server sizes from the free margin below.
     const pairSize = parseAmount(request);
     if (serverPair && pairSize !== undefined) serverPair.legs = serverPair.legs.map((l) => ({ ...l, sizeUsd: pairSize }));
@@ -642,12 +658,21 @@ export async function POST(req: NextRequest) {
     let text: string;
     let usedModel = model;
     if (serverPair) {
-      const goal = /\b(volume|farm\w*|points?)\b/i.test(request) ? "farming" : "neutral_carry";
+      const goal = farming || /\bvolume\b/i.test(request) ? "farming" : "neutral_carry";
       text = JSON.stringify({
         decision: "build",
         objective: goal,
-        understanding: `Neutral position on ${pairReq!.base}: long on one venue, short the same quantity on the other, between ${(pairReq!.venues ?? ["Hyperliquid", "Extended"]).join(" and ")}.`,
+        understanding: `${goal === "farming" ? "Farming the venues' points and airdrops with volume and open interest, kept delta-neutral: " : "Neutral position: "}${pairReq!.base} long on one venue, short the same quantity on the other, between ${(pairReq!.venues ?? ["Hyperliquid", "Extended"]).join(" and ")}.`,
         strategies: [serverPair],
+      });
+    } else if (suggested.length > 0) {
+      text = JSON.stringify({
+        decision: "build",
+        objective: farming ? "farming" : "neutral_carry",
+        understanding: farming
+          ? `You want to farm the venues' points and airdrops: as much volume and open interest as possible for the fees, with no price exposure. Best pairs now across ${suggestVenues.join(", ")}, long where funding is cheapest.`
+          : `A delta-neutral pair: long on one venue, short the same quantity on another. Best funding spreads now across ${suggestVenues.join(", ")}.`,
+        strategies: suggested,
       });
     } else try {
       ({ text, model: usedModel } = await completeWithFallback(
@@ -728,6 +753,8 @@ export async function POST(req: NextRequest) {
       txflowFreeUsd: snapshot?.txflow ? snapshot.txflow.availableUsd : null,
       walletDeployableUsd: snapshot?.assets?.length ? deployableUsd(snapshot.assets) : 0,
     };
+    // Pairs the server built fund their empty venue from the wallet (the model writes its own Deposit legs).
+    if (serverPair || suggested.length > 0) strategies = strategies.map((st: LLMStrategy) => addPairDeposits(st, balances));
     const conformance = enforceConformance(strategies, objective, {
       order: explicit,
       namedVenues: namedVenues(request),
@@ -736,6 +763,7 @@ export async function POST(req: NextRequest) {
       balances,
       // No dollar size: the share the user chose (or the policy's), applied by the server to the free margin.
       sizeShare: parseAmount(request) === undefined && !explicit?.sizeUsd ? (capitalShare(request) ?? SIZING_POLICY.maxUtilization) : undefined,
+      explicitLeverage: !!explicit?.leverage || mentionsLeverage(request),
       now: Date.now(),
     });
     if (conformance.notes.length) console.info("[parse-intent] conformance:", conformance.notes.join(" | "));

@@ -137,3 +137,24 @@ describe("pairs with TxFlow", () => {
     expect(unknown.blockers?.join(" ")).toMatch(/TxFlow/);
   });
 });
+
+describe("pairs the server suggests when no asset is named", () => {
+  it("picks the cheapest volume for farming, one asset per plan, at the farming leverage", async () => {
+    const { suggestPairStrategies } = await import("./pair");
+    const { extendedQuote, hlQuote } = await import("./markets");
+    const h = (apr: number) => apr / 100 / 8760;
+    const markets = {
+      fetchedAt: "",
+      quotes: [
+        hlQuote({ market: "ETH", base: "ETH", markUsd: 2400, fundingHourly: h(11), szDecimals: 4, maxLeverage: 25, dayVolumeUsd: 9e8 }),
+        extendedQuote({ market: "ETH-USD", base: "ETH", markUsd: 2400, fundingHourly: h(-2), sizeStep: 0.001, minQty: 0.01, maxLeverage: 50, dayVolumeUsd: 8e7 }),
+        hlQuote({ market: "BTC", base: "BTC", markUsd: 90000, fundingHourly: h(8), szDecimals: 5, maxLeverage: 40, dayVolumeUsd: 2e9 }),
+        extendedQuote({ market: "BTC-USD", base: "BTC", markUsd: 90000, fundingHourly: h(7), sizeStep: 0.0001, minQty: 0.0001, maxLeverage: 50, dayVolumeUsd: 3e8 }),
+      ],
+    };
+    const out = suggestPairStrategies(markets, ["Hyperliquid", "Extended"], "farming", 3);
+    expect(out.map((s) => s.name)).toEqual(["ETH beta-neutral: long Extended, short Hyperliquid", "BTC beta-neutral: long Extended, short Hyperliquid"]);
+    expect(out[0].legs?.every((l) => l.leverage === 3)).toBe(true);
+    expect(out[0].summary).toMatch(/neutral bot/);
+  });
+});

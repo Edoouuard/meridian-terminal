@@ -31,6 +31,7 @@ import { HyperliquidWithdrawButton } from "@/components/execute/HyperliquidWithd
 import { HlpDepositButton, HypeStakeButton } from "@/components/execute/HyperliquidEarnButtons";
 import { ExtendedDepositButton } from "@/components/execute/ExtendedDepositButton";
 import { PerpPairButton } from "@/components/execute/PerpPairButton";
+import { RunAsBotButton } from "@/components/execute/RunAsBotButton";
 import { TxflowDepositButton, TxflowPerpExecuteButton, TxflowWithdrawButton } from "@/components/execute/TxflowButtons";
 import { ExtendedPerpExecuteButton, LifiPerpExecuteButton, PerpExecuteButton } from "@/components/execute/PerpExecuteButtons";
 import { LidoUnstakeButton, MorphoExecuteButton, MorphoWithdrawButton, PendleExecuteButton, SwapExecuteButton } from "@/components/execute/VenueExecuteButtons";
@@ -148,6 +149,7 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
         </div>
       )}
       {pairSeq && pairUntouched && <PerpPairButton plan={plan} seq={pairSeq} prices={prices} onFilled={(i, ref) => recordFill(i)(ref)} />}
+      {pairSeq && <RunAsBotButton plan={plan} seq={pairSeq} />}
       {plan.fundingNotes && plan.fundingNotes.length > 0 && (
         <div className="risk-note" style={{ border: "1px solid var(--color-divider)" }}>
           <div className="risk-note__label" style={{ color: "var(--color-neutral-500)" }}>Fitted to your wallet</div>

@@ -12,6 +12,7 @@ import type { LLMStrategy } from "@/lib/strategyIntegrity";
 import { marketBase } from "@/lib/perpVenues";
 import type { MarketQuote, MarketSnapshot, PerpVenueName } from "@/lib/planner/markets";
 import type { PlannerClarify } from "@/lib/planner/clarify";
+import { rankForCarry, rankForFarming, scanPairs } from "@/lib/neutralBot/opportunities";
 
 type Venue = PerpVenueName;
 const DEFAULT_VENUES: [Venue, Venue] = ["Hyperliquid", "Extended"];
@@ -142,4 +143,34 @@ export function pairAssetQuestion(markets: MarketSnapshot | undefined, venues: [
     .slice(0, 4);
   if (ranked.length < 2) return null;
   return { question: "Which asset should the neutral position use?", why: `Ranked by today's funding gap between ${venues[0]} and ${venues[1]} (listed on both).`, options: ranked.map((x) => `${x.b} (gap ${x.spread.toFixed(1)}%/yr)`) };
+}
+
+/**
+ * The pairs the server proposes when the request names no asset: the best
+ * ones on the venues this wallet trades, from the live funding
+ * (lib/neutralBot/opportunities.ts) — cheapest volume for a farming goal,
+ * widest spread that pays its fees back for carry — one per asset.
+ */
+export function suggestPairStrategies(
+  markets: MarketSnapshot,
+  venues: Venue[],
+  goal: "farming" | "neutral_carry",
+  leverage: number | undefined,
+  count = 2,
+): LLMStrategy[] {
+  const pairs = scanPairs(markets, { venues });
+  const ranked = goal === "farming" ? rankForFarming(pairs) : rankForCarry(pairs).length ? rankForCarry(pairs) : rankForFarming(pairs);
+  const out: LLMStrategy[] = [];
+  const seen = new Set<string>();
+  for (const p of ranked) {
+    if (out.length >= count || seen.has(p.base)) continue;
+    const s = buildPairStrategy({ base: p.base, venues: [p.long.venue, p.short.venue], leverage }, markets);
+    if (!s) continue;
+    seen.add(p.base);
+    out.push({
+      ...s,
+      summary: `${s.summary} ${goal === "farming" ? `Picked for the cheapest volume across ${venues.join(", ")} today` : `Picked for the funding spread (${p.spreadAprPct.toFixed(1)}%/yr)`}; automate it with the neutral bot (Tools) to keep it rotating.`,
+    });
+  }
+  return out;
 }

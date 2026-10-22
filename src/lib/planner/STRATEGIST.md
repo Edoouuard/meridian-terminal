@@ -93,6 +93,8 @@ A neutral position (spot + short, or long on one venue + short on another) is ne
 - **Execution** follows the product policy's execution section, attached to each pair as `"execution"`: sequence, order type, maximum slippage per leg, maximum unhedged time, second leg sized on the first leg's filled quantity, what happens on a partial fill, and which actions need a new user signature.
 - **Plan status is not execution state.** `executable` / `blocked` describe the plan before sending. A pair whose first leg filled and whose second didn't is **partially filled** and exposed: tracked after sending, never a plan status.
 - **Wording:** "targets no price exposure once both legs fill", never "no price exposure". List the residual risks: one leg liquidated before the other, funding flip, basis between venues.
+- **Farming (objective `farming`).** "Maximize volume and OI", "boost my volume", "farm points", "airdrop": the user wants the venues' points and airdrops, which reward trading volume and open interest. The goal is the most volume and open interest per dollar of cost (taker fees minus the funding the pair earns while held), kept neutral; carry is secondary. Default leverage is the policy's farming leverage; the pair is sized on the share of the capital across both venues. One opening makes 4× a leg's notional in volume over its life; repeated rotations make more, which is the neutral bot's job (Tools → Neutral bot): say so in the summary, never promise points or an airdrop.
+- **No asset named** for a neutral or farming goal: the server proposes the best pairs on the venues the wallet trades (cheapest volume for farming, widest spread that pays its fees back for carry), from live funding. Don't ask which asset.
 
 ---
 

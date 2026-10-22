@@ -50,10 +50,11 @@ describe("perp legs sized from the free margin", () => {
   };
   const balances = { hyperliquidFreeUsd: 21.79, extendedFreeUsd: 21, walletDeployableUsd: 10 };
 
-  it("puts the share of the smaller venue's free margin, at the leverage, on both legs", () => {
-    // (21 − $1 reserve) ÷ 1.03 × 10 = 194.17 on both.
+  it("spends the share of both venues' margin on the pair, half a leg, at the leverage", () => {
+    // 100%: capped by the smaller venue, (21 − $1 reserve) ÷ 1.03 × 10 = 194.17 on both.
     expect(sizePerpLegs(pair, [1, 0], balances, 1).legs.map((l) => l.sizeUsd)).toEqual([194.17, 194.17]);
-    expect(sizePerpLegs(pair, [1, 0], balances, 0.5).legs.map((l) => l.sizeUsd)).toEqual([97.08, 97.08]);
+    // 50%: half of ($20.79 + $20), $10.20 a leg ÷ 1.03 × 10 = 99.00.
+    expect(sizePerpLegs(pair, [1, 0], balances, 0.5).legs.map((l) => l.sizeUsd)).toEqual([99, 99]);
   });
 
   it("keeps the model's sizes when a balance is unknown", () => {
@@ -70,5 +71,23 @@ describe("a vault deposit on a perp venue (owner's test: \"put 10$ into Hyperliq
     expect(sizeQuestion({ hyperliquidFreeUsd: 37.83, extendedFreeUsd: 7.54, thesis: "put some money into Hyperliquid's vault" })).toBeNull();
     // A trade on the venue still gets the question.
     expect(sizeQuestion({ hyperliquidFreeUsd: 37.83, extendedFreeUsd: 7.54, thesis: "short ETH on Hyperliquid" })).not.toBeNull();
+  });
+});
+
+describe("farming intent (volume / OI means points and airdrops)", () => {
+  it("reads the ways users ask to farm", async () => {
+    const { isFarmingIntent, mentionsLeverage } = await import("./sizing");
+    for (const t of [
+      "open a beta neutral postion, maximize volume and OI — 25% of my available capital",
+      "boost my volume on Extended",
+      "farm points on Hyperliquid and TxFlow",
+      "je veux maximiser mon volume et mon open interest",
+      "airdrop farming delta neutral",
+      "max volume, neutral",
+    ]) expect(isFarmingIntent(t)).toBe(true);
+    for (const t of ["beta neutral ETH between Hyperliquid and Extended", "short ETH 2x", "what is the 24h volume of ETH?"]) expect(isFarmingIntent(t)).toBe(false);
+    expect(mentionsLeverage("beta neutral ETH 5x")).toBe(true);
+    expect(mentionsLeverage("levier 3")).toBe(true);
+    expect(mentionsLeverage("maximize volume and OI — 25% of my available capital")).toBe(false);
   });
 });

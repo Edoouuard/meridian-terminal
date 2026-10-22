@@ -2,16 +2,17 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useAccount, useSignTypedData } from "wagmi";
+import { useAccount } from "wagmi";
 import type { Address } from "viem";
 import type { TradeLeg, TradePlan } from "@/lib/tradePlan";
+import type { PerpVenueName } from "@/lib/planner/markets";
 import { fmtUsd } from "@/lib/data";
 import { runPerpPair, type PairFill, type PairRun, type PairStep, type PairVenue } from "@/lib/perpPair";
-import { fetchPerpAccount, hyperliquidEnv, marginNeededUsd, perpMarketOrder, withAgent, type WalletSign } from "@/lib/integrations/hyperliquidTrade";
-import { executeExtendedPerp, fetchExtendedBalance } from "@/lib/integrations/extended-live";
-import { repairExtendedVault, useExtendedAccount } from "@/hooks/useExtendedAccount";
-import { TXFLOW_NETWORK, fetchTxflowAccount } from "@/lib/integrations/txflow-live";
-import { txflowMarketOrder, withTxflowAgent, type TxflowWalletSign } from "@/lib/integrations/txflowTrade";
+import { fetchPerpAccount, hyperliquidEnv, marginNeededUsd } from "@/lib/integrations/hyperliquidTrade";
+import { fetchExtendedBalance } from "@/lib/integrations/extended-live";
+import { useExtendedAccount } from "@/hooks/useExtendedAccount";
+import { usePerpTrader } from "@/hooks/usePerpTrader";
+import { fetchTxflowAccount } from "@/lib/integrations/txflow-live";
 import { useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
 import type { PriceEntry } from "@/lib/quote";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -24,7 +25,7 @@ const isTx = (l: TradeLeg) => /txflow/i.test(l.protocol || "");
 const isLong = (l: TradeLeg) => /^long$/i.test(l.side.trim());
 const hlCoin = (l: TradeLeg) => (l.asset || "").replace(/[-\s]?PERP$/i, "").trim().toUpperCase();
 const extSymbol = (l: TradeLeg) => (l.asset || "").replace(/PERP$/i, "").trim() || "ETH";
-const venueName = (l: TradeLeg) => (isHl(l) ? "Hyperliquid" : isTx(l) ? "TxFlow" : "Extended");
+const venueName = (l: TradeLeg): PerpVenueName => (isHl(l) ? "Hyperliquid" : isTx(l) ? "TxFlow" : "Extended");
 const lev = (l: TradeLeg) => Math.max(1, Math.round(l.leverage ?? 1));
 const declined = (msg: string) => (/user rejected|denied/i.test(msg) ? "Signature declined in the wallet." : msg.split("\n")[0]);
 
@@ -47,7 +48,7 @@ export function PerpPairButton({
   onFilled: (legIndex: number, ref: string) => void;
 }) {
   const { address, isConnected, chainId } = useAccount();
-  const { signTypedDataAsync } = useSignTypedData();
+  const trader = usePerpTrader(prices);
   const signer = useExtendedAccount();
   const envName = useSharedHlEnv();
   const env = hyperliquidEnv(envName === "testnet");
@@ -86,32 +87,9 @@ export function PerpPairButton({
     })
     .filter(Boolean);
 
-  const walletSign: WalletSign = (td) => signTypedDataAsync(td as Parameters<typeof signTypedDataAsync>[0]);
-  const txWalletSign: TxflowWalletSign = (td) => signTypedDataAsync(td as Parameters<typeof signTypedDataAsync>[0]);
-  const hlFill = (coin: string, o: { ok: boolean; filled?: { totalSz: number; avgPx: number }; error?: string }): PairFill =>
-    o.ok && o.filled ? { ok: true, filledQty: o.filled.totalSz, avgPx: o.filled.avgPx, ref: `hyperliquid:${coin}:${o.filled.totalSz}@${o.filled.avgPx}` } : { ok: false, error: o.error ?? "The order didn't fill (no liquidity within 5% of the mid)." };
-
-  const order = async (i: number, isBuy: boolean, qty: number | undefined, reduceOnly: boolean): Promise<PairFill> => {
+  const order = (i: number, isBuy: boolean, qty: number | undefined, reduceOnly: boolean): Promise<PairFill> => {
     const l = plan.legs[i];
-    if (isHl(l)) {
-      const coin = hlCoin(l);
-      const out = await withAgent({ user: address, env, walletSign, walletChainId: chainId }, (key) =>
-        perpMarketOrder(env, key, { coin, isBuy, sizeUsd: reduceOnly ? 0 : (l.sizeUsd ?? 0), coinQty: qty, leverage: lev(l), reduceOnly, user: address }),
-      );
-      return hlFill(coin, out);
-    }
-    if (isTx(l)) {
-      const out = await withTxflowAgent({ user: address, walletSign: txWalletSign, walletChainId: chainId }, (key) =>
-        txflowMarketOrder(TXFLOW_NETWORK, key, { user: address, symbol: hlCoin(l), isBuy, sizeUsd: reduceOnly ? 0 : (l.sizeUsd ?? 0), coinQty: qty, leverage: lev(l), reduceOnly }),
-      );
-      return out.ok && out.filled
-        ? { ok: true, filledQty: out.filled.totalSz, avgPx: out.filled.avgPx, ref: `txflow:${out.market?.name ?? hlCoin(l)}:${out.filled.totalSz}@${out.filled.avgPx}` }
-        : { ok: false, error: out.error ?? "TxFlow didn't report a fill." };
-    }
-    const r = await executeExtendedPerp({ signer: signer!, symbol: extSymbol(l), isBuy, sizeUsd: l.sizeUsd ?? 0, prices, leverage: lev(l), reduceOnly, qtyOverride: qty });
-    if (r.repairedVaultId) repairExtendedVault(r.repairedVaultId);
-    const filled = Number(r.filledQty);
-    return r.ok && filled > 0 ? { ok: true, filledQty: filled, avgPx: Number(r.avgPrice) || undefined, ref: `extended:${r.market}:${r.filledQty}@${r.avgPrice ?? ""}` } : { ok: false, error: r.error ?? "Extended didn't report a fill." };
+    return trader.order(venueName(l), { market: isHl(l) || isTx(l) ? hlCoin(l) : extSymbol(l), isBuy, sizeUsd: l.sizeUsd ?? 0, qty, leverage: lev(l), reduceOnly });
   };
 
   const venue: PairVenue = {
@@ -124,14 +102,8 @@ export function PerpPairButton({
     setRun(null);
     try {
       // The trading-key approval (once) happens before anything trades, never between the two legs.
-      if (hlLeg) {
-        setStep("approving");
-        await withAgent({ user: address!, env, walletSign, walletChainId: chainId! }, async () => ({ ok: true }));
-      }
-      if (txLeg) {
-        setStep("approving");
-        await withTxflowAgent({ user: address!, walletSign: txWalletSign, walletChainId: chainId! }, async () => ({ ok: true }));
-      }
+      setStep("approving");
+      await trader.prepare(legs.map(venueName));
       const out = await runPerpPair(seq, venue, setStep);
       setRun(out);
       if (out.status === "neutral") {
