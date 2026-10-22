@@ -21,6 +21,8 @@ import { PerpVenuesSummary, VENUE_ANCHOR } from "@/components/PerpVenuesSummary"
 import { NeutralBotPanel } from "@/components/NeutralBotPanel";
 import { OPEN_BOT_EVENT, OPEN_TOOLS_EVENT, SHOW_BOT_EVENT } from "@/lib/neutralBot/bus";
 import { NeutralBotHost } from "@/components/NeutralBotHost";
+import { executableCoverage } from "@/lib/coverage";
+
 import { NeutralBotView } from "@/components/NeutralBotView";
 import { BotStatusChip } from "@/components/BotStatusChip";
 import { LifiPerpsConnectPanel } from "@/components/LifiPerpsConnectPanel";
@@ -57,6 +59,9 @@ const LIVE_TRACKED_PROTOCOLS = /aave|spark|compound|morpho|fluid|yearn|sky|ethen
 
 const CHAIN_NAMES = SUPPORTED_CHAINS.map((c) => CHAIN_LABEL[c.id]).join(", ");
 import { ThreadItem, fmtUsd } from "@/lib/data";
+
+/** Protocols Meridian signs into, across its chains (lib/coverage.ts). */
+const EXECUTABLE_PROTOCOLS = executableCoverage().protocols.length;
 
 
 function formatAssetAmount(asset: LiveAsset): string {
@@ -356,7 +361,7 @@ export default function TerminalApp() {
           <span className="status-pill__dot" aria-hidden="true" />
           {isConnected ? `Connected · ${chain?.name ?? "wallet"}` : "Not connected"}
           <span className="status-pill__sep" aria-hidden="true">·</span>
-          {ACTIVE_CHAIN_IDS.length} chains
+          {ACTIVE_CHAIN_IDS.length} chains · {EXECUTABLE_PROTOCOLS} protocols
         </span>
         <span className="topbar__spacer" />
         {FEATURES.perps && <BotStatusChip onOpen={() => setCenterView("bot")} />}

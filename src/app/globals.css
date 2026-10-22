@@ -753,6 +753,22 @@ kbd {
   color: var(--color-text);
   white-space: nowrap;
 }
+.protocol-pill--exec {
+  background: color-mix(in srgb, var(--risk-good) 14%, transparent);
+}
+.coverage-summary {
+  display: flex;
+  gap: 14px;
+  margin-top: var(--space-2);
+  font-size: 11px;
+  color: color-mix(in srgb, var(--color-text) 60%, transparent);
+}
+.coverage-summary strong {
+  font-size: 18px;
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+  margin-right: 2px;
+}
 .scard__protocols {
   display: flex;
   flex-wrap: wrap;

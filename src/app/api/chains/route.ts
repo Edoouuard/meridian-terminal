@@ -1,20 +1,20 @@
 import { NextResponse } from "next/server";
+import { ACTIVE_CHAIN_IDS, CHAIN_LABEL } from "@/lib/onchain";
+import { LLAMA_CHAIN_ID } from "@/lib/protocols/registry";
+import { FEATURES } from "@/lib/features";
 
 export const revalidate = 300;
 
 /**
- * Target chains Meridian tracks -> their DefiLlama display name.
- * Hyperliquid is omitted from DefiLlama chain TVL in most datasets; if absent it
- * is simply not returned (callers fall back to the static registry).
+ * The chains Meridian executes on (lib/onchain.ts ACTIVE_CHAIN_IDS), each with
+ * its DefiLlama display name (HyperEVM is "Hyperliquid L1" there), plus
+ * Solana when its panel is on. The chain id is fixed here, never read back
+ * from DefiLlama, so the Chains tab can join each row to Meridian's coverage.
  */
-const TARGET_CHAINS: { id: string; name: string; ll: string }[] = [
-  { id: "ethereum", name: "Ethereum", ll: "Ethereum" },
-  { id: "base", name: "Base", ll: "Base" },
-  { id: "arbitrum", name: "Arbitrum", ll: "Arbitrum" },
-  { id: "optimism", name: "Optimism", ll: "Optimism" },
-  { id: "polygon", name: "Polygon", ll: "Polygon" },
-  { id: "avalanche", name: "Avalanche", ll: "Avalanche" },
-  { id: "solana", name: "Solana", ll: "Solana" },
+const LLAMA_NAME: Record<number, string> = Object.fromEntries(Object.entries(LLAMA_CHAIN_ID).map(([name, id]) => [id, name]));
+const TARGET_CHAINS: { id: string; name: string; ll: string; chainId?: number }[] = [
+  ...ACTIVE_CHAIN_IDS.map((chainId) => ({ id: String(chainId), name: CHAIN_LABEL[chainId] ?? String(chainId), ll: LLAMA_NAME[chainId] ?? CHAIN_LABEL[chainId] ?? "", chainId })),
+  ...(FEATURES.solana ? [{ id: "solana", name: "Solana", ll: "Solana" }] : []),
 ];
 
 /** Exclude centralized exchanges / wrapped-token placeholders from "biggest protocols". */
@@ -55,7 +55,7 @@ const MAX_STALE_MS = 30 * 60_000;
 export async function GET() {
   const staticFallback = () => {
     // Build a name-only fallback from the static registry (kept dependency-free).
-    return TARGET_CHAINS.map((c) => ({ id: c.id, name: c.name, topProtocols: [], live: false }));
+    return TARGET_CHAINS.map((c) => ({ id: c.id, name: c.name, chainId: c.chainId, topProtocols: [], live: false }));
   };
 
   const fallback = (reason: string) => {
@@ -104,7 +104,7 @@ export async function GET() {
       return {
         id: c.id,
         name: c.name,
-        chainId: meta?.chainId,
+        chainId: c.chainId ?? meta?.chainId,
         tvlUsd: meta?.tvl ? Math.round(meta.tvl) : undefined,
         topProtocols: top,
         live: true,

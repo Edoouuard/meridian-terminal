@@ -24,6 +24,8 @@ export const RHINO_ARBITRUM_BRIDGE: Address = "0x10417734001162Ea139e8b044DFe28D
 export const EXTENDED_DEPOSIT_TOKEN: Address = ARBITRUM_USDC;
 /** Smallest deposit Meridian sends: below this the bridge fee eats most of it. */
 export const EXTENDED_MIN_DEPOSIT_USD = 10;
+/** Extended's own app: the fallback when its bridge API fails (same wallet, same account). */
+export const EXTENDED_APP_URL = "https://app.extended.exchange/";
 
 export const RHINO_DEPOSIT_ABI = [
   {
@@ -48,6 +50,20 @@ export interface BridgeQuote {
 
 type FetchImpl = typeof fetch;
 
+/** An error Extended's bridge answered, with its HTTP status (5xx: their side, worth a retry). */
+export class ExtendedBridgeError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = "ExtendedBridgeError";
+  }
+}
+
+/** Extended's server failed, not the request: the same quote may work in another documented form or a minute later. */
+export const isBridgeServerError = (e: unknown): boolean => e instanceof ExtendedBridgeError && e.status >= 500;
+
 async function call(signer: ExtendedSigner, method: "GET" | "POST", path: string, fetchImpl: FetchImpl): Promise<unknown> {
   const res = await fetchImpl(`${extendedRestUrls()[signer.network]}${path}`, { method, headers: { "x-api-key": signer.apiKey } });
   const text = await res.text();
@@ -59,7 +75,7 @@ async function call(signer: ExtendedSigner, method: "GET" | "POST", path: string
   }
   const message = (body as { error?: { message?: unknown } } | null)?.error?.message;
   if (!res.ok || (body as { status?: unknown } | null)?.status === "ERROR") {
-    throw new Error(typeof message === "string" && message ? message : `Extended bridge: HTTP ${res.status}`);
+    throw new ExtendedBridgeError(typeof message === "string" && message ? message : `Extended bridge: HTTP ${res.status}`, res.status);
   }
   // Some bridge endpoints answer without the usual { status, data } envelope.
   return (body as { data?: unknown } | null)?.data ?? body;
@@ -102,11 +118,41 @@ export async function fetchArbitrumBridge(signer: ExtendedSigner, fetchImpl: Fet
   return arbitrumBridgeFromConfig(await call(signer, "GET", "/user/bridge/config", fetchImpl));
 }
 
+/**
+ * The quote request in the forms Extended's docs allow, tried in order while
+ * Extended answers with a server error (owner report 2026-10-22: HTTP 500,
+ * code 1006, on the documented form): `asset` is optional, and the amount is
+ * a number. The quoted amount is the one deposited, so a whole-dollar form
+ * quotes (and later deposits) the whole dollars.
+ */
+export function quoteAttempts(amountUsd: number): { query: string; amountUsd: number }[] {
+  const cents = (Math.floor(amountUsd * 100) / 100).toFixed(2);
+  const whole = Math.floor(amountUsd);
+  const base = "/user/bridge/quote?chainIn=ARB&chainOut=STRK";
+  return [
+    { query: `${base}&amount=${cents}&asset=USD`, amountUsd: Number(cents) },
+    { query: `${base}&amount=${cents}`, amountUsd: Number(cents) },
+    { query: `${base}&amount=${whole}&asset=USD`, amountUsd: whole },
+    { query: `${base}&amount=${whole}&asset=USDC`, amountUsd: whole },
+  ].filter((a, i, all) => a.amountUsd >= EXTENDED_MIN_DEPOSIT_USD && all.findIndex((b) => b.query === a.query) === i);
+}
+
 export async function quoteArbitrumDeposit(signer: ExtendedSigner, amountUsd: number, fetchImpl: FetchImpl = fetch): Promise<BridgeQuote> {
   if (!(amountUsd >= EXTENDED_MIN_DEPOSIT_USD)) throw new Error(`Deposits to Extended start at $${EXTENDED_MIN_DEPOSIT_USD}.`);
-  const amount = (Math.floor(amountUsd * 100) / 100).toFixed(2);
-  const raw = await call(signer, "GET", `/user/bridge/quote?chainIn=ARB&chainOut=STRK&amount=${amount}&asset=USD`, fetchImpl);
-  return parseQuote(raw, Number(amount));
+  let last: unknown = null;
+  for (const a of quoteAttempts(amountUsd)) {
+    try {
+      return parseQuote(await call(signer, "GET", a.query, fetchImpl), a.amountUsd);
+    } catch (e) {
+      // A refusal (geo-restriction, unsupported asset, bad amount) is an answer: only a server error tries the next form.
+      if (!isBridgeServerError(e)) throw e;
+      last = e;
+    }
+  }
+  throw new ExtendedBridgeError(
+    `Extended's bridge (Rhino.fi) failed on its side for this quote (${last instanceof Error ? last.message : "server error"}). Nothing was sent. Try again in a minute, or deposit with this same wallet on app.extended.exchange: Meridian reads the balance as soon as it lands.`,
+    last instanceof ExtendedBridgeError ? last.status : 500,
+  );
 }
 
 export async function commitQuote(signer: ExtendedSigner, quoteId: string, fetchImpl: FetchImpl = fetch): Promise<void> {
