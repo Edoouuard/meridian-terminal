@@ -119,10 +119,23 @@ describe("bridge quote when Extended's server fails (owner report: HTTP 500, cod
   it("says what to do when every form fails, and never retries a refusal", async () => {
     const { quoteArbitrumDeposit } = await import("./extendedBridge");
     const all500 = vi.fn(async () => err500());
-    await expect(quoteArbitrumDeposit(signer, 20, all500 as never)).rejects.toThrow(/failed on its side .*Nothing was sent.*extended\.exchange/);
-    expect(all500).toHaveBeenCalledTimes(4);
+    await expect(quoteArbitrumDeposit(signer, 20, all500 as never)).rejects.toThrow(/failing .*Arc.*Nothing was sent.*app\.extended\.exchange/);
+    expect(all500).toHaveBeenCalledTimes(3);
     const refused = vi.fn(async () => new Response(JSON.stringify({ status: "ERROR", error: { message: "AssetIsNotSupported" } }), { status: 400 }));
     await expect(quoteArbitrumDeposit(signer, 20, refused as never)).rejects.toThrow("AssetIsNotSupported");
     expect(refused).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a refusal after Extended's server error (owner report: 'Asset not found' shown)", () => {
+  it("reports Extended's outage, not the later refusal", async () => {
+    const { quoteArbitrumDeposit } = await import("./extendedBridge");
+    let n = 0;
+    const fetchImpl = vi.fn(async () =>
+      ++n === 1
+        ? new Response(JSON.stringify({ status: "ERROR", error: { code: 1006, message: "Internal Server Error" } }), { status: 500 })
+        : new Response(JSON.stringify({ status: "ERROR", error: { code: 1000, message: "Asset not found" } }), { status: 400 }),
+    );
+    await expect(quoteArbitrumDeposit({ network: "mainnet", apiKey: "k" } as never, 20, fetchImpl as never)).rejects.toThrow(/Internal Server Error/);
   });
 });
