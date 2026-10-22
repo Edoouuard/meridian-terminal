@@ -16,7 +16,7 @@ import { marketBase } from "@/lib/perpVenues";
 import { EXECUTION_POLICY, SIZING_POLICY } from "@/lib/planner/policy";
 import type { MarketSnapshot, PerpVenueName } from "@/lib/planner/markets";
 import { computeVenueEconomics, findQuote, isVenuePlan, type Economics, type VenueBalances } from "@/lib/planner/economics";
-import { sizePerpLegs } from "@/lib/planner/sizing";
+import { fitPairToMinimums, sizePerpLegs } from "@/lib/planner/sizing";
 
 export type { Economics } from "@/lib/planner/economics";
 
@@ -72,6 +72,8 @@ export interface ConformanceContext {
   balances?: VenueBalances;
   /** Share of the free margin perp legs use (lib/planner/sizing.ts); undefined = the model's sizes stand (the user gave a dollar size). */
   sizeShare?: number;
+  /** The user named a leverage: the server never raises it to clear a market minimum. */
+  explicitLeverage?: boolean;
   now?: number;
 }
 
@@ -295,6 +297,11 @@ export function enforceConformance(raw: LLMStrategy[], objective: Objective | un
     // Venue plans: the server sizes the perp legs from the free margin, and their return lives in the economics, not in an APY.
     if (isVenuePlan(s)) {
       if (ctx.sizeShare !== undefined && ctx.balances) s = sizePerpLegs(s, pair?.legs, ctx.balances, ctx.sizeShare);
+      if (ctx.markets && !ctx.explicitLeverage) {
+        const fit = fitPairToMinimums(s, pair?.legs, ctx.markets.quotes);
+        if (fit.raisedTo) notes.push(`"${s.name}" leverage raised to ${fit.raisedTo}x to clear the market minimums`);
+        s = fit.strategy as PlannerStrategy;
+      }
       s.apy = undefined;
     }
     const blockers = [...extendedBlockers(s, ctx.extended, ctx.balances?.walletDeployableUsd)];

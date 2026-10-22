@@ -18,6 +18,8 @@ import { HyperliquidPanel } from "@/components/HyperliquidPanel";
 import { ExtendedConnectPanel } from "@/components/ExtendedConnectPanel";
 import { TxflowPanel } from "@/components/TxflowPanel";
 import { PerpVenuesSummary, VENUE_ANCHOR } from "@/components/PerpVenuesSummary";
+import { NeutralBotPanel } from "@/components/NeutralBotPanel";
+import { BOT_ANCHOR, OPEN_BOT_EVENT } from "@/lib/neutralBot/bus";
 import { LifiPerpsConnectPanel } from "@/components/LifiPerpsConnectPanel";
 import { LidoWithdrawalsPanel } from "@/components/LidoWithdrawalsPanel";
 import { PerpPositionsPanel } from "@/components/PerpPositionsPanel";
@@ -156,6 +158,15 @@ export default function TerminalApp() {
     };
     window.addEventListener(OPEN_STRATEGIES_EVENT, open);
     return () => window.removeEventListener(OPEN_STRATEGIES_EVENT, open);
+  }, []);
+  // "Run it as a bot" from a plan opens Tools at the neutral bot.
+  useEffect(() => {
+    const open = () => {
+      setLeftTab("venues");
+      setTimeout(() => document.getElementById(BOT_ANCHOR)?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+    };
+    window.addEventListener(OPEN_BOT_EVENT, open);
+    return () => window.removeEventListener(OPEN_BOT_EVENT, open);
   }, []);
   // A tour step pointing inside a side tab opens it first.
   useEffect(() => {
@@ -439,6 +450,7 @@ export default function TerminalApp() {
               {FEATURES.perps && (
                 <>
                   <PerpVenuesSummary />
+                  <NeutralBotPanel />
                   <div id={VENUE_ANCHOR.hyperliquid}>
                     <HyperliquidPanel />
                   </div>

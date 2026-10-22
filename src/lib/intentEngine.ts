@@ -79,6 +79,8 @@ export interface ParseIntentResponse {
   answer?: PlannerAnswer;
   /** Index of the strategy the planner recommends for this user. */
   recommended?: number;
+  /** The planner's reading of the goal ("farming", "neutral_carry", …). */
+  objective?: string;
 }
 
 const cleanList = (v: unknown): string[] | undefined => {
@@ -314,7 +316,8 @@ export async function routeThesisAsync(
       throw new Error("No strategies returned");
     }
 
-    const variants = data.strategies.map(strategyToTradePlan);
+    const objective = typeof data.objective === "string" ? data.objective : undefined;
+    const variants = data.strategies.map(strategyToTradePlan).map((v) => (objective ? { ...v, objective } : v));
 
     // Default to moderate strategy, fall back to middle, then first
     const defaultPlan =

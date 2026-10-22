@@ -14,7 +14,7 @@ export const SIZING_POLICY = {
   /** Margin requested above notional / leverage, for fees and price moves while the order fills. */
   marginBufferPct: 3,
   /** Leverage when the user gave none. */
-  defaultLeverage: { neutral: 1, carry: 1, farming: 1, directional: 1 },
+  defaultLeverage: { neutral: 1, carry: 1, farming: 3, directional: 1 },
   /** Holding period used to spread entry + exit costs over a year, in days, when the user gave none. */
   defaultHoldingDays: { carry: 30, farming: 7, directional: 7, yield: 365, hedge: 30 },
   /** A two-leg neutral position is within tolerance when |long qty − short qty| / qty ≤ this, after rounding. */
@@ -83,7 +83,7 @@ export function policySection(): string {
     "## Sizing",
     `- No size given: commit at most ${p.maxUtilization * 100}% of the FREE amount on the venue that pays (free margin for perps, free wallet balance for spot), after a $${p.feeReserveUsd} reserve per venue. Unknown free amount: leave the size null (the plan is blocked).`,
     `- Margin per perp leg = notional / leverage × (1 + ${p.marginBufferPct}%).`,
-    `- Default leverage: neutral / carry / farming ${p.defaultLeverage.neutral}x, directional ${p.defaultLeverage.directional}x — only when the user gave none.`,
+    `- Default leverage: neutral / carry ${p.defaultLeverage.neutral}x, farming (volume / open interest for points) ${p.defaultLeverage.farming}x, directional ${p.defaultLeverage.directional}x — only when the user gave none.`,
     `- Default holding period: carry ${p.defaultHoldingDays.carry} days, farming ${p.defaultHoldingDays.farming}, directional ${p.defaultHoldingDays.directional}, yield ${p.defaultHoldingDays.yield}, hedge ${p.defaultHoldingDays.hedge}.`,
     `- Two-leg neutral position: the same base quantity on both legs, a quantity valid on both markets (the server computes it); residual delta tolerance ${p.residualDeltaTolerancePct}%.`,
     "## Stop-loss convention",

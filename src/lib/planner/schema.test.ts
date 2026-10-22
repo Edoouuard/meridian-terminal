@@ -255,3 +255,36 @@ describe("planner contract — the server sizes perp legs from the free margin (
     expect(run(undefined).economics?.legs?.map((l) => l.baseQuantity)).toEqual([0.06, 0.06]);
   });
 });
+
+describe("farming pair sized on the whole capital (owner report: 25% gave $4.80 legs, blocked under the minimums)", () => {
+  // Hyperliquid $91.92 free, Extended empty, $23.87 USDC in the wallet; "25% of my available capital".
+  const balances: VenueBalances = { hyperliquidFreeUsd: 91.92, extendedFreeUsd: 0, walletDeployableUsd: 23.87 };
+  const ethPair = (lev: number) =>
+    strat("ETH beta-neutral", [
+      { side: "Long", asset: "ETH-USD PERP", protocol: "Extended", chain: "Arbitrum", leverage: lev },
+      { side: "Short", asset: "ETH PERP", protocol: "Hyperliquid", chain: "Arbitrum", leverage: lev },
+    ]);
+
+  it("funds Extended from the wallet and opens legs over both markets' minimums", async () => {
+    const { addPairDeposits } = await import("./sizing");
+    const funded = addPairDeposits(ethPair(3), balances);
+    expect(funded.legs?.[0]).toMatchObject({ side: "Deposit", protocol: "Extended", asset: "USDC", sizeUsd: 23.87 });
+    const out = enforceConformance([funded], "farming", ctx({ extended: extendedEmpty, balances, sizeShare: 0.25 })).strategies[0];
+    const perps = (out.legs ?? []).filter((l) => /long|short/i.test(l.side));
+    // 25% of ($90.92 + $22.87) = $28.45, half a leg: $14.22 of margin ÷ 1.03 at 3x = $41.42 each.
+    expect(perps.map((l) => l.sizeUsd)).toEqual([41.42, 41.42]);
+    expect(out.status).toBe("executable");
+  });
+
+  it("raises the leverage to clear the minimum when the user named none", () => {
+    const funded = { ...ethPair(1), legs: [{ side: "Deposit", asset: "USDC", protocol: "Extended", chain: "Arbitrum", sizeUsd: 23.87 }, ...(ethPair(1).legs ?? [])] } as LLMStrategy;
+    const out = enforceConformance([funded], "farming", ctx({ extended: extendedEmpty, balances, sizeShare: 0.25 })).strategies[0];
+    const perps = (out.legs ?? []).filter((l) => /long|short/i.test(l.side));
+    // $13.81 at 1x is under 0.01 ETH ($30.01 here): 3x is the lowest leverage that clears it.
+    expect(perps.map((l) => l.leverage)).toEqual([3, 3]);
+    expect(perps[0].sizeUsd).toBeGreaterThan(30.6);
+    expect(out.status).toBe("executable");
+    const kept = enforceConformance([funded], "farming", ctx({ extended: extendedEmpty, balances, sizeShare: 0.25, explicitLeverage: true })).strategies[0];
+    expect(kept.status).toBe("blocked");
+  });
+});
