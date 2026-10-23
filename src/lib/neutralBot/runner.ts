@@ -97,6 +97,22 @@ export function marketOn(snapshot: Pick<MarketSnapshot, "quotes">, venue: PerpVe
 
 const fmt = (n: number) => `$${n.toFixed(2)}`;
 
+/**
+ * "Stop & close": close whatever is left of the bot's pair, both legs at their exact sizes, whatever their
+ * state (one leg alone, unequal legs, a pair held). Positions the bot didn't open are never touched.
+ */
+function closeAllAction(cfg: BotConfig, stats: BotStats, obs: { sizes: Partial<Record<PerpVenueName, number>>; markUsd: number }): BotAction {
+  const dust = DUST_USD / Math.max(obs.markUsd, 1e-9);
+  const open = cfg.venues.filter((v) => Math.abs(obs.sizes[v] ?? 0) > dust);
+  if (open.length === 0) return { kind: "stop", reason: "no pair open, nothing to close" };
+  if (stats.openedAt === null) return { kind: "stop", reason: `the ${cfg.base} position on ${open.join(" and ")} wasn't opened by the bot: left as is` };
+  return { kind: "close", reason: "stopped by you" };
+}
+
+/** Close the bot's pair now (see closeAllAction), at market. */
+export const closeBotPair = (cfg: BotConfig, stats: BotStats, snapshot: Pick<MarketSnapshot, "quotes">, venues: BotVenues, now: number) =>
+  runTick(cfg, { ...stats, stopReason: null }, snapshot, venues, now, Math.random, { closeAll: true });
+
 export async function runTick(
   cfg: BotConfig,
   stats0: BotStats,
@@ -104,6 +120,7 @@ export async function runTick(
   venues: BotVenues,
   now: number,
   rand: () => number = Math.random,
+  opts: { closeAll?: boolean } = {},
 ): Promise<TickResult> {
   const [a, b] = cfg.venues;
   const qa = marketOn(snapshot, a, cfg.base);
@@ -123,7 +140,7 @@ export async function runTick(
   const heldNotional = stats0.legs.reduce((s, l) => Math.max(s, l.qty * quote(l.venue).markUsd), 0);
   const stats = { ...accrueFunding(stats0, heldSpread, heldNotional, stats0.lastTickAt ?? now, now), lastTickAt: now };
 
-  const action = decide(cfg, stats, obs);
+  const action = opts.closeAll ? closeAllAction(cfg, stats, obs) : decide(cfg, stats, obs);
   const sizes: Partial<Record<PerpVenueName, number>> = { [a]: sa, [b]: sb };
   const fills: Fill[] = [];
   const send = async (venue: PerpVenueName, o: { isBuy: boolean; sizeUsd?: number; qty?: number; reduceOnly: boolean; stopLossPct?: number }): Promise<PairFill> => {
@@ -135,7 +152,8 @@ export async function runTick(
     return out;
   };
   const makerVenue = makerVenueOf(cfg);
-  const useMaker = !!(makerVenue && venues.maker);
+  // "Stop & close" closes at market: a post-only close could wait a minute or fill in part.
+  const useMaker = !!(makerVenue && venues.maker) && !opts.closeAll;
   const sleep = venues.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const clock = venues.clock ?? Date.now;
   /** One maker leg on the maker venue, hedged at taker on the other; fills recorded like the taker path's. */

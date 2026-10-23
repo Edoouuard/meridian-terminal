@@ -5,7 +5,7 @@ import { useAccount, useSignMessage } from "wagmi";
 import type { Address } from "viem";
 import type { MarketSnapshot } from "@/lib/planner/markets";
 import { usePerpTrader } from "@/hooks/usePerpTrader";
-import { runTick } from "@/lib/neutralBot/runner";
+import { closeBotPair, runTick } from "@/lib/neutralBot/runner";
 import { makerVenueOf } from "@/lib/neutralBot/engine";
 import { addLog, foldTick, foldTickError } from "@/lib/neutralBot/tickState";
 import { botActionMessage, type BotAction } from "@/lib/neutralBot/serverAuth";
@@ -239,12 +239,12 @@ export function NeutralBotHost() {
         }
         setBotState({ running: false, nextTickAt: null, busy: true });
         try {
+          // A tick still trading (an opening in flight) finishes first: closing before it lands would leave its legs open.
+          for (let i = 0; inFlight.current && i < 600; i++) await new Promise((r) => setTimeout(r, 200));
           const { cfg, stats } = getBotState();
-          // The budget path closes a held pair (or a lone leg of it), and never touches a position the bot didn't open.
-          const done = Math.max(1, stats.cycles);
-          const r = await runTick({ ...cfg, maxCycles: done }, { ...stats, cycles: done, stopReason: null }, await fetchSnapshot(), traderRef.current, Date.now());
-          setBotState({ stats: { ...r.stats, cycles: r.action.kind === "close" ? stats.cycles + 1 : stats.cycles, stopReason: "stopped by you" }, view: r.view ?? null, needsMargin: null });
-          botLog(r.action.kind === "stop" ? "Nothing to close: no pair open." : r.message, r.error ? "bad" : "ok");
+          const r = await closeBotPair(cfg, stats, await fetchSnapshot(), traderRef.current, Date.now());
+          setBotState({ stats: { ...r.stats, stopReason: "stopped by you" }, view: r.view ?? null, needsMargin: null });
+          botLog(r.message, r.error ? "bad" : "ok");
         } catch (err) {
           botLog(`Close failed: ${errText(err)}`, "bad");
         } finally {

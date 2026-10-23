@@ -17,7 +17,7 @@ import type { Signer as ExtendedSigner } from "@blackcube/extended-sdk";
 import { fetchPerpSnapshot } from "@/lib/perpFeed";
 import { perpCore } from "@/lib/perpCore";
 import { hyperliquidEnv } from "@/lib/integrations/hyperliquidTrade";
-import { runTick, type BotVenues } from "@/lib/neutralBot/runner";
+import { closeBotPair, runTick, type BotVenues } from "@/lib/neutralBot/runner";
 import { EMPTY_STATS, type BotConfig, type BotStats } from "@/lib/neutralBot/engine";
 import { addLog, foldTick, foldTickError, type BotCore, type BotLogLine } from "@/lib/neutralBot/tickState";
 import { kv, kvGetJson, kvLock, kvSetJson } from "@/lib/server/kv";
@@ -140,11 +140,10 @@ export async function tickServerBot(address: string, opts: { close?: boolean } =
       const venues = venuesFor(r);
       const snapshot = await fetchPerpSnapshot();
       if (opts.close) {
-        // The budget path closes a held pair (or a lone leg of it), never a position the bot didn't open.
-        const done = Math.max(1, r.stats.cycles);
-        const t = await runTick({ ...r.cfg, maxCycles: done }, { ...r.stats, cycles: done, stopReason: null }, snapshot, venues, now);
-        const stats = { ...t.stats, cycles: t.action.kind === "close" ? r.stats.cycles + 1 : r.stats.cycles, stopReason: "stopped by you" };
-        next = { ...r, stats, view: t.view ?? r.view, needsMargin: null, running: false, log: addLog(r.log, t.action.kind === "stop" ? "Nothing to close: no pair open." : t.message, t.error ? "bad" : "ok", now) };
+        // Closes what is left of the bot's pair at market, never a position the bot didn't open.
+        const t = await closeBotPair(r.cfg, r.stats, snapshot, venues, now);
+        const stats = { ...t.stats, stopReason: "stopped by you" };
+        next = { ...r, stats, view: t.view ?? r.view, needsMargin: null, running: false, log: addLog(r.log, t.message, t.error ? "bad" : "ok", now) };
       } else {
         next = foldTick(r, await runTick(r.cfg, r.stats, snapshot, venues, now), now);
       }
