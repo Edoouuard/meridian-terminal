@@ -15,7 +15,7 @@ import { completionText } from "@/lib/planner/completion";
 import { addPairDeposits, capitalShare, isFarmingIntent, mentionsLeverage, sizeQuestion } from "@/lib/planner/sizing";
 import { buildPairStrategy, mentionedBases, pairAssetQuestion, parsePairRequest, suggestPairStrategies } from "@/lib/planner/pair";
 import type { PerpVenueName } from "@/lib/planner/markets";
-import { cleanHistory, conversationSection, effectiveRequest } from "@/lib/planner/conversation";
+import { cleanHistory, conversationSection, effectiveRequest, normalizeChainMentions } from "@/lib/planner/conversation";
 import { marketBase } from "@/lib/perpVenues";
 import { parseAmount } from "@/lib/tradePlan";
 import { ANSWER_SYSTEM, cleanAnswer, marketSection, wantsAnswer, type PriceRow } from "@/lib/planner/answer";
@@ -521,10 +521,12 @@ const EXPLAIN_TIMEOUT_MS = 25_000;
 
 export async function POST(req: NextRequest) {
   try {
-    const { thesis, portfolio, clarified, answeredQuestion, history: rawHistory } = await req.json();
-    if (!thesis || typeof thesis !== "string" || thesis.trim().length === 0) {
+    const { thesis: rawThesis, portfolio, clarified, answeredQuestion, history: rawHistory } = await req.json();
+    if (!rawThesis || typeof rawThesis !== "string" || rawThesis.trim().length === 0) {
       return NextResponse.json({ error: "thesis is required" }, { status: 400 });
     }
+    // "on ARB" is the Arbitrum chain: read as such everywhere below.
+    const thesis = normalizeChainMentions(rawThesis);
     if (thesis.length > MAX_THESIS_CHARS) {
       return NextResponse.json({ error: `Keep the request under ${MAX_THESIS_CHARS} characters.` }, { status: 400 });
     }
@@ -548,7 +550,7 @@ export async function POST(req: NextRequest) {
 
     // A follow-up ("why not long Hyperliquid and short Extended?") applies to the last request that named an asset:
     // the server's checks read both together, and the model sees the conversation.
-    const history = cleanHistory(rawHistory);
+    const history = cleanHistory(rawHistory).map((t) => ({ ...t, request: normalizeChainMentions(t.request) }));
     const request = effectiveRequest(thesis.trim(), history, yieldContext.markets);
     const answered = typeof answeredQuestion === "string" ? answeredQuestion : undefined;
 

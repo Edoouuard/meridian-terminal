@@ -1,11 +1,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createRateLimiter, ruleForPath } from "@/lib/rateLimit";
-import { BETA_COOKIE, betaPassword, betaToken, safeEqual } from "@/lib/betaGate";
+import { BETA_COOKIE, betaPassword, readSeat } from "@/lib/betaGate";
+import { seatActive } from "@/lib/server/betaSeats";
 
 const checkRateLimit = createRateLimiter();
 
-/** Paths reachable without the beta cookie. */
-const PUBLIC_PATHS = new Set(["/beta", "/api/beta-login", "/api/bot/tick"]);
+/** Paths reachable without the beta cookie (/admin has its own password). */
+const PUBLIC_PATHS = new Set(["/beta", "/api/beta-login", "/api/bot/tick", "/admin", "/api/beta-admin"]);
 /** Server-to-server routes with their own check (a token in the path, a signature): no cookie, no per-IP limit. */
 const SERVER_PREFIXES = ["/api/extended-srv/"];
 
@@ -39,15 +40,18 @@ export async function proxy(req: NextRequest) {
   const password = betaPassword();
   if (!password || PUBLIC_PATHS.has(pathname)) return NextResponse.next();
 
-  const cookie = req.cookies.get(BETA_COOKIE)?.value;
-  if (cookie && safeEqual(cookie, await betaToken(password))) return NextResponse.next();
+  const seat = await readSeat(req.cookies.get(BETA_COOKIE)?.value, password);
+  // API calls trust the signed cookie; a page load also checks the seat wasn't freed on /admin.
+  if (seat && (isApi || (await seatActive(seat)))) return NextResponse.next();
 
   if (isApi) return NextResponse.json({ error: "Beta access required." }, { status: 401 });
 
   const url = req.nextUrl.clone();
   url.pathname = "/beta";
-  url.search = `?next=${encodeURIComponent(pathname + search)}`;
-  return NextResponse.redirect(url);
+  url.search = `?next=${encodeURIComponent(pathname + search)}${seat ? "&error=revoked" : ""}`;
+  const res = NextResponse.redirect(url);
+  if (seat) res.cookies.delete(BETA_COOKIE);
+  return res;
 }
 
 export const config = {

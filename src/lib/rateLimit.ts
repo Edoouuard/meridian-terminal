@@ -53,6 +53,7 @@ const MINUTE = 60_000;
 export const API_RATE_LIMITS: Array<[prefix: string, rule: RateLimitRule]> = [
   ["/api/parse-intent", { limit: 10, windowMs: MINUTE }], // LLM call (paid)
   ["/api/beta-login", { limit: 10, windowMs: MINUTE }], // password guessing
+  ["/api/beta-admin", { limit: 20, windowMs: MINUTE }], // admin password guessing
   ["/api/bridge", { limit: 30, windowMs: MINUTE }],
   ["/api/route-quote", { limit: 30, windowMs: MINUTE }],
   ["/api/pendle", { limit: 30, windowMs: MINUTE }],

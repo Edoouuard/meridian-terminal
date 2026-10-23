@@ -38,6 +38,8 @@ import { TxflowDepositButton, TxflowPerpExecuteButton, TxflowWithdrawButton } fr
 import { ExtendedPerpExecuteButton, PerpExecuteButton } from "@/components/execute/PerpExecuteButtons";
 import { LidoUnstakeButton, MorphoExecuteButton, MorphoWithdrawButton, PendleExecuteButton, SwapExecuteButton } from "@/components/execute/VenueExecuteButtons";
 import { NotWired, OrderRow, RISK_TIER_COLOR, isUnsupported, legRowValue } from "@/components/thread/shared";
+import { EXTENDED_MIN_DEPOSIT_USD } from "@/lib/integrations/extendedBridge";
+import { TXFLOW_MIN_DEPOSIT_USD } from "@/lib/integrations/txflow-live";
 
 /**
  * Live vault risk score (Philidor, free API — see lib/integrations/philidor.ts)
@@ -292,7 +294,21 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
             <LegRiskBadge leg={leg} />
             <StakeYieldBadge leg={leg} />
             {(fundedByBridge || fundedByHlWithdraw) && legChain !== undefined ? (
-              <FundsArrivalGate leg={leg} chainId={legChain} prices={prices} from={fundedByHlWithdraw ? "hyperliquid" : "bridge"}>
+              <FundsArrivalGate
+                leg={leg}
+                chainId={legChain}
+                prices={prices}
+                from={fundedByHlWithdraw ? "hyperliquid" : "bridge"}
+                partial={
+                  isExtDeposit
+                    ? { minUsd: EXTENDED_MIN_DEPOSIT_USD, render: (l) => <ExtendedDepositButton leg={l} /> }
+                    : isTxDeposit
+                      ? { minUsd: TXFLOW_MIN_DEPOSIT_USD, render: (l) => <TxflowDepositButton leg={l} /> }
+                      : isBridge
+                        ? { minUsd: 5, render: (l) => <BridgeExecuteButton leg={l} prices={prices} /> }
+                        : undefined
+                }
+              >
                 {execution}
               </FundsArrivalGate>
             ) : (
