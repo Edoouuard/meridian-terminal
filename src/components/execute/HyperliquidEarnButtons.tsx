@@ -22,6 +22,7 @@ import { useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { OrderRow } from "@/components/thread/shared";
 import { recordExecution } from "@/lib/history";
+import { humanizeMessage } from "@/lib/errorText";
 
 const muted = { margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" } as const;
 const errStyle = { margin: "4px 0 0", fontSize: 11, color: "var(--risk-bad, #c0392b)" } as const;
@@ -81,7 +82,7 @@ export function HlpDepositButton({ leg, onDone }: { leg: TradeLeg; onDone?: (ref
     <>
       {row}
       <OrderRow label="Deposit" value={`${fmt(amount)} USDC → HLP (locked ${HLP_LOCKUP_DAYS} days)`} valueColor="var(--color-accent-700)" />
-      {state.status === "error" && <p style={errStyle}>{state.error}</p>}
+      {state.status === "error" && <p style={errStyle}>{humanizeMessage(state.error)}</p>}
       <button className="btn btn-primary" style={{ fontSize: 13, marginTop: 6, cursor: "pointer" }} onClick={() => setConfirming(true)}>
         Deposit {fmt(amount)} into HLP →
       </button>
@@ -152,7 +153,7 @@ export function HypeStakeButton({ leg, prices, onDone }: { leg: TradeLeg; prices
     <>
       {row}
       <OrderRow label="Stake" value={`${amount} HYPE → ${validator.name} (${(validator.commission * 100).toFixed(1)}% commission)`} valueColor="var(--color-accent-700)" />
-      {state.status === "error" && <p style={errStyle}>{state.error}</p>}
+      {state.status === "error" && <p style={errStyle}>{humanizeMessage(state.error)}</p>}
       <button className="btn btn-primary" style={{ fontSize: 13, marginTop: 6, cursor: "pointer" }} onClick={() => setConfirming(true)}>
         Stake {amount} HYPE →
       </button>

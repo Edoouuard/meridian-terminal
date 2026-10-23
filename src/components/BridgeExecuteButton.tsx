@@ -10,6 +10,7 @@ import { resolvePriceFromList, usdToTokenAmount, type PriceEntry } from "@/lib/q
 import { useBridgeSwapQuote } from "@/hooks/useBridgeSwapQuote";
 import { chainIdFromName, legChainId } from "@/lib/chains";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
+import { humanizeMessage } from "@/lib/errorText";
 
 /** Reverse-match a free-text chain name (from the thesis, e.g. "to Arbitrum") against CHAIN_LABEL. */
 function matchChainIdByName(text: string): number | undefined {
@@ -107,7 +108,7 @@ export function BridgeExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
       >
         {isLoading ? "Fetching best route…" : `Get route to ${CHAIN_LABEL[toChainId] ?? toChainId} →`}
       </button>
-      {error && <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--risk-bad, #c0392b)" }}>{error}</p>}
+      {error && <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--risk-bad, #c0392b)" }}>{humanizeMessage(error)}</p>}
     </>
   );
 }

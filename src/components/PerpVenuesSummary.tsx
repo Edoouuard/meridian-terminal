@@ -10,9 +10,11 @@ import { loadAgent } from "@/lib/integrations/hyperliquidTrade";
 import { loadTxflowAgent } from "@/lib/integrations/txflowTrade";
 import { TXFLOW_NETWORK, fetchTxflowAccount } from "@/lib/integrations/txflow-live";
 import { fmtUsd } from "@/lib/data";
+import { BUILDING_VENUES } from "@/lib/buildingVenues";
+import { BuildingBadge } from "@/components/BuildingBadge";
 
 /** Anchors of the venue panels in Tools, so the summary can jump to each. */
-export const VENUE_ANCHOR = { hyperliquid: "venue-hyperliquid", extended: "venue-extended", txflow: "venue-txflow", ondo: "venue-ondo", lighter: "venue-lighter" } as const;
+export const VENUE_ANCHOR = { hyperliquid: "venue-hyperliquid", extended: "venue-extended", txflow: "venue-txflow" } as const;
 
 type Status = { label: string; tone: "good" | "idle" };
 
@@ -64,8 +66,14 @@ export function PerpVenuesSummary() {
         status={connected(!!txKey, "Connected", "Not connected")}
         note={tx.data ? `${fmtUsd(tx.data.withdrawable)} free` : undefined}
       />
-      <Row name="Ondo" anchor={VENUE_ANCHOR.ondo} status={{ label: "Via LI.FI, set up below", tone: "idle" }} />
-      <Row name="Lighter" anchor={VENUE_ANCHOR.lighter} status={{ label: "Via LI.FI, set up below", tone: "idle" }} />
+      {BUILDING_VENUES.map((name) => (
+        <div key={name} className="is-building" style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, padding: "3px 0" }}>
+          <span aria-hidden style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: "var(--color-neutral-300, #ccc)" }} />
+          <span style={{ fontWeight: 600, minWidth: 82 }}>{name}</span>
+          <span style={{ flex: 1 }} />
+          <BuildingBadge />
+        </div>
+      ))}
     </section>
   );
 }

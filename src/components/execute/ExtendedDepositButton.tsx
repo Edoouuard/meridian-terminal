@@ -23,6 +23,7 @@ import {
 } from "@/lib/integrations/extendedBridge";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
 import { NotWired, OrderRow } from "@/components/thread/shared";
+import { humanizeMessage } from "@/lib/errorText";
 
 const muted = { margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" } as const;
 const fmt = (x: number) => `$${x.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -110,7 +111,7 @@ export function ExtendedDepositButton({ leg }: { leg: TradeLeg }) {
       {quote && <OrderRow label="Bridge fee (Rhino.fi)" value={`${fmt(quote.feeUsd)} · about ${fmt(Math.max(0, quote.amountUsd - quote.feeUsd))} credited on Extended`} />}
     </>
   );
-  const errorLine = error && <p style={{ ...muted, color: "var(--risk-bad, #c0392b)" }}>{error}</p>;
+  const errorLine = error && <p style={{ ...muted, color: "var(--risk-bad, #c0392b)" }}>{humanizeMessage(error)}</p>;
 
   if (!quote) {
     return (

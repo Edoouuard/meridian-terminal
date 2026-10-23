@@ -541,7 +541,8 @@ function fitPerpHedgeToBudget(fixed: LLMLeg[], original: LLMLeg[]): LLMLeg[] {
 /** Spot/lending sides never carry leverage. */
 function fixSpotLeverage(leg: LLMLeg): LLMLeg {
   if (SPOT_SIDES.has(leg.side.toLowerCase()) && leg.leverage !== undefined) {
-    const { leverage: _, ...rest } = leg;
+    const rest = { ...leg };
+    delete rest.leverage;
     return rest;
   }
   return leg;

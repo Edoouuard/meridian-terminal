@@ -30,6 +30,7 @@ import {
   moveSpotUsdcToPerps,
   protectionPrices,
 } from "@/lib/integrations/hyperliquidTrade";
+import { humanizeMessage } from "@/lib/errorText";
 
 /**
  * Live Hyperliquid perp execution, in the order a trader needs it:
@@ -199,7 +200,7 @@ export function PerpExecuteButton({
         </p>
         {prot && !prot.ok && (
           <p style={{ margin: "4px 0 0", fontSize: 12, color: "var(--risk-bad, #c0392b)" }}>
-            The position is open but the stop-loss / take-profit was refused: {prot.error}. Set it in the Hyperliquid app or close the position below.
+            The position is open but the stop-loss / take-profit was refused: {humanizeMessage(prot.error)}. Set it in the Hyperliquid app or close the position below.
           </p>
         )}
         {position !== 0 && (
@@ -229,7 +230,7 @@ export function PerpExecuteButton({
       <>
         {info}
         <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--risk-bad, #c0392b)" }}>
-          {`Hyperliquid: ${error ?? "the order failed"}`}
+          {`Hyperliquid: ${humanizeMessage(error) || "the order failed"}`}
           {clearBtn}
         </p>
       </>
@@ -270,7 +271,7 @@ export function PerpExecuteButton({
             >
               {moving === "pending" ? "Moving USDC to perps…" : `Move $${(Math.ceil(shortBy * 100) / 100).toFixed(2)} USDC from spot to perps →`}
             </button>
-            {moving && moving !== "pending" && <p style={{ ...muted, color: "var(--risk-bad, #c0392b)" }}>{moving}</p>}
+            {moving && moving !== "pending" && <p style={{ ...muted, color: "var(--risk-bad, #c0392b)" }}>{humanizeMessage(moving)}</p>}
           </>
         ) : (
           <p style={muted}>
@@ -514,7 +515,7 @@ export function ExtendedPerpExecuteButton({
   if (status === "error") {
     return (
       <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--risk-bad, #c0392b)" }}>
-        {`Extended: ${error ?? "execution failed"}`}
+        {`Extended: ${humanizeMessage(error) || "execution failed"}`}
         <button onClick={reset} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 11 }}>
           clear
         </button>

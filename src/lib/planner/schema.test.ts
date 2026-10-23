@@ -324,3 +324,14 @@ describe("a deposit to Extended paid from the Hyperliquid account (owner's test,
     expect(out.strategies[0].blockers).toBeUndefined();
   });
 });
+
+describe("venues still being built (Ondo, Lighter)", () => {
+  it("never shows a plan on them as runnable, and never as an alternative", () => {
+    const lighter = strat("ETH short on Lighter", [{ side: "Short", asset: "ETH PERP", protocol: "Lighter", chain: "Arbitrum", sizeUsd: 50, leverage: 2 }]);
+    const out = enforceConformance([lighter], "directional", ctx());
+    expect(out.strategies[0]).toMatchObject({ status: "blocked" });
+    expect(out.strategies[0].blockers).toContain("Lighter isn't available in Meridian yet.");
+    const asAlternative = enforceConformance([{ ...lighter, kind: "alternative" } as LLMStrategy], "directional", ctx({ namedVenues: ["Hyperliquid"] }));
+    expect(asAlternative.strategies).toHaveLength(0);
+  });
+});

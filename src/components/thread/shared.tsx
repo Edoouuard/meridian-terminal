@@ -3,6 +3,7 @@
 import type { RiskTier } from "@/lib/integrations/philidor";
 import { fmtUsd } from "@/lib/data";
 import type { Order } from "@/lib/execution";
+import { BuildingBadge } from "@/components/BuildingBadge";
 
 export const RISK_TIER_COLOR: Record<RiskTier, string> = {
   Prime: "var(--risk-good)",
@@ -20,12 +21,19 @@ export function OrderRow({ label, value, valueColor }: { label: string; value: R
 }
 
 /**
- * Honest "not wired yet" — never fakes a success for a venue the harness
- * can't sign. Styled to visually read as unavailable (dashed border, muted
- * background) with a "Building" tag, so it's obvious at a glance before
- * reading the text.
+ * Why a step has no button — never a fake success. `building`: the venue or
+ * action isn't available in Meridian yet (dashed, muted, a "Building" tag).
+ * Otherwise it's what the user has to do or why nothing can run now (connect
+ * a wallet, a minimum, no balance): a plain note, no "Building" tag.
  */
-export function NotWired({ venue, reason }: { venue: string; reason: string }) {
+export function NotWired({ venue, reason, building = false }: { venue: string; reason: string; building?: boolean }) {
+  if (!building) {
+    return (
+      <p className="text-muted" style={{ margin: "6px 0 0", fontSize: 11 }}>
+        {reason}
+      </p>
+    );
+  }
   return (
     <div
       style={{
@@ -40,10 +48,8 @@ export function NotWired({ venue, reason }: { venue: string; reason: string }) {
       }}
     >
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <span className="tag tag-neutral" style={{ fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>
-          Building
-        </span>
-        <span style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>{venue} isn&apos;t live yet</span>
+        <BuildingBadge />
+        <span style={{ fontSize: 12, color: "var(--color-neutral-500)" }}>{venue} isn&apos;t available in Meridian yet</span>
       </div>
       <span className="text-muted" style={{ fontSize: 11 }}>
         {reason}

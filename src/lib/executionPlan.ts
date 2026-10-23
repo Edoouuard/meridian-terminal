@@ -247,7 +247,6 @@ export function logTransition(
   state: OrderFlowState,
   extra?: Record<string, unknown>,
 ): void {
-  // eslint-disable-next-line no-console
   console.info("[execute-order]", {
     planId: plan?.planId,
     chainId: plan?.chainId,

@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { fmtUsd } from "@/lib/data";
 import { ExtendedDepositButton } from "@/components/execute/ExtendedDepositButton";
 import { EXTENDED_MIN_DEPOSIT_USD } from "@/lib/integrations/extendedBridge";
+import { humanizeMessage } from "@/lib/errorText";
 
 function fmtPx(n: number): string {
   if (!Number.isFinite(n) || n === 0) return "-";
@@ -287,7 +288,7 @@ export function ExtendedConnectPanel() {
               {address ? "Connect Extended with my wallet" : "Connect a wallet first"}
             </button>
           )}
-          {error && <p style={{ fontSize: 11, margin: 0, color: "var(--risk-bad, #c0392b)" }}>{error}</p>}
+          {error && <p style={{ fontSize: 11, margin: 0, color: "var(--risk-bad, #c0392b)" }}>{humanizeMessage(error)}</p>}
 
           <button
             className="btn btn-secondary"

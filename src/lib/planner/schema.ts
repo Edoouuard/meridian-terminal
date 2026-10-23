@@ -14,6 +14,7 @@ import { belowMinimum } from "@/lib/strategyIntegrity";
 import type { ExplicitPerpOrder } from "@/lib/explicitOrder";
 import { marketBase } from "@/lib/perpVenues";
 import { HL_WITHDRAW_FEE_USD } from "@/lib/integrations/hyperliquidExchange";
+import { isBuildingVenue } from "@/lib/buildingVenues";
 import { EXECUTION_POLICY, SIZING_POLICY } from "@/lib/planner/policy";
 import type { MarketSnapshot, PerpVenueName } from "@/lib/planner/markets";
 import { computeVenueEconomics, findQuote, isVenuePlan, type Economics, type VenueBalances } from "@/lib/planner/economics";
@@ -318,6 +319,8 @@ export function enforceConformance(raw: LLMStrategy[], objective: Objective | un
       s.apy = undefined;
     }
     const blockers = [...extendedBlockers(s, ctx.extended, ctx.balances?.walletDeployableUsd)];
+    const building = [...new Set((s.legs ?? []).filter((l) => isBuildingVenue(l.protocol)).map((l) => l.protocol))];
+    if (building.length) blockers.push(`${building.join(" and ")} ${building.length > 1 ? "aren't" : "isn't"} available in Meridian yet.`);
     if (isVenuePlan(s) && ctx.markets && ctx.balances) {
       const v = computeVenueEconomics(s, pair?.legs, ctx.markets, ctx.balances, holding, ctx.now);
       s.economics = v.economics;

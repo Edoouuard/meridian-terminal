@@ -17,6 +17,7 @@ import { useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
 import type { PriceEntry } from "@/lib/quote";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { recordExecution } from "@/lib/history";
+import { humanizeMessage } from "@/lib/errorText";
 
 const muted = { margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" } as const;
 const bad = "var(--risk-bad, #c0392b)";
@@ -150,12 +151,12 @@ export function PerpPairButton({
       {run && (
         <p style={{ ...muted, color: run.status === "exposed" ? bad : "var(--color-neutral-600, #555)" }}>
           {run.status === "first_failed"
-            ? `Nothing was traded: ${run.error}`
+            ? `Nothing was traded: ${humanizeMessage(run.error)}`
             : run.status === "unwound"
-              ? `The second leg failed (${run.error}), so the first was closed: no position is left open (fees aside).`
+              ? `The second leg failed (${humanizeMessage(run.error)}), so the first was closed: no position is left open (fees aside).`
               : run.status === "exposed"
-                ? `Exposed: ${run.qty} ${coin} stays open on the ${label(plan.legs[run.legIndex])} (${run.error}; closing failed: ${run.unwindError}). Close it now in Risk → Perp positions.`
-                : run.error}
+                ? `Exposed: ${run.qty} ${coin} stays open on the ${label(plan.legs[run.legIndex])} (${humanizeMessage(run.error)}; closing failed: ${humanizeMessage(run.unwindError)}). Close it now in Risk → Perp positions.`
+                : humanizeMessage(run.error)}
         </p>
       )}
       {short.length > 0 ? (

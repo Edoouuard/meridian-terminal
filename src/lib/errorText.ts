@@ -81,9 +81,12 @@ export function explainError(err: unknown): ExplainedError {
   const full = err instanceof Error ? `${(err as { shortMessage?: string }).shortMessage ?? ""}\n${err.message}` : String(err);
   for (const r of RULES) if (r.re.test(full)) return { text: r.text, cause: r.cause };
   if (/revert/i.test(full)) {
-    const reason = /reverted with (?:the following )?reason:\s*([^\n]+)/i.exec(full)?.[1] ?? /execution reverted:?\s*([^\n]*)/i.exec(full)?.[1];
+    const raw = /reverted with (?:the following )?reason:\s*([^\n]+)/i.exec(full)?.[1] ?? /execution reverted:?\s*([^\n]*)/i.exec(full)?.[1];
+    // A readable reason ("BAD_THING") is worth quoting; "for an unknown reason" or a hex blob isn't.
+    const reason = raw?.trim().replace(/\.+$/, "");
+    const readable = reason && !/unknown reason|^0x[0-9a-f]*$/i.test(reason);
     return {
-      text: reason?.trim() ? `The contract refused the transaction: ${reason.trim().slice(0, 120)}.` : "The contract refused the transaction.",
+      text: readable ? `The contract refused the transaction: ${reason.slice(0, 120)}.` : "This transaction would fail on-chain right now, so nothing was sent. Get a fresh quote and retry.",
       cause: "revert",
     };
   }
@@ -91,10 +94,40 @@ export function explainError(err: unknown): ExplainedError {
   return { text: "Something went wrong talking to the chain." };
 }
 
-/** "<plain sentence> (details: <short technical reason>)" — what the UI and the journal show. */
+/** The plain sentence the UI shows; the short technical reason goes to the console (and Sentry), not the screen. */
 export function userFacingError(err: unknown, prefix?: string): string {
   const { text } = explainError(err);
   const detail = shortError(err);
-  const head = prefix ? `${prefix} ${text.charAt(0).toLowerCase()}${text.slice(1)}` : text;
-  return detail && !text.includes(detail) ? `${head} (details: ${detail})` : head;
+  if (detail && !text.includes(detail) && typeof console !== "undefined") console.warn("[meridian] error detail:", detail);
+  return prefix ? `${prefix} ${text.charAt(0).toLowerCase()}${text.slice(1)}` : text;
+}
+
+/** Venue and server messages that only mean "their side is down / busy": the sentence a user gets instead. */
+const MESSAGE_RULES: Array<{ re: RegExp; text: string }> = [
+  { re: /user (rejected|denied)|rejected the request|request rejected/i, text: "Signature rejected in your wallet." },
+  { re: /\b429\b|rate.?limit|too many requests/i, text: "Too many requests right now. Wait a few seconds and try again." },
+  { re: /failed to fetch|load failed|network ?error|fetch failed|ECONNRESET|ETIMEDOUT|timed? ?out/i, text: "Couldn't reach the service. Check your connection and try again." },
+  { re: /\b5\d\d\b|internal server error|unhandlederror|bad gateway|service unavailable/i, text: "The service is having trouble right now. Try again in a few minutes." },
+];
+
+/**
+ * A message shown to the user, cleaned of what only a developer reads: HTTP
+ * codes, JSON bodies, "(details: …)", environment variable names, URLs and
+ * stack lines. Plain messages pass through unchanged.
+ */
+export function humanizeMessage(raw: string | null | undefined): string {
+  if (!raw) return "";
+  const line = raw.split("\n").map((l) => l.trim()).find(Boolean) ?? "";
+  const technical = /\bHTTP\b|\{".*"\}|\b[A-Z][A-Z0-9]*_[A-Z0-9_]{3,}\b|https?:\/\/|\bat [\w.]+ \(|\b[45]\d\d\b|→/.test(line);
+  for (const r of MESSAGE_RULES) if (r.re.test(line) && (technical || r.text.startsWith("Signature"))) return r.text;
+  let out = line
+    .replace(/\s*\(details:[^)]*\)\.?/gi, "")
+    .replace(/\s*\{".*"\}/g, "")
+    .replace(/\s*\(?\bHTTP \d{3}\)?/g, "")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (/\b[A-Z][A-Z0-9]*_[A-Z0-9_]{3,}\b/.test(out)) out = "This feature isn't available right now.";
+  if (out.length > 220) out = `${out.slice(0, 217).trimEnd()}…`;
+  return out || "Something went wrong. Try again in a moment.";
 }

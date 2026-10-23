@@ -5,6 +5,8 @@ import { useQuery } from "@tanstack/react-query";
 import type { MarketSnapshot, PerpVenueName } from "@/lib/planner/markets";
 import { usePerpTrader } from "@/hooks/usePerpTrader";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { BuildingBadge } from "@/components/BuildingBadge";
+import { humanizeMessage } from "@/lib/errorText";
 import { BotVolumeChart } from "@/components/BotVolumeChart";
 import { BotFunds, VENUE_ANCHOR_OF, useVenueFunds } from "@/components/BotFunds";
 import { rankForCarry, rankForFarming, scanPairs, type PairOpportunity } from "@/lib/neutralBot/opportunities";
@@ -128,6 +130,11 @@ export function NeutralBotView() {
     queryFn: async () => (await (await fetch("/api/bot/server?status=1")).json()) as { configured: boolean; missing: string[] },
     staleTime: 5 * 60_000,
   });
+  // The setup details (what the server lacks) stay in /api/bot/server?status=1, never in the UI.
+  const serverReady = serverStatus.data?.configured === true;
+  useEffect(() => {
+    if (serverStatus.data && !serverStatus.data.configured && s.onServer && !s.running && !s.stats.openedAt) setBotState({ onServer: false });
+  }, [serverStatus.data, s.onServer, s.running, s.stats.openedAt]);
   const [confirming, setConfirming] = useState<"start" | "close" | null>(null);
   const [morePairs, setMorePairs] = useState(false);
 
@@ -475,13 +482,20 @@ export function NeutralBotView() {
                 <button type="button" className={`btn ${s.onServer ? "btn-secondary" : "btn-primary"} bot-mini`} aria-pressed={!s.onServer} onClick={() => setBotState({ onServer: false })}>
                   In this browser
                 </button>
-                <button type="button" className={`btn ${s.onServer ? "btn-primary" : "btn-secondary"} bot-mini`} aria-pressed={s.onServer} disabled={serverStatus.data ? !serverStatus.data.configured : false} onClick={() => setBotState({ onServer: true })}>
-                  On Meridian&apos;s server, 24/7
+                <button
+                  type="button"
+                  className={`btn ${s.onServer ? "btn-primary" : "btn-secondary"} bot-mini${serverReady ? "" : " is-building"}`}
+                  aria-pressed={s.onServer}
+                  disabled={!serverReady}
+                  title={serverReady ? undefined : "Being built: not available yet"}
+                  onClick={() => setBotState({ onServer: true })}
+                >
+                  On Meridian&apos;s server, 24/7 {serverStatus.data && !serverReady && <BuildingBadge />}
                 </button>
               </div>
               <span className="text-muted bot-hint">
-                {serverStatus.data && !serverStatus.data.configured
-                  ? `The server isn't set up for bots yet (missing: ${serverStatus.data.missing.join("; ")}).`
+                {serverStatus.data && !serverReady
+                  ? "Running 24/7 on Meridian's server is coming soon. For now the bot runs from this tab: if the computer sleeps, it stops trading until it wakes (the venue stops still protect the pair)."
                   : s.onServer
                     ? "Keeps trading when this computer sleeps or the tab closes, until you pause or stop it. Your trading keys go to the server encrypted: the Hyperliquid and TxFlow ones can trade but not withdraw; Extended only withdraws to your own wallet. Start asks one wallet signature to prove it's you."
                     : "Runs from this tab: if the computer sleeps, it stops trading until it wakes (the venue stops still protect the pair)."}
@@ -603,7 +617,7 @@ export function NeutralBotView() {
             {s.log.slice(0, 80).map((l, i) => (
               <div key={`${l.at}-${i}`} className={`bot-log__line bot-log__line--${l.tone}`}>
                 <span className="bot-log__time">{clock(l.at)}</span>
-                <span>{l.text}</span>
+                <span>{humanizeMessage(l.text)}</span>
               </div>
             ))}
           </div>

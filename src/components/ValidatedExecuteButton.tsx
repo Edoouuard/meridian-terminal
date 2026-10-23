@@ -15,6 +15,7 @@ import type { OrderFlowState } from "@/lib/executionPlan";
 import { confirmStrategyLeg } from "@/lib/strategyTracker";
 import { useStrategyLeg } from "@/components/thread/strategyLegContext";
 import { TxProgress } from "@/components/TxProgress";
+import { humanizeMessage } from "@/lib/errorText";
 
 const STATUS_LABEL: Partial<Record<OrderFlowState, string>> = {
   VALIDATING: "Checking your balance…",
@@ -144,7 +145,7 @@ export function ValidatedExecuteButton({
     const friendly =
       /reject|declined|user denied/i.test(message ?? "")
         ? "Signature rejected in your wallet."
-        : message;
+        : humanizeMessage(message);
     return (
       <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--risk-bad, #c0392b)" }}>
         {friendly}

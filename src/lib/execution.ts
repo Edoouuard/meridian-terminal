@@ -1062,7 +1062,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
     case "lighter":
       return fail(`${assetLabel} perps on ${String(order.protocol)} use the LI.FI relay — use the dedicated perps panel instead.`);
     case "variational":
-      return fail("Variational options are not yet wired for live execution.");
+      return fail("Variational options aren't available in Meridian yet.");
     case "pendle": {
       // Buy PT through Pendle's RouterV4. The calldata comes from Pendle's
       // API (it routes the input token through an aggregator), so — like

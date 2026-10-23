@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { explainError, shortError, userFacingError } from "@/lib/errorText";
+import { explainError, humanizeMessage, shortError, userFacingError } from "@/lib/errorText";
 import { classifyExecutionError } from "@/lib/executionPlan";
 
 const viemLike = (shortMessage: string, details = "") =>
@@ -42,5 +42,23 @@ describe("errorText — user-facing text", () => {
     const c = classifyExecutionError(new Error("insufficient funds for gas * price + value"), "supply");
     expect(c.state).toBe("INSUFFICIENT_BALANCE");
     expect(c.message).toMatch(/network fee/);
+  });
+});
+
+describe("errorText — messages cleaned for the screen", () => {
+  it("never quotes 'for an unknown reason' as a revert reason", () => {
+    const text = userFacingError(new Error("Execution reverted for an unknown reason."));
+    expect(text).toMatch(/would fail on-chain right now, so nothing was sent/);
+    expect(text).not.toMatch(/unknown reason|details/);
+  });
+
+  it.each([
+    ["Extended bridge: HTTP 500", "The service is having trouble right now. Try again in a few minutes."],
+    ["LI.FI REST /quote → HTTP 429: {\"message\":\"slow down\"}", "Too many requests right now. Wait a few seconds and try again."],
+    ["The server isn't set up for bots yet (missing: BOT_ENCRYPTION_KEY is set but only 23 characters)", "This feature isn't available right now."],
+    ["Transaction would fail (details: execution reverted)", "Transaction would fail"],
+    ["Not enough margin on Hyperliquid: $12 free, $20 needed.", "Not enough margin on Hyperliquid: $12 free, $20 needed."],
+  ])("%s", (raw, clean) => {
+    expect(humanizeMessage(raw)).toBe(clean);
   });
 });

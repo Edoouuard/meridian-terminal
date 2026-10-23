@@ -9,6 +9,7 @@ import { TXFLOW_MIN_DEPOSIT_USD, TXFLOW_NETWORK, fetchTxflowAccount, fetchTxflow
 import { TXFLOW_APP_URL, TXFLOW_BUILDER_RESTRICTED, approveTxflowAgent, forgetTxflowAgent, loadTxflowAgent, txflowMarketOrder, withTxflowAgent, type TxflowWalletSign } from "@/lib/integrations/txflowTrade";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { TxflowDepositButton, TxflowWithdrawButton } from "@/components/execute/TxflowButtons";
+import { humanizeMessage } from "@/lib/errorText";
 
 const declined = (msg: string) => (/user rejected|denied/i.test(msg) ? "Signature declined in the wallet." : msg.split("\n")[0]);
 
@@ -157,7 +158,7 @@ export function TxflowPanel() {
       )}
 
       {busy && <p style={{ fontSize: 11, margin: "6px 0 0" }} className="text-muted">{busy}</p>}
-      {error && <p style={{ fontSize: 11, margin: "6px 0 0", color: "var(--risk-bad, #c0392b)" }}>{error}</p>}
+      {error && <p style={{ fontSize: 11, margin: "6px 0 0", color: "var(--risk-bad, #c0392b)" }}>{humanizeMessage(error)}</p>}
       {error === TXFLOW_BUILDER_RESTRICTED && (
         <a className="btn" style={{ fontSize: 12, marginTop: 6, display: "inline-block" }} href={TXFLOW_APP_URL} target="_blank" rel="noreferrer">
           Open app.txflow.com ↗

@@ -63,7 +63,7 @@ describe("assetMap — resolveOrderForLeg (Aave supply on Base)", () => {
   it("returns unsupported for an unwired Aave side", () => {
     const res = resolveOrderForLeg(leg({ side: "Stake" }), undefined, USDC_PRICE, BASE_CHAIN_ID);
     expect("unsupported" in res).toBe(true);
-    expect(res.unsupported).toContain("not wired");
+    expect(res.unsupported).toContain("isn't available in Meridian yet");
   });
 });
 
@@ -106,7 +106,7 @@ describe("assetMap — resolveOrderForLeg (Compound III, USDC market only)", () 
   it("returns unsupported for an unwired Compound side", () => {
     const res = resolveOrderForLeg(compoundLeg({ side: "Stake" }), undefined, USDC_PRICE, BASE_CHAIN_ID);
     expect("unsupported" in res).toBe(true);
-    expect(res.unsupported).toContain("not wired");
+    expect(res.unsupported).toContain("isn't available in Meridian yet");
   });
 });
 

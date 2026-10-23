@@ -49,7 +49,7 @@ const DEFAULT_MODEL = "google/gemini-2.5-flash";
 const PERPS_DISABLED_NOTE = `
 
 ## CURRENT LIMITATION — PERPS DISABLED
-Perpetual futures (Hyperliquid, Extended, Ondo, Lighter) cannot be executed in Meridian right now — but depositing USDC into a Hyperliquid account can (side "Deposit", protocol "Hyperliquid"). Build every strategy from spot legs only (lending, borrowing, staking, swaps, bridges, vaults). Never put a Long or Short leg in a strategy.
+Perpetual futures (Hyperliquid, Extended, TxFlow) cannot be executed in Meridian right now — but depositing USDC into a Hyperliquid account can (side "Deposit", protocol "Hyperliquid"). Build every strategy from spot legs only (lending, borrowing, staking, swaps, bridges, vaults). Never put a Long or Short leg in a strategy.
 For a hedge, a beta-neutral or delta-neutral goal, use the spot-only version: the "Beta-neutral ETH carry" (supply USDC on Aave, borrow WETH, swap it to an LST on Uniswap, supply the LST on Aave) from the live data. Mention once in variantNote that the perp version (spot in a vault + short perp) comes when perps are enabled.`;
 
 /** Chains the chat may target, and the subset funds can be bridged between (lib/onchain ACTIVE_CHAIN_IDS, mcp/routerAllowlist). */
@@ -94,14 +94,13 @@ When the user's portfolio is provided:
 - **Hyperliquid stock, index & commodity perps (HIP-3)**: Tesla, Nvidia, the S&P 500, gold, oil… are traded as perps with USDC margin, from the same Hyperliquid account as crypto perps. For a view on a stock, an index or a commodity ("short Tesla", "long gold", "hedge my portfolio with the S&P 500"), use side "Long" or "Short", protocol "Hyperliquid", chain "Arbitrum", and asset = the EXACT market name from the live "Stock, index & commodity perps" list followed by " PERP" (e.g. "xyz:TSLA PERP", "xyz:SP500 PERP", "xyz:GOLD PERP"). Never invent a market that isn't in that list; quote its live price and funding. Respect its max leverage. These markets trade around the clock but follow the underlying's price: say so in the risk note.
 - **Extended**: StarkEx L2, up to 20x leverage. Active points program. Meridian signs Extended orders once the user has connected Extended. When the Extended account lacks margin and the wallet holds native USDC on Arbitrum, put a Deposit leg first (side "Deposit", protocol "Extended", asset "USDC", chain "Arbitrum", sizeUsd = the missing margin + $1, at least $10): Meridian deposits through Extended's bridge. When the user asks for Extended, the plan uses Extended even if the account is not connected or can't be funded: the server marks it blocked with what unblocks it. A Hyperliquid version is only an alternative, never the requested plan.
 - **TxFlow**: its own L1 with an order book, USDC margin, hourly funding (see the live "TxFlow perps" list). Executable: the first trade asks one wallet signature to approve Meridian's TxFlow trading key (it can trade, never withdraw); no connection step. Assets by the EXACT market name + " PERP" ("ETH-USDC PERP"). When the TxFlow account lacks margin, put a Deposit leg first (side "Deposit", protocol "TxFlow", asset "USDC", chain "Arbitrum", sizeUsd = the missing margin + $1, at least $5): native USDC on Arbitrum goes to TxFlow's bridge. A withdrawal is side "Withdraw", protocol "TxFlow", asset "USDC" ($1 fee, minimum $2). Optional "stopLossPct" / "takeProfitPct" on a TxFlow perp leg: Meridian binds them to the position after the fill. When the user asks for TxFlow, the plan uses TxFlow; another venue is only an alternative.
-- **Ondo**: via LI.FI relay.
-- **Lighter**: zk-rollup. Check live data for LLP vault APR if available.
+- **Ondo** and **Lighter**: not available in Meridian yet (being built). Never put an Ondo or Lighter leg in a plan; when the user names one, say so in variantNote and use Hyperliquid, Extended or TxFlow.
 Choose the perp venue based on: the user's goal (points? liquidity? fees?), NOT a default preference.
 
 ### Protocol Vaults
 - **HLP (Hyperliquid)**: market-making vault. Check live APR in data. Executable: side "Deposit", protocol "Hyperliquid", asset "HLP", sizeUsd = the USDC put in, chain "Arbitrum". It draws on USDC already in the user's Hyperliquid account (see HYPERLIQUID ACCOUNT); when there isn't enough, a Hyperliquid deposit leg (below) comes first. Locked 4 days; returns come from market making and can be negative — say both.
 - **HYPE staking (Hyperliquid)**: executable: side "Stake", protocol "Hyperliquid", asset "HYPE", sizeUsd = the USD value staked. It stakes HYPE held in the user's Hyperliquid spot balance (two wallet signatures, delegated to the most staked validator charging ≤ 5%); unstaking takes 7 days — say so. HYPE held elsewhere must reach Hyperliquid spot first (say so; a Buy leg on Hyperliquid spot works when the user holds USDC there).
-- **LLP (Lighter)**: liquidity pool vault. Check live APR in data.
+- **LLP (Lighter)**: not available in Meridian yet: never a leg.
 Use these when user wants passive yield with protocol exposure.
 
 ### Spot / Swaps
@@ -232,7 +231,7 @@ Before returning your JSON, verify each strategy against this checklist:
 
 side: exactly one of: "Supply", "Borrow", "Repay", "Withdraw", "Long", "Short", "Swap", "Stake", "Bridge", "Transfer", "Restake", "Buy", "Deposit", "Sell" (Deposit only for the Hyperliquid deposit; Sell only for selling UETH/UBTC/USOL on Hyperliquid spot)
 asset: token symbol. Perps: "ETH PERP" (optional "stopLossPct" / "takeProfitPct" numbers on the perp leg); Hyperliquid stocks "xyz:AMD PERP"; Extended markets by their exact name + " PERP" ("ETH-USD PERP", "AMD_24_5-USD PERP"); TxFlow markets by their exact name + " PERP" ("ETH-USDC PERP"). Swaps: "USDC → ETH". Staking: output token "stETH".
-protocol: exactly one of: "Aave", "Compound", "Spark", "Lido", "Hyperliquid", "Extended", "TxFlow", "Ondo", "Lighter", "Uniswap", "Morpho", "Pendle", "EigenLayer", "Fluid", "Sky", "Spark Savings", "Ethena", "Yearn", "Curve Savings", "Curve LlamaLend", "Wallet", "deBridge" (same-chain swaps use "Uniswap"; LI.FI same-chain swaps are not executable)
+protocol: exactly one of: "Aave", "Compound", "Spark", "Lido", "Hyperliquid", "Extended", "TxFlow", "Uniswap", "Morpho", "Pendle", "EigenLayer", "Fluid", "Sky", "Spark Savings", "Ethena", "Yearn", "Curve Savings", "Curve LlamaLend", "Wallet", "deBridge" (same-chain swaps use "Uniswap"; LI.FI same-chain swaps are not executable)
 sizeUsd: integer USD value.
 leverage: only for Long/Short legs. Integer.
 to: only for a Transfer leg: the recipient address (0x…) or .eth name, copied exactly from the user's message. No recipient in the message → no Transfer leg; ask for one in the understanding.
@@ -532,10 +531,8 @@ export async function POST(req: NextRequest) {
 
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) {
-      return NextResponse.json(
-        { error: "OPENROUTER_API_KEY not configured — add it to .env.local" },
-        { status: 500 },
-      );
+      console.error("[parse-intent] OPENROUTER_API_KEY is not set");
+      return NextResponse.json({ error: "The planner is unavailable right now. Try again in a minute." }, { status: 503 });
     }
 
     const model = process.env.OPENROUTER_MODEL || DEFAULT_MODEL;
