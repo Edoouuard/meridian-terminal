@@ -141,7 +141,7 @@ export function BotFunds({ trader, funds, pair, neededUsd }: { trader: PerpTrade
       {funds && funds.hlVaults >= 0.01 && <p className="text-muted bot-footnote">Also {usd(funds.hlVaults)} in Hyperliquid vaults (HLP…): it earns there, but can&apos;t margin a trade until you withdraw it from the vault.</p>}
       {pair.includes("Extended") && (
         <p className="text-muted bot-footnote">
-          Extended moved from Starknet to Arc on 22 October and deposits from Meridian fail until its API catches up. Deposit with this same wallet on{" "}
+          If Meridian&apos;s deposit to Extended fails (Extended just moved to Arc), deposit with this same wallet on{" "}
           <a href={EXTENDED_APP_URL} target="_blank" rel="noreferrer">
             app.extended.exchange
           </a>

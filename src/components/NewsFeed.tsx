@@ -63,8 +63,8 @@ function useNews(enabled: boolean) {
       return res.json();
     },
     enabled,
-    staleTime: 10 * 60_000,
-    refetchInterval: enabled ? 15 * 60_000 : false,
+    staleTime: 2 * 60_000,
+    refetchInterval: enabled ? 5 * 60_000 : false,
   });
 }
 
@@ -77,7 +77,7 @@ function fmtPublished(iso: string | undefined, now: number): string {
   return h < 48 ? `${h}h ago` : `${Math.round(h / 24)}d ago`;
 }
 
-/** Crypto headlines (NewsData.io via /api/news), each with an "Ask Meridian" about the user's positions. */
+/** Crypto headlines (newsroom RSS feeds and NewsData.io via /api/news), each with an "Ask Meridian" about the user's positions. */
 function NewsPanel({ now }: { now: number }) {
   const news = useNews(true);
   const items = news.data?.items ?? [];
@@ -87,7 +87,7 @@ function NewsPanel({ now }: { now: number }) {
       <div className="panel-card__head">
         <h6 className="panel-card__title">News</h6>
         <span className="text-muted" style={{ fontSize: 11 }}>
-          {items.length > 0 ? `NewsData${status === "stale" ? " · delayed" : ""} · ${fmtAge(now - news.dataUpdatedAt)}` : ""}
+          {items.length > 0 ? `Live${status === "stale" ? " · delayed" : ""} · updated ${fmtAge(now - news.dataUpdatedAt)}` : ""}
         </span>
       </div>
       {items.length > 0 ? (
@@ -116,13 +116,11 @@ function NewsPanel({ now }: { now: number }) {
         <p className="text-muted" style={{ fontSize: 12, margin: "var(--space-2) 0 0" }}>
           {news.isLoading
             ? "Fetching headlines…"
-            : status === "not_configured"
-              ? "News isn't configured yet (NEWSDATA_API_KEY)."
-              : "No headlines right now — the news source is unreachable."}
+            : "No headlines right now — the news sources are unreachable."}
         </p>
       )}
       <p className="text-muted" style={{ fontSize: 10, margin: "var(--space-2) 0 0" }}>
-        Headlines from NewsData.io, refreshed every 15 minutes. Not investment advice; links open the original article.
+        Headlines from CoinDesk, Cointelegraph, Decrypt, The Block and Blockworks (plus NewsData.io), refreshed every 5 minutes. Not investment advice; links open the original article.
       </p>
     </section>
   );
