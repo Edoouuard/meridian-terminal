@@ -75,6 +75,15 @@ export function BridgeExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
     return <NotWiredLine reason={`No live price for ${fromToken.symbol} — cannot size this bridge safely.`} />;
   }
 
+  const request = {
+    fromChainId,
+    toChainId,
+    fromTokenAddress: fromToken.address,
+    toTokenAddress: toToken.address,
+    fromAmount: quote.amountBase.toString(),
+    fromAddress: address,
+  };
+
   if (best) {
     const order = bridgeOrderFromQuote(best, fromToken, quote.amountBase, fromChainId);
     return (
@@ -82,7 +91,8 @@ export function BridgeExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
         <p className="text-muted" style={{ fontSize: 11, margin: "0 0 4px" }}>
           Best route: {best.provider === "lifi" ? "LI.FI" : "deBridge"} → {CHAIN_LABEL[toChainId] ?? toChainId}
         </p>
-        <ValidatedExecuteButton order={order} label={`Bridge to ${CHAIN_LABEL[toChainId] ?? toChainId} →`} />
+        {/* A route quote goes stale in a minute or two (its minimum out, its deadline): a retry takes a fresh one. */}
+        <ValidatedExecuteButton order={order} label={`Bridge to ${CHAIN_LABEL[toChainId] ?? toChainId} →`} onRetry={() => void fetchQuote(request)} />
       </>
     );
   }
@@ -93,16 +103,7 @@ export function BridgeExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
         className="btn btn-primary"
         style={{ fontSize: 13, marginTop: 6, cursor: "pointer" }}
         disabled={isLoading}
-        onClick={() =>
-          fetchQuote({
-            fromChainId,
-            toChainId,
-            fromTokenAddress: fromToken.address,
-            toTokenAddress: toToken.address,
-            fromAmount: quote.amountBase.toString(),
-            fromAddress: address,
-          })
-        }
+        onClick={() => fetchQuote(request)}
       >
         {isLoading ? "Fetching best route…" : `Get route to ${CHAIN_LABEL[toChainId] ?? toChainId} →`}
       </button>

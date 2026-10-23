@@ -42,11 +42,14 @@ export function ValidatedExecuteButton({
   order,
   label,
   onConfirmed,
+  onRetry,
 }: {
   order: Order;
   label: string;
   /** Called once with the main tx hash after it confirms on-chain. */
   onConfirmed?: (hash: `0x${string}`) => void;
+  /** Called when the user retries after a failure (a route quote is refreshed there: the old one may be stale). */
+  onRetry?: () => void;
 }) {
   const { isConnected, address, chainId: walletChainId } = useAccount();
   const { switchChain, isPending: switching } = useSwitchChain();
@@ -146,7 +149,10 @@ export function ValidatedExecuteButton({
       <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--risk-bad, #c0392b)" }}>
         {friendly}
         <button
-          onClick={reset}
+          onClick={() => {
+            reset();
+            onRetry?.();
+          }}
           style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 11 }}
         >
           Retry

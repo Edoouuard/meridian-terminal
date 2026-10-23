@@ -9,6 +9,14 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 
 const secret = () => process.env.BOT_ENCRYPTION_KEY ?? "";
 export const boxConfigured = () => secret().length >= 32;
+/** What is wrong with BOT_ENCRYPTION_KEY, for the setup message (its length only, never the value), or null. */
+export const boxProblem = (): string | null => {
+  const n = secret().length;
+  if (n >= 32) return null;
+  return n === 0
+    ? "BOT_ENCRYPTION_KEY isn't set on this deployment (Production only? redeploy after adding it)"
+    : `BOT_ENCRYPTION_KEY is set but only ${n} characters: it needs 32+ random characters (not the command that makes them)`;
+};
 
 const keyOf = (s: string) => createHash("sha256").update(s).digest();
 

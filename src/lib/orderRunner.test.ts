@@ -106,6 +106,25 @@ describe("orderRunner — executePreparedOrder", () => {
     expect(simulations).toEqual(["approve", "supply"]);
   });
 
+  it("waits for a lagging RPC after the approval mines, rather than fail at once", async () => {
+    let supplySims = 0;
+    const { deps, writes } = fakeDeps({ allowance: 0n, failSimulation: (fn) => fn === "supply" && writes.length > 0 && ++supplySims < 3 });
+    const prepared = await prepareOrder(deps, supply());
+    if (!prepared.ok) throw new Error(prepared.message);
+    const res = await executePreparedOrder({ ...deps, sleep: async () => undefined }, prepared);
+    expect(res.ok).toBe(true);
+    expect(writes.map((w) => w.functionName)).toEqual(["approve", "supply"]);
+  });
+
+  it("stops before the second signature when the call keeps reverting after the approval", async () => {
+    const { deps, writes } = fakeDeps({ allowance: 0n, failSimulation: (fn) => fn === "supply" && writes.length > 0 });
+    const prepared = await prepareOrder(deps, supply());
+    if (!prepared.ok) throw new Error(prepared.message);
+    const res = await executePreparedOrder({ ...deps, sleep: async () => undefined }, prepared);
+    expect(res).toMatchObject({ ok: false, state: "SIMULATION_FAILED" });
+    expect(writes.map((w) => w.functionName)).toEqual(["approve"]);
+  });
+
   it("resets a non-zero USDT allowance to 0 before approving", async () => {
     const { deps, writes } = fakeDeps({ allowance: 1n });
     const prepared = await prepareOrder(deps, supply(USDT));
