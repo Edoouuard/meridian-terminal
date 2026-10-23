@@ -41,6 +41,8 @@ export function mentionedBases(text: string, markets: MarketSnapshot | undefined
   if (!markets) return [];
   const bases = new Set(markets.quotes.filter((q) => q.kind === "perp").map((q) => q.base.toUpperCase()));
   const out: string[] = [];
+  // A chain after "on / sur / from…" is where funds are, not an asset traded ("USDC on Ethereum" is no ETH position).
+  text = text.replace(/\b(on|sur|in|from|to|vers|via|de)\s+(arbitrum|ethereum|mainnet|base|optimism|polygon|avalanche|bnb chain|bsc|hyperevm)\b/gi, " ");
   for (const m of text.matchAll(/[A-Za-z&][A-Za-z0-9&]{1,11}(?::[A-Za-z0-9]+)?(?:-USD)?/g)) {
     const raw = m[0];
     const lower = raw.toLowerCase();
@@ -84,7 +86,8 @@ export function parsePairRequest(text: string, markets: MarketSnapshot | undefin
   const hl = /\b(hyperliquid|hl)\b/i.test(text);
   const ext = /\b(extended|x10)\b/i.test(text);
   const tx = /\btxflow\b/i.test(text);
-  const goal = /\b(neutral|neutre|beta|delta|pair|paire|volume|farm\w*|carry|spread|arb\w*)\b/i.test(text) || (/\blong\b/i.test(text) && /\bshort\b/i.test(text));
+  // "arbitrage", never "ARB" (the token, or Arbitrum written by its ticker).
+  const goal = /\b(neutral|neutre|beta|delta|pair|paire|volume|farm\w*|carry|spread|arbitrag\w*)\b/i.test(text) || (/\blong\b/i.test(text) && /\bshort\b/i.test(text));
   if (!goal) return null;
   // TxFlow with one other venue named: that pair (all three named: the model plans it).
   const venues: [Venue, Venue] | undefined = tx && hl && !ext ? ["Hyperliquid", "TxFlow"] : tx && ext && !hl ? ["Extended", "TxFlow"] : undefined;

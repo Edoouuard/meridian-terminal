@@ -24,6 +24,7 @@ export function FundsArrivalGate({
   prices,
   from = "bridge",
   children,
+  partial,
 }: {
   leg: TradeLeg;
   chainId: number;
@@ -31,6 +32,11 @@ export function FundsArrivalGate({
   /** What delivers the funds: a bridge, or a withdrawal from Hyperliquid to Arbitrum. */
   from?: "bridge" | "hyperliquid";
   children: ReactNode;
+  /**
+   * When less arrived than planned (a fee, a smaller withdrawal) but at least
+   * `minUsd`: offer to run the step on what is there, rendered by `render`.
+   */
+  partial?: { minUsd: number; render: (leg: TradeLeg) => ReactNode };
 }) {
   const { address } = useAccount();
   const symbol = spentSymbol(leg, chainId);
@@ -52,6 +58,8 @@ export function FundsArrivalGate({
   const reached = balance !== undefined && needed !== undefined && balance >= needed;
   const [arrived, setArrived] = useState(false);
   if (reached && !arrived) setArrived(true);
+  const [usePartial, setUsePartial] = useState<TradeLeg | null>(null);
+  if (usePartial && partial) return <>{partial.render(usePartial)}</>;
 
   // Can't measure it (unknown token or no price) → don't block; the leg's own
   // pre-signature balance check still applies.
@@ -59,11 +67,21 @@ export function FundsArrivalGate({
   if (reached || arrived) return <>{children}</>;
 
   const chainLabel = CHAIN_LABEL[chainId] ?? `chain ${chainId}`;
+  // What arrived so far, in USD, kept a hair under the balance (the order converts at the live price).
+  const haveUsd = balance !== undefined ? Math.floor((Number(balance) / 10 ** token.decimals) * (price ?? 1) * 0.995 * 100) / 100 : 0;
+  const canUsePartial = !!partial && haveUsd >= partial.minUsd;
   return (
-    <p className="text-muted" style={{ fontSize: 12, margin: "6px 0 0" }}>
-      Waiting for {from === "hyperliquid" ? "the Hyperliquid withdrawal" : "the bridge"} above to deliver {token.symbol} on {chainLabel}:{" "}
-      {balance !== undefined ? formatBaseUnits(balance, token.decimals) : "…"} / {formatBaseUnits(needed, token.decimals)} {token.symbol}.
-      This step unlocks on its own once the funds arrive ({from === "hyperliquid" ? "usually 3–5 min after the withdrawal" : "usually 1–3 min after the bridge confirms"}).
-    </p>
+    <div style={{ margin: "6px 0 0" }}>
+      <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
+        Waiting for {from === "hyperliquid" ? "the Hyperliquid withdrawal" : "the bridge"} above to deliver {token.symbol} on {chainLabel}:{" "}
+        {balance !== undefined ? formatBaseUnits(balance, token.decimals) : "…"} / {formatBaseUnits(needed, token.decimals)} {token.symbol}.
+        This step unlocks on its own once the funds arrive ({from === "hyperliquid" ? "usually 3–5 min after the withdrawal" : "usually 1–3 min after the bridge confirms"}).
+      </p>
+      {canUsePartial && (
+        <button type="button" className="btn btn-secondary" style={{ fontSize: 12, marginTop: 6 }} onClick={() => setUsePartial({ ...leg, sizeUsd: haveUsd })}>
+          Use the ${haveUsd.toFixed(2)} already there instead →
+        </button>
+      )}
+    </div>
   );
 }
