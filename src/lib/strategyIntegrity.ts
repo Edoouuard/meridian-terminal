@@ -15,6 +15,8 @@ import { HL_MIN_ORDER_USD } from "@/lib/integrations/hyperliquidTrade";
 import { HL_WITHDRAW_FEE_USD } from "@/lib/integrations/hyperliquidExchange";
 import { UNISWAP_SWAP_ROUTER02_BY_CHAIN } from "@/lib/integrations/uniswap";
 import { marketBase } from "@/lib/perpVenues";
+import { EXTENDED_MIN_DEPOSIT_USD } from "@/lib/integrations/extendedBridge";
+import { TXFLOW_MIN_DEPOSIT_USD } from "@/lib/integrations/txflow-live";
 
 export interface LLMLeg {
   side: string;
@@ -261,7 +263,32 @@ export function deliverUsableTokens(legs: LLMLeg[]): LLMLeg[] {
 
 export function validateAndFixStrategy(strategy: LLMStrategy, ctx?: WalletContext): LLMStrategy {
   const legs = (Array.isArray(strategy.legs) ? strategy.legs : []).filter((l) => l && typeof l.side === "string" && typeof l.asset === "string").map(cleanNumbers);
-  return fitToBudget(withdrawFromHyperliquid(checkStructure({ ...strategy, legs }, ctx), ctx), ctx);
+  return fitToBudget(withdrawFromHyperliquid(raiseToDepositMinimums(checkStructure({ ...strategy, legs }, ctx)), ctx), ctx);
+}
+
+/** What each venue's bridge takes at the least: a smaller deposit is lost or never credited. */
+const DEPOSIT_MINIMUM: { venue: RegExp; name: string; usd: number }[] = [
+  { venue: /extended/i, name: "Extended", usd: EXTENDED_MIN_DEPOSIT_USD },
+  { venue: /txflow/i, name: "TxFlow", usd: TXFLOW_MIN_DEPOSIT_USD },
+  { venue: /hyperliquid/i, name: "Hyperliquid", usd: 5 },
+];
+
+/**
+ * A margin deposit under its venue's minimum can't run (Extended's bridge
+ * takes $10): raise it to the minimum and say so, rather than show a plan
+ * that is blocked by its own size. HLP deposits are the strategy, not margin.
+ */
+export function raiseToDepositMinimums(strategy: LLMStrategy): LLMStrategy {
+  const notes: string[] = [];
+  const legs = strategy.legs.map((l) => {
+    if (!/^deposit$/i.test(l.side.trim()) || /\bhlp\b/i.test(l.asset)) return l;
+    const min = DEPOSIT_MINIMUM.find((m) => m.venue.test(l.protocol));
+    const size = l.sizeUsd ?? 0;
+    if (!min || !(size > 0) || size >= min.usd) return l;
+    notes.push(`${min.name}'s minimum deposit is $${min.usd}: the deposit was raised from $${size.toFixed(2).replace(/\.00$/, "")} to $${min.usd}.`);
+    return { ...l, sizeUsd: min.usd };
+  });
+  return notes.length ? { ...strategy, legs, fundingNotes: [...(strategy.fundingNotes ?? []), ...notes] } : strategy;
 }
 
 const isHlWithdraw = (l: LLMLeg) => /^withdraw$/i.test(l.side.trim()) && /hyperliquid/i.test(l.protocol);
@@ -281,7 +308,10 @@ export function withdrawFromHyperliquid(strategy: LLMStrategy, ctx?: WalletConte
   // Legs paid from the Hyperliquid account itself (HLP, spot buys) don't need the withdrawal.
   const missing = freshCapitalUsd(strategy.legs, held) - deployableUsd(ctx?.assets);
   if (!(missing > 1)) return strategy;
-  const size = Math.floor(Math.min(held, missing + HL_WITHDRAW_FEE_USD) * 100) / 100;
+  // Enough that what lands (after the fee, with the funding planner's rounding margin) covers the whole shortfall,
+  // and never a withdrawal too small to be worth its transaction.
+  const wanted = Math.max(MIN_BUDGET_USD, Math.ceil((missing / WITHDRAW_ARRIVAL_MARGIN + HL_WITHDRAW_FEE_USD) * 100) / 100);
+  const size = Math.floor(Math.min(held, wanted) * 100) / 100;
   const leg: LLMLeg = {
     side: "Withdraw",
     asset: "USDC",
@@ -311,6 +341,9 @@ function cleanNumbers(l: LLMLeg): LLMLeg {
   const chain = (/hyperliquid|extended|txflow/i.test(protocol) && /^deposit$/i.test(l.side.trim())) || isHlpLeg ? "Arbitrum" : l.chain;
   return { ...l, protocol, chain, sizeUsd: num(l.sizeUsd), leverage: num(l.leverage), stopLossPct: num(l.stopLossPct), takeProfitPct: num(l.takeProfitPct) };
 }
+
+/** The share of a withdrawal the funding planner lets the next step spend (its balance rounding margin is 0.995), with room to spare. */
+const WITHDRAW_ARRIVAL_MARGIN = 0.99;
 
 /** Below this, the planner already says the wallet is too thin: nothing to scale to. */
 const MIN_BUDGET_USD = 5;

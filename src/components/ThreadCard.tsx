@@ -451,7 +451,8 @@ export function ThreadCard({
                 key={i}
                 plan={plan}
                 isActive={i === activeIdx}
-                isRecommended={i === recommendedIdx}
+                // A blocked plan is never badged "Recommended": it stays first, saying what blocks it.
+                isRecommended={i === recommendedIdx && plan.status !== "blocked"}
                 onSelect={() => {
                   setActiveIdx(i);
                   onSelectVariant?.(plan);
