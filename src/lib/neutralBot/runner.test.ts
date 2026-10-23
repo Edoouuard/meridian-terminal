@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { extendedQuote, hlQuote } from "@/lib/planner/markets";
 import { DEFAULT_BOT_CONFIG, EMPTY_STATS, type BotConfig } from "@/lib/neutralBot/engine";
-import { runTick, type BotVenues } from "@/lib/neutralBot/runner";
+import { closeBotPair, runTick, type BotVenues } from "@/lib/neutralBot/runner";
 import type { PerpVenueName } from "@/lib/planner/markets";
 
 const hourly = (aprPct: number) => aprPct / 100 / 8760;
@@ -154,5 +154,47 @@ describe("neutral bot tick", () => {
     expect(posted[1]).toBe("buy 0.02@2499.9 ro");
     expect(f.pos).toEqual({ Hyperliquid: 0, Extended: 0 });
   });
-});
 
+  describe("Stop & close", () => {
+    const opened = async (f: ReturnType<typeof fakeVenues>) => (await runTick(cfg, EMPTY_STATS, snapshot, f.v, 1000, mid)).stats;
+
+    it("closes both legs at market, even unequal ones, and counts the pair", async () => {
+      const f = fakeVenues();
+      const stats = await opened(f);
+      f.pos.Extended = 0.03; // legs out of balance: a trim alone would leave the pair open
+      f.log.length = 0;
+      const r = await closeBotPair(cfg, stats, snapshot, f.v, 2000);
+      expect(f.pos).toEqual({ Hyperliquid: 0, Extended: 0 });
+      expect(f.log).toEqual(["Hyperliquid buy 0.02 ro", "Extended sell 0.03 ro"]);
+      expect(r.stats).toMatchObject({ openedAt: null, legs: [], cycles: 1 });
+      expect(r.message).toMatch(/Closed the pair \(stopped by you\)/);
+    });
+
+    it("closes a lone leg the bot opened", async () => {
+      const f = fakeVenues();
+      const stats = await opened(f);
+      f.pos.Hyperliquid = 0;
+      await closeBotPair(cfg, stats, snapshot, f.v, 2000);
+      expect(f.pos).toEqual({ Hyperliquid: 0, Extended: 0 });
+    });
+
+    it("in maker mode, closes at market rather than wait on a post-only order", async () => {
+      const f = fakeVenues();
+      const stats = await opened(f);
+      f.v.maker = { book: async () => ({ bid: 2499.9, ask: 2500.1 }), post: async () => ({ ok: true, oid: 1 }), cancel: async () => undefined, protect: async () => undefined };
+      f.log.length = 0;
+      await closeBotPair({ ...cfg, execution: "maker" }, stats, snapshot, f.v, 2000);
+      expect(f.log).toEqual(["Hyperliquid buy 0.02 ro", "Extended sell 0.02 ro"]);
+    });
+
+    it("never touches a position the bot didn't open, and says so", async () => {
+      const f = fakeVenues();
+      f.pos.Hyperliquid = -0.05;
+      const r = await closeBotPair(cfg, EMPTY_STATS, snapshot, f.v, 2000);
+      expect(f.log).toEqual([]);
+      expect(r.message).toMatch(/wasn't opened by the bot: left as is/);
+      const flat = await closeBotPair(cfg, EMPTY_STATS, snapshot, fakeVenues().v, 2000);
+      expect(flat.message).toMatch(/no pair open, nothing to close/);
+    });
+  });
+});
