@@ -41,6 +41,10 @@ import { userFacingError } from "@/lib/errorText";
 
 /** How long to wait for a tx to confirm before surfacing CONFIRMATION_TIMEOUT instead of hanging forever. */
 export const CONFIRMATION_TIMEOUT_MS = 120_000;
+/** The real call is simulated up to this many times after the approval mines, this far apart. */
+const POST_APPROVAL_SIM_ATTEMPTS = 4;
+const POST_APPROVAL_SIM_DELAY_MS = 1500;
+const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
@@ -69,6 +73,8 @@ export interface OrderRunnerDeps {
   client: OrderRunnerClient;
   writeContract: WriteAsync;
   sendTransaction: WriteAsync;
+  /** Waits between the post-approval simulation attempts (tests pass an instant one). */
+  sleep?: (ms: number) => Promise<void>;
   /** UI hook — called on every state transition (the runner already logs it). */
   onState?: (state: OrderFlowState, info?: { hash?: `0x${string}` }) => void;
 }
@@ -390,10 +396,24 @@ export async function executePreparedOrder(deps: OrderRunnerDeps, prepared: Prep
       transition(deps, plan, "APPROVAL_CONFIRMED", { hash: approvalHash });
 
       // The allowance is live on-chain only now — simulate the real call before the second signature.
-      try {
-        await simulatePlan(client, address, built);
-      } catch (err) {
-        return { ...failure(deps, plan, "SIMULATION_FAILED", `Transaction would fail after approval: ${errorMessage(err)}`), approvalHash };
+      // A load-balanced RPC can answer from a node a block behind the approval's receipt, where the
+      // allowance is still short and the call reverts: give it a few seconds to catch up first.
+      let lastErr: unknown = null;
+      for (let attempt = 0; attempt < POST_APPROVAL_SIM_ATTEMPTS; attempt++) {
+        if (attempt > 0) await (deps.sleep ?? defaultSleep)(POST_APPROVAL_SIM_DELAY_MS);
+        try {
+          await simulatePlan(client, address, built);
+          lastErr = null;
+          break;
+        } catch (err) {
+          lastErr = err;
+        }
+      }
+      if (lastErr) {
+        return {
+          ...failure(deps, plan, "SIMULATION_FAILED", `Transaction would fail after approval: ${errorMessage(lastErr)} Your approval stays in place: a retry asks only for the transaction's signature.`),
+          approvalHash,
+        };
       }
     }
   }
