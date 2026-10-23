@@ -43,7 +43,7 @@ const COIN_NAMES: Record<string, string> = {
   bnb: "BNB", dogecoin: "DOGE", doge: "DOGE", cardano: "ADA", ada: "ADA", tron: "TRX", trx: "TRX", hyperliquid: "HYPE", hype: "HYPE",
   chainlink: "LINK", link: "LINK", avalanche: "AVAX", avax: "AVAX", sui: "SUI", toncoin: "TON", ton: "TON", litecoin: "LTC", ltc: "LTC",
   polkadot: "DOT", uniswap: "UNI", aave: "AAVE", arbitrum: "ARB", optimism: "OP", pepe: "PEPE", near: "NEAR", aptos: "APT", monero: "XMR", xmr: "XMR",
-  ena: "ENA", ethena: "ENA", usdc: "USDC", tether: "USDT", usdt: "USDT", stablecoin: "USDC", stablecoins: "USDC",
+  ena: "ENA", ethena: "ENA", usdc: "USDC", tether: "USDT", usdt: "USDT",
 };
 
 export function coinTags(text: string): string[] {
