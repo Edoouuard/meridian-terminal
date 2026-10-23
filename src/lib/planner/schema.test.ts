@@ -288,3 +288,39 @@ describe("farming pair sized on the whole capital (owner report: 25% gave $4.80 
     expect(kept.status).toBe("blocked");
   });
 });
+
+describe("a deposit to Extended paid from the Hyperliquid account (owner's test, 2026-10-23)", () => {
+  // $1.80 of USDC in the wallet on Arbitrum, $53 in the Hyperliquid account; the user asks to deposit $5 to Extended.
+  const assets = [
+    { symbol: "USDC", venue: "Wallet", chain: "Arbitrum", usd: 1.8 },
+    { symbol: "USDC", venue: "Hyperliquid perps", chain: "Hyperliquid L1", usd: 53.43 },
+  ];
+  const plan = (sizeUsd: number, blockers?: string[]): LLMStrategy =>
+    ({
+      name: `Deposit $${sizeUsd} to Extended`,
+      risk: "low",
+      variantNote: "",
+      summary: "",
+      legs: [{ side: "Deposit", asset: "USDC", protocol: "Extended", chain: "Arbitrum", sizeUsd }],
+      blockers,
+    }) as LLMStrategy;
+
+  it("raises the deposit to Extended's $10 minimum, withdraws enough from Hyperliquid, and runs", async () => {
+    const { validateAndFixStrategy } = await import("@/lib/strategyIntegrity");
+    const fixed = [plan(5, ["Extended's deposit minimum is $10; a $5 deposit is lost.", "Wallet holds $2 native USDC on Arbitrum, below the $5 needed."]), plan(10)].map((s) =>
+      validateAndFixStrategy(s, { assets }),
+    );
+    const [withdraw, deposit] = fixed[0].legs;
+    expect(deposit).toMatchObject({ side: "Deposit", protocol: "Extended", sizeUsd: 10 });
+    expect(withdraw).toMatchObject({ side: "Withdraw", protocol: "Hyperliquid" });
+    // What lands after the $1 fee, plus the wallet's $1.80, covers the $10 with the rounding margin.
+    expect((withdraw.sizeUsd! - 1 + 1.8) * 0.995).toBeGreaterThanOrEqual(10);
+    expect(fixed[0].fundingNotes?.join(" ")).toMatch(/minimum deposit is \$10/);
+
+    const out = enforceConformance(fixed, "move", ctx({ extended: extendedEmpty, balances: { ...funded, walletDeployableUsd: 1.8 } }));
+    // The $5 and $10 requests became the same plan: shown once, and executable.
+    expect(out.strategies).toHaveLength(1);
+    expect(out.strategies[0]).toMatchObject({ status: "executable" });
+    expect(out.strategies[0].blockers).toBeUndefined();
+  });
+});

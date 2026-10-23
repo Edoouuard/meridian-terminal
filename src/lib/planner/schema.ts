@@ -13,6 +13,7 @@ import type { LLMLeg, LLMStrategy } from "@/lib/strategyIntegrity";
 import { belowMinimum } from "@/lib/strategyIntegrity";
 import type { ExplicitPerpOrder } from "@/lib/explicitOrder";
 import { marketBase } from "@/lib/perpVenues";
+import { HL_WITHDRAW_FEE_USD } from "@/lib/integrations/hyperliquidExchange";
 import { EXECUTION_POLICY, SIZING_POLICY } from "@/lib/planner/policy";
 import type { MarketSnapshot, PerpVenueName } from "@/lib/planner/markets";
 import { computeVenueEconomics, findQuote, isVenuePlan, type Economics, type VenueBalances } from "@/lib/planner/economics";
@@ -118,6 +119,12 @@ export function deviations(s: LLMStrategy, ctx: ConformanceContext): string[] {
   return out;
 }
 
+/** A model-written blocker about wallet funds or a size minimum. */
+const FUNDING_BLOCKER = /\b(wallet|holds?|balance|insufficient|not enough|minimum|worth a transaction|is lost)\b/i;
+
+const legsSignature = (s: PlannerStrategy) =>
+  JSON.stringify([s.economics?.annualizedGrossCarryUsd ?? null, s.apy ?? null, ...(s.legs ?? []).map((l) => [l.side.trim().toLowerCase(), l.asset.trim().toLowerCase(), venueOf(l), l.chain ?? "", Math.round((l.sizeUsd ?? 0) * 100), l.leverage ?? 1])]);
+
 const isExtDeposit = (l: LLMLeg) => /extended/i.test(l.protocol) && /^(deposit|fund)$/i.test(l.side.trim());
 
 /** Why the Extended legs can't run now, from the account state (empty = they can, or there are none). A deposit leg in the plan counts toward the margin. */
@@ -129,8 +136,14 @@ export function extendedBlockers(s: LLMStrategy, ext: ConformanceContext["extend
   if (ext.network && ext.network !== "mainnet") return [`Extended is connected on ${ext.network} only; real orders need the mainnet account.`];
   if (ext.availableUsd === undefined) return ["Extended balance unknown right now (status unknown): these legs aren't treated as executable."];
   const planned = depositLegs.reduce((a, l) => a + (l.sizeUsd ?? 0), 0);
-  const deposits = walletUsd === undefined ? planned : Math.min(planned, walletUsd);
-  if (planned > 0 && deposits < planned) return [`The deposit to Extended needs $${Math.ceil(planned)} of USDC on Arbitrum; the wallet holds about $${Math.floor(walletUsd ?? 0)}.`];
+  // A withdrawal from the Hyperliquid account earlier in the plan lands in the wallet before the deposit runs.
+  const withdrawn = (s.legs ?? [])
+    .filter((l) => /^withdraw$/i.test(l.side.trim()) && /hyperliquid/i.test(l.protocol))
+    .reduce((a, l) => a + Math.max(0, (l.sizeUsd ?? 0) - HL_WITHDRAW_FEE_USD), 0);
+  const inWallet = walletUsd === undefined ? undefined : walletUsd + withdrawn;
+  // One cent of slack: sizes are rounded to the cent on both sides.
+  const deposits = inWallet === undefined ? planned : Math.min(planned, inWallet + 0.01);
+  if (planned > 0 && deposits < planned) return [`The deposit to Extended needs $${Math.ceil(planned)} of USDC on Arbitrum; the wallet holds about $${Math.floor(walletUsd ?? 0)}${withdrawn > 0 ? ` plus $${Math.floor(withdrawn)} arriving from Hyperliquid` : ""}.`];
   const needed = legs.reduce((a, l) => a + ((l.sizeUsd ?? 0) / Math.max(1, l.leverage ?? 1)) * (1 + SIZING_POLICY.marginBufferPct / 100), 0);
   if (legs.length > 0 && (ext.availableUsd + deposits < needed || ext.availableUsd + deposits <= SIZING_POLICY.feeReserveUsd)) {
     return [
@@ -319,7 +332,13 @@ export function enforceConformance(raw: LLMStrategy[], objective: Objective | un
     // Venue plans are checked against each market's own minimum above; other steps against the $5 floor.
     const tooSmall = isVenuePlan(s) ? null : belowMinimum(s);
     if (tooSmall) blockers.push(tooSmall);
-    const own = Array.isArray(s.blockers) ? s.blockers.filter((b) => typeof b === "string" && b.trim()) : [];
+    // On venue plans and Extended deposits, balances and minimums are the server's to check, on the plan
+    // as fixed (deposits raised to the venue's minimum, withdrawals added): the model wrote its own
+    // about the plan before those fixes.
+    const serverChecksFunds = isVenuePlan(s) || (s.legs ?? []).some(isExtDeposit);
+    const own = Array.isArray(s.blockers)
+      ? s.blockers.filter((b) => typeof b === "string" && b.trim() && !(serverChecksFunds && FUNDING_BLOCKER.test(b)))
+      : [];
     const all = [...new Set([...blockers, ...own])];
     s.blockers = all.length ? all : undefined;
     s.status = s.blockers ? "blocked" : "executable";
@@ -327,6 +346,12 @@ export function enforceConformance(raw: LLMStrategy[], objective: Objective | un
     // An alternative is only worth showing if it runs now.
     if (s.kind === "alternative" && s.status === "blocked") {
       notes.push(`"${s.name}" dropped: a blocked alternative`);
+      continue;
+    }
+    // The same steps for the same return twice (two sizes the fixes brought to one) is one plan.
+    const sig = legsSignature(s);
+    if (out.some((o) => legsSignature(o) === sig)) {
+      notes.push(`"${s.name}" dropped: same steps as an earlier plan`);
       continue;
     }
     out.push(s);
