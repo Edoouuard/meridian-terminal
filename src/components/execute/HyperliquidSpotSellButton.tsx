@@ -17,6 +17,7 @@ import { StrategyLegContext } from "@/components/thread/strategyLegContext";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { NotWired, OrderRow } from "@/components/thread/shared";
 import { recordExecution } from "@/lib/history";
+import { humanizeMessage } from "@/lib/errorText";
 
 const HYPEREVM_ID = 999;
 const muted = { margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" } as const;
@@ -111,7 +112,7 @@ export function HyperliquidSpotSellButton({ leg, onFilled }: { leg: TradeLeg; on
   if (status === "error") {
     return (
       <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--risk-bad, #c0392b)" }}>
-        {`Hyperliquid: ${error ?? "the sell failed"}`}
+        {`Hyperliquid: ${humanizeMessage(error) || "the sell failed"}`}
         <button onClick={reset} style={{ marginLeft: 8, background: "none", border: "none", cursor: "pointer", color: "var(--color-neutral-500)", fontSize: 11 }}>
           clear
         </button>

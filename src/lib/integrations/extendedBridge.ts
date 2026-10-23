@@ -156,7 +156,7 @@ export async function quoteArbitrumDeposit(signer: ExtendedSigner, amountUsd: nu
     }
   }
   throw new ExtendedBridgeError(
-    `Extended's deposit API is failing ("${last instanceof Error ? last.message : "server error"}" on every quote): Extended moved its settlement from Starknet to Arc on 22 October 2026, and its API for deposits from another chain hasn't been updated for it yet. Nothing was sent. Deposit with this same wallet on app.extended.exchange instead: Meridian reads the balance as soon as it lands, and the bot uses it.`,
+    "Extended's deposit service isn't answering right now, so nothing was sent. Deposit with this same wallet on app.extended.exchange instead: Meridian reads the balance as soon as it lands, and the bot uses it.",
     last instanceof ExtendedBridgeError ? last.status : 500,
   );
 }

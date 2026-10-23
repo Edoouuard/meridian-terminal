@@ -309,7 +309,7 @@ export function resolveOrderForLeg(
                 ? "approve"
                 : undefined;
     if (!orderType) {
-      return { unsupported: `Aave ${leg.side} is not wired for live execution yet` };
+      return { unsupported: `Aave ${leg.side} isn't available in Meridian yet` };
     }
     const symbol = bareSymbol(leg.asset);
     const token = findToken(symbol, resolveChainId);
@@ -356,7 +356,7 @@ export function resolveOrderForLeg(
                 ? "approve"
                 : undefined;
     if (!orderType) {
-      return { unsupported: `Compound ${leg.side} is not wired for live execution yet` };
+      return { unsupported: `Compound ${leg.side} isn't available in Meridian yet` };
     }
     const symbol = bareSymbol(leg.asset);
     if (symbol !== "USDC") {
@@ -445,7 +445,7 @@ export function resolveOrderForLeg(
       side === "repay" ? "repay" : side === "supply" ? "supply" : side === "borrow" ? "borrow"
         : side === "withdraw" ? "withdraw" : side === "approve" ? "approve" : undefined;
     if (!orderType) {
-      return { unsupported: `Spark ${leg.side} is not wired for live execution yet` };
+      return { unsupported: `Spark ${leg.side} isn't available in Meridian yet` };
     }
     if (!SPARK_POOL_BY_CHAIN[resolveChainId]) {
       return { unsupported: `Spark is not deployed on this chain — only Ethereum and Gnosis.` };
@@ -674,7 +674,7 @@ export function resolveOrderForLeg(
         decimals: 18,
       } as Order;
     }
-    return { unsupported: `${venue} perps not wired for live execution yet` };
+    return { unsupported: `${venue} perps aren't available in Meridian yet` };
   }
 
   // --- Remaining protocols -------------------------------------------------
@@ -688,7 +688,7 @@ export function resolveOrderForLeg(
       return { type: "swap", protocol: "pendle", token: token.address, symbol: token.symbol, amount: "0", chainId: resolveChainId, decimals: token.decimals };
     }
     case "lido":
-      return { unsupported: `Lido ${leg.side || "action"} not wired for live execution yet` };
+      return { unsupported: `Lido ${leg.side || "action"} isn't available in Meridian yet` };
     case "eigenlayer": {
       // Restake stETH (the only open LST strategy wired), Ethereum only.
       if (resolveChainId !== 1) return { unsupported: "EigenLayer restaking is only available on Ethereum mainnet." };
@@ -737,7 +737,7 @@ export function resolveOrderForLeg(
       } as Order;
     }
     default:
-      return { unsupported: `${venue} is not wired for live execution yet` };
+      return { unsupported: `${venue} isn't available in Meridian yet` };
   }
 }
 

@@ -11,6 +11,7 @@ import { useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { OrderRow } from "@/components/thread/shared";
 import { recordExecution } from "@/lib/history";
+import { humanizeMessage } from "@/lib/errorText";
 
 const muted = { margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" } as const;
 const fmt = (x: number) => `$${x.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -97,7 +98,7 @@ export function HyperliquidWithdrawButton({ leg, onDone }: { leg: TradeLeg; onDo
     <>
       {row}
       <OrderRow label="Withdraw" value={`${fmt(amount)} USDC → Arbitrum (≈ ${fmt(arrives)} after the ${fmt(HL_WITHDRAW_FEE_USD)} fee)`} valueColor="var(--color-accent-700)" />
-      {state.status === "error" && <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--risk-bad, #c0392b)" }}>{state.error}</p>}
+      {state.status === "error" && <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--risk-bad, #c0392b)" }}>{humanizeMessage(state.error)}</p>}
       <button className="btn btn-primary" style={{ fontSize: 13, marginTop: 6, cursor: "pointer" }} onClick={() => setConfirming(true)}>
         Withdraw {fmt(amount)} from Hyperliquid →
       </button>

@@ -26,11 +26,9 @@ import { executableCoverage } from "@/lib/coverage";
 import { ArbView } from "@/components/ArbView";
 import { NeutralBotView } from "@/components/NeutralBotView";
 import { BotStatusChip } from "@/components/BotStatusChip";
-import { LifiPerpsConnectPanel } from "@/components/LifiPerpsConnectPanel";
 import { LidoWithdrawalsPanel } from "@/components/LidoWithdrawalsPanel";
 import { PerpPositionsPanel } from "@/components/PerpPositionsPanel";
 import { SolanaPanel } from "@/components/SolanaPanel";
-import { McpStatusPanel } from "@/components/McpStatusPanel";
 import { BridgePanel } from "@/components/BridgePanel";
 import { LiveAsset, useLivePortfolio } from "@/hooks/useLivePortfolio";
 import { useHaikuPortfolio } from "@/hooks/useHaikuPortfolio";
@@ -485,19 +483,10 @@ export default function TerminalApp() {
                   <div id={VENUE_ANCHOR.txflow}>
                     <TxflowPanel />
                   </div>
-                  <div id={VENUE_ANCHOR.ondo}>
-                    <LifiPerpsConnectPanel provider="ondo" />
-                  </div>
-                  <div id={VENUE_ANCHOR.lighter}>
-                    <LifiPerpsConnectPanel provider="lighter" />
-                  </div>
                 </>
               )}
               {FEATURES.solana && <SolanaPanel />}
-              <details className="system-status">
-                <summary>System status</summary>
-                <McpStatusPanel />
-              </details>
+
             </>
           )}
           {leftTab === "strategies" && <StrategiesPanel />}

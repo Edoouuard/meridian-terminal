@@ -20,6 +20,7 @@ import { useSharedHlEnv } from "@/hooks/useHyperliquidEnv";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { NotWired, OrderRow } from "@/components/thread/shared";
 import { recordExecution } from "@/lib/history";
+import { humanizeMessage } from "@/lib/errorText";
 
 const muted = { margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" } as const;
 
@@ -151,7 +152,7 @@ export function HyperliquidSpotBuyButton({ leg, onFilled }: { leg: TradeLeg; onF
         >
           {moving === "pending" ? "Moving USDC to spot…" : `Move $${amount.toFixed(2)} USDC to spot →`}
         </button>
-        {moving && moving !== "pending" && <p style={{ ...muted, color: "var(--risk-bad, #c0392b)" }}>{moving}</p>}
+        {moving && moving !== "pending" && <p style={{ ...muted, color: "var(--risk-bad, #c0392b)" }}>{humanizeMessage(moving)}</p>}
       </>
     );
   }

@@ -34,9 +34,9 @@ describe("routeThesis — EXAMPLE_THESIS_FOR_TYPE round-trips", () => {
 });
 
 describe("routeThesis — variant alternatives surface without changing the default plan", () => {
-  it("the betaneutral example carries all 3 venue variants, defaulting to the one it already resolved to", () => {
+  it("the betaneutral example carries the live venue variants, defaulting to the one it already resolved to", () => {
     const routed = routeThesis(EXAMPLE_THESIS_FOR_TYPE.betaneutral);
-    expect(routed.variants).toHaveLength(3);
+    expect(routed.variants).toHaveLength(2);
     expect(routed.plan).toBe(routed.variants![0]); // Extended, same as the single-plan default above.
   });
 

@@ -9,7 +9,7 @@ import type { TradeLeg, TradePlan } from "@/lib/tradePlan";
 import { StrategyLegContext } from "@/components/thread/strategyLegContext";
 import { useLivePrices } from "@/hooks/useLivePrices";
 import { useBestYield } from "@/hooks/useBestYield";
-import { useHlpApr, useLlpApr } from "@/hooks/useVaultYields";
+import { useHlpApr } from "@/hooks/useVaultYields";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
 import { MorphoExecuteButton } from "@/components/execute/VenueExecuteButtons";
 import { HlpDepositButton } from "@/components/execute/HyperliquidEarnButtons";
@@ -63,13 +63,14 @@ function YieldOptionRow({ option, asset, sizeUsd }: { option: MergedYieldOption;
         </StrategyLegContext.Provider>
       ) : (
         <NotWired
+          building
           venue={option.protocol}
           reason={
             option.kind === "vault"
-              ? `${option.protocol} deposit isn't wired for one-click execution yet — this is a real live rate, not something you can act on from here today.`
+              ? `A live rate, shown for comparison: ${option.protocol} deposits aren't available in Meridian yet.`
               : option.kind === "lp"
-                ? `${option.protocol} liquidity provision carries impermanent-loss risk and isn't wired for one-click execution yet.`
-                : `${option.protocol} isn't wired for one-click execution yet — this is a real live rate from DefiLlama, shown for comparison.`
+                ? `A live rate, shown for comparison: providing liquidity on ${option.protocol} isn't available in Meridian yet (and carries impermanent-loss risk).`
+                : `A live rate, shown for comparison: ${option.protocol} isn't available in Meridian yet.`
           }
         />
       )}
@@ -106,7 +107,6 @@ export function YieldFinderCard({ asset, sizeUsd }: { asset: string; sizeUsd: nu
   const upperAsset = asset.toUpperCase();
   const { data: pools, isLoading: poolsLoading } = useBestYield(upperAsset);
   const { data: hlpApr, isLoading: hlpLoading } = useHlpApr();
-  const { data: llpApr, isLoading: llpLoading } = useLlpApr();
   const isUsdc = upperAsset === "USDC";
 
   const options: MergedYieldOption[] = useMemo(() => {
@@ -124,21 +124,10 @@ export function YieldFinderCard({ asset, sizeUsd }: { asset: string; sizeUsd: nu
     if (isUsdc && typeof hlpApr === "number") {
       base.push({ protocol: "Hyperliquid HLP", chain: "Hyperliquid", apy: hlpApr, tvlUsd: 0, kind: "vault", wired: false });
     }
-    if (isUsdc && typeof llpApr === "number") {
-      base.push({
-        protocol: "Lighter LLP",
-        chain: "Lighter",
-        apy: llpApr,
-        tvlUsd: 0,
-        kind: "vault",
-        wired: false,
-        vaultNote: "Depositing into LLP requires locking LIT tokens (1:10 ratio) — not just USDC.",
-      });
-    }
     return base.sort((a, b) => b.apy - a.apy);
-  }, [pools, hlpApr, llpApr, isUsdc]);
+  }, [pools, hlpApr, isUsdc]);
 
-  const loading = poolsLoading || (isUsdc && (hlpLoading || llpLoading));
+  const loading = poolsLoading || (isUsdc && hlpLoading);
 
   if (loading && options.length === 0) {
     return (
@@ -162,7 +151,7 @@ export function YieldFinderCard({ asset, sizeUsd }: { asset: string; sizeUsd: nu
 
   const sections: { label: string; apy: number; pools: MergedYieldOption[] }[] = [{ label: "Best live rate", apy: best.apy, pools: [best] }];
   if (establishedPool && establishedPool.protocol !== best.protocol) {
-    sections.push({ label: "Established — already wired for one click", apy: establishedPool.apy, pools: [establishedPool] });
+    sections.push({ label: "Established — one click in Meridian", apy: establishedPool.apy, pools: [establishedPool] });
   }
   if (splitPool.length > 1) {
     sections.push({ label: `Diversified — split evenly across ${splitPool.length}`, apy: blendedApy, pools: splitPool });
@@ -184,7 +173,7 @@ export function YieldFinderCard({ asset, sizeUsd }: { asset: string; sizeUsd: nu
         </div>
       ))}
       <p className="text-muted" style={{ fontSize: 10, margin: 0 }}>
-        Lending/LP rates from DefiLlama&apos;s free yields API · vault APRs read live from Hyperliquid/Lighter&apos;s own APIs — not editorial picks.
+        Lending and LP rates from DefiLlama · the HLP vault rate read live from Hyperliquid — data, not editorial picks.
       </p>
     </div>
   );

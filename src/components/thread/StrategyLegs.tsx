@@ -18,6 +18,8 @@ import { PHILIDOR_PROTOCOL_ID, philidorAssetQuery } from "@/lib/integrations/phi
 import { formatBaseUnits } from "@/lib/quote";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FEATURES } from "@/lib/features";
+import { isBuildingVenue } from "@/lib/buildingVenues";
+import { BuildingBadge } from "@/components/BuildingBadge";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
 import { StrategyLegContext } from "@/components/thread/strategyLegContext";
 import { confirmStrategyLeg, pairPartnerQty, remainingLegIndexes, strategyId, useTrackedStrategies } from "@/lib/strategyTracker";
@@ -33,7 +35,7 @@ import { ExtendedDepositButton } from "@/components/execute/ExtendedDepositButto
 import { PerpPairButton } from "@/components/execute/PerpPairButton";
 import { RunAsBotButton } from "@/components/execute/RunAsBotButton";
 import { TxflowDepositButton, TxflowPerpExecuteButton, TxflowWithdrawButton } from "@/components/execute/TxflowButtons";
-import { ExtendedPerpExecuteButton, LifiPerpExecuteButton, PerpExecuteButton } from "@/components/execute/PerpExecuteButtons";
+import { ExtendedPerpExecuteButton, PerpExecuteButton } from "@/components/execute/PerpExecuteButtons";
 import { LidoUnstakeButton, MorphoExecuteButton, MorphoWithdrawButton, PendleExecuteButton, SwapExecuteButton } from "@/components/execute/VenueExecuteButtons";
 import { NotWired, OrderRow, RISK_TIER_COLOR, isUnsupported, legRowValue } from "@/components/thread/shared";
 
@@ -92,7 +94,7 @@ function StakeYieldBadge({ leg }: { leg: TradeLeg }) {
       value={
         lidoIsBest || !lido
           ? `Lido ${(lido ?? best).apy.toFixed(2)}% APY (best live rate)`
-          : `Lido ${lido.apy.toFixed(2)}% — ${best.protocol} offers ${best.apy.toFixed(2)}% but isn't wired for live execution`
+          : `Lido ${lido.apy.toFixed(2)}% — ${best.protocol} offers ${best.apy.toFixed(2)}%, not yet available in Meridian`
       }
       valueColor={lidoIsBest || !lido ? "var(--risk-good)" : "var(--risk-warning)"}
     />
@@ -230,25 +232,25 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
             ) : isHlWithdraw ? (
               <HyperliquidWithdrawButton leg={leg} onDone={recordFill(i)} />
             ) : isVenueOther ? (
-              <NotWired venue={protocolLabel(leg.protocol)} reason={`${leg.side} on ${protocolLabel(leg.protocol)} is done in its own app — Meridian places orders and deposits there.`} />
+              <NotWired building venue={protocolLabel(leg.protocol)} reason={`${leg.side} on ${protocolLabel(leg.protocol)} is done in its own app — Meridian places orders and deposits there.`} />
             ) : isPendleExit ? (
-              <NotWired venue="Pendle" reason="Selling or redeeming a PT is done in the Pendle app (app.pendle.finance) for now." />
+              <NotWired building venue="Pendle" reason="Selling or redeeming a PT is done in the Pendle app (app.pendle.finance) for now." />
             ) : isHlSpotSell ? (
               <HyperliquidSpotSellButton leg={leg} onFilled={recordFill(i)} />
             ) : isHlSpotBuy ? (
               <HyperliquidSpotBuyButton leg={leg} onFilled={recordFill(i)} />
             ) : isPerp && !FEATURES.perps ? (
-              <NotWired venue={leg.protocol} reason="Perps are paused during the beta while spot execution is validated end to end." />
+              <NotWired building venue={leg.protocol} reason="Perps are paused during the beta while spot execution is validated end to end." />
             ) : isPerp && /hyperliquid/i.test(leg.protocol || "") ? (
               <PerpExecuteButton leg={leg} hedged={hedgesSpot(leg, plan.legs)} onFilled={recordFill(i)} baseQty={partnerQty(i)} />
             ) : /txflow/i.test(leg.protocol || "") ? (
               <TxflowPerpExecuteButton leg={leg} hedged={hedgesSpot(leg, plan.legs)} onFilled={recordFill(i)} baseQty={partnerQty(i)} />
             ) : /extended/i.test(leg.protocol || "") ? (
               <ExtendedPerpExecuteButton leg={leg} prices={prices} onFilled={recordFill(i)} baseQty={partnerQty(i)} />
-            ) : /ondo/i.test(leg.protocol || "") ? (
-              <LifiPerpExecuteButton leg={leg} prices={prices} provider="ondo" />
-            ) : /lighter/i.test(leg.protocol || "") ? (
-              <LifiPerpExecuteButton leg={leg} prices={prices} provider="lighter" />
+            ) : isBuildingVenue(leg.protocol) ? (
+              <p className="text-muted" style={{ fontSize: 11, margin: "4px 0 0" }}>
+                <BuildingBadge /> {leg.protocol} isn&apos;t available in Meridian yet.
+              </p>
             ) : /uniswap/i.test(leg.protocol || "") ? (
               <SwapExecuteButton leg={leg} prices={prices} />
             ) : isMorpho ? (
@@ -260,9 +262,9 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
             ) : isBridge ? (
               <BridgeExecuteButton leg={leg} prices={prices} />
             ) : isLifiSwap ? (
-              <NotWired venue="LI.FI" reason="Same-chain LI.FI swaps aren't wired yet — cross-chain moves use the Bridge step." />
+              <NotWired building venue="LI.FI swaps" reason="Same-chain LI.FI swaps aren't available yet: cross-chain moves use the Bridge step." />
             ) : isUnsupported(resolved) ? (
-              <NotWired venue={protocolLabel(leg.protocol)} reason={resolved.unsupported} />
+              <NotWired building={/available in Meridian yet/i.test(resolved.unsupported)} venue={protocolLabel(leg.protocol)} reason={resolved.unsupported} />
             ) : null
           ) : (
             <>

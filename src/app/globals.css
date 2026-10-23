@@ -455,12 +455,10 @@ textarea.input { overflow-y: auto; max-height: 120px; }
   background: var(--color-bg);
 }
 .side-tabs .seg-opt span { display: block; width: 100%; text-align: center; }
-.how-computed,
-.system-status {
+.how-computed {
   font-size: 11px;
 }
-.how-computed summary,
-.system-status summary {
+.how-computed summary {
   cursor: pointer;
   color: var(--color-neutral-600);
   font-size: 11px;
@@ -471,7 +469,6 @@ textarea.input { overflow-y: auto; max-height: 120px; }
   font-size: 11px;
   line-height: 1.5;
 }
-.system-status > :not(summary) { margin-top: 8px; }
 .suggestion-card {
   display: flex;
   flex-direction: column;
@@ -1899,3 +1896,19 @@ body {
 .arb-card__more summary { cursor: pointer; font-size: 11px; }
 .arb-card__alerts { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
 .arb-card__alerts .arb-card__size input { width: 52px; }
+
+/* A feature shown but not available yet: greyed, with a "Building" tag. */
+.badge-building {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--color-divider);
+  background: color-mix(in srgb, var(--color-text) 5%, transparent);
+  color: var(--color-neutral-500, #8a8a8a);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+.is-building { opacity: 0.55; cursor: not-allowed; }

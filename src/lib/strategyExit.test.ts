@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { currentValueUsd, exitPlan, exitTradePlan, positionFor } from "@/lib/strategyExit";
 import type { TrackedLeg, TrackedStrategy } from "@/lib/strategyTracker";
 import { resolveOrderForLeg } from "@/lib/assetMap";
-import type { Order } from "@/lib/execution";
 
 const leg = (l: Partial<TrackedLeg> & Pick<TrackedLeg, "side" | "asset" | "protocol">, status: TrackedLeg["status"] = "confirmed"): TrackedLeg => ({ status, ...l });
 const strat = (legs: TrackedLeg[]): TrackedStrategy => ({ id: "s1", title: "ETH carry", summary: "", apyKind: "variable", createdAt: 0, legs });

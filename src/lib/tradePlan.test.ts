@@ -135,10 +135,10 @@ describe("tradePlan — borrowing / supply / repay intents", () => {
 });
 
 describe("tradePlan — parseThesisVariants (risk-tiered alternatives)", () => {
-  it("offers all 3 perp venues for a beta-neutral farm, naming the mentioned one first", () => {
-    const variants = parseThesisVariants("Farm points on Lighter without directional risk");
-    expect(variants).toHaveLength(3);
-    expect(variants.map((v) => v.variantLabel)).toEqual(["Lighter", "Extended", "Ondo"]);
+  it("offers the live perp venues for a beta-neutral farm, naming the mentioned one first", () => {
+    const variants = parseThesisVariants("Farm points on TxFlow without directional risk");
+    expect(variants).toHaveLength(2);
+    expect(variants.map((v) => v.variantLabel)).toEqual(["TxFlow", "Extended"]);
     // Every variant is still a full, independently executable plan.
     for (const v of variants) {
       expect(v.legs.map((l) => l.protocol)).toEqual(["Hyperliquid", v.variantLabel]);
@@ -148,7 +148,12 @@ describe("tradePlan — parseThesisVariants (risk-tiered alternatives)", () => {
 
   it("defaults the beta-neutral venue order to Extended first when none is named", () => {
     const variants = parseThesisVariants("Farm HYPE points without directional risk");
-    expect(variants.map((v) => v.variantLabel)).toEqual(["Extended", "Lighter", "Ondo"]);
+    expect(variants.map((v) => v.variantLabel)).toEqual(["Extended", "TxFlow"]);
+  });
+
+  it("never offers a venue still being built (Lighter, Ondo), even when named", () => {
+    const variants = parseThesisVariants("Farm points on Lighter without directional risk");
+    expect(variants.map((v) => v.variantLabel)).toEqual(["Extended", "TxFlow"]);
   });
 
   it("offers 3 leverage tiers for a directional perp with no explicit leverage", () => {

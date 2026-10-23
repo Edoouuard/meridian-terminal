@@ -9,6 +9,7 @@ import { useBridge, USDC_BY_CHAIN } from "@/hooks/useBridge";
 import { CHAIN_LABEL } from "@/lib/onchain";
 import { formatBaseUnits } from "@/lib/quote";
 import { isRoutingSupportedChain } from "@/lib/mcp/routerAllowlist";
+import { humanizeMessage } from "@/lib/errorText";
 
 /** Chains with a verified router entrypoint (routerAllowlist) and native USDC. */
 const BRIDGE_CHAINS = Object.keys(USDC_BY_CHAIN)
@@ -131,7 +132,7 @@ export function BridgePanel() {
 
       {inputError && <p style={{ fontSize: 11, margin: "6px 0 0", color: "var(--risk-warning)" }}>{inputError}</p>}
       {status === "error" && bridge.error && (
-        <p style={{ fontSize: 11, margin: "6px 0 0", color: "var(--risk-warning)" }}>{bridge.error}</p>
+        <p style={{ fontSize: 11, margin: "6px 0 0", color: "var(--risk-warning)" }}>{humanizeMessage(bridge.error)}</p>
       )}
 
       {quote && order && (

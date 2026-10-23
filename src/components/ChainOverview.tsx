@@ -96,7 +96,7 @@ export function ChainOverview({ hideDivider }: { hideDivider?: boolean } = {}) {
         )}
       </div>
       <p className="text-muted" style={{ fontSize: 10, margin: "var(--space-2) 0 0" }}>
-        &quot;Meridian&quot;: protocols Meridian signs into on that chain (from its own contract tables). TVL and biggest protocols per chain from DefiLlama (free API). Prices for orders come from CoinGecko (free API).
+        &quot;Meridian&quot;: protocols Meridian signs into on that chain (from its own contract tables). TVL and biggest protocols per chain from DefiLlama; order prices from CoinGecko.
       </p>
     </>
   );

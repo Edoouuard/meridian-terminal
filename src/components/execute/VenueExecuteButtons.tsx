@@ -19,6 +19,7 @@ import { QUOTER_V2_QUOTE_READ_ABI, QUOTE_FEE_TIERS, UNISWAP_QUOTER_V2_BY_CHAIN, 
 import { formatBaseUnits, resolvePriceFromList, usdToTokenAmount, type PriceEntry } from "@/lib/quote";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
 import { NotWired, OrderRow, RISK_TIER_COLOR } from "@/components/thread/shared";
+import { humanizeMessage } from "@/lib/errorText";
 
 /**
  * Live Uniswap v3 swap execution. Unlike Aave/Lido (whose amount is sized
@@ -295,7 +296,7 @@ export function LidoUnstakeButton({ leg, prices }: { leg: TradeLeg; prices?: Pri
     return <NotWired venue="Lido" reason="Connect a wallet to unstake." />;
   }
   if (chainId !== 1) {
-    return <NotWired venue="Lido" reason="Lido unstaking is only wired on Ethereum mainnet — switch networks." />;
+    return <NotWired venue="Lido" reason="Lido unstaking runs on Ethereum mainnet: switch networks." />;
   }
   if (isLoading) {
     return <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>Reading your stETH balance…</p>;
@@ -398,7 +399,7 @@ export function PendleExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
     return <p style={{ margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" }}>Loading live Pendle markets…</p>;
   }
   if (market && !supported) {
-    return <NotWired venue="Pendle" reason={`Pendle PT is wired on Ethereum, Arbitrum and Base — not ${chainName}.`} />;
+    return <NotWired venue="Pendle" reason={`Pendle PT is available on Ethereum, Arbitrum and Base, not ${chainName}.`} />;
   }
   if (!market) {
     return <NotWired venue="Pendle" reason={`No Pendle prime or major-stablecoin market for "${leg.asset}" on Ethereum, Arbitrum or Base right now with ≥ $1M liquidity and more than 14 days to expiry. Meridian only buys PT on Pendle's curated (prime) markets and on major stablecoins (USDC, USDT, DAI, USDS, USDe and their savings versions, GHO, PYUSD).`} />;
@@ -488,7 +489,7 @@ export function PendleExecuteButton({ leg, prices }: { leg: TradeLeg; prices?: P
           {quoting ? "Quoting on Pendle…" : `Get quote: ${amount.amount} ${spend.symbol} → PT-${market.name}`}
         </button>
       )}
-      {quoteError && <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--risk-bad, #c0392b)" }}>{quoteError}</p>}
+      {quoteError && <p style={{ margin: "4px 0 0", fontSize: 11, color: "var(--risk-bad, #c0392b)" }}>{humanizeMessage(quoteError)}</p>}
     </>
   );
 }

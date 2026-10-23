@@ -209,11 +209,11 @@ export function NewsFeed() {
             ))
           ) : (
             <p className="text-muted" style={{ fontSize: 12, margin: "var(--space-2) 0 0" }}>
-              {alpha.isLoading ? "Fetching live protocol data…" : "No live alpha right now — DefiLlama's protocol feed is unreachable."}
+              {alpha.isLoading ? "Fetching live protocol data…" : "No new listings to show right now."}
             </p>
           )}
           <p className="text-muted" style={{ fontSize: 10, margin: "var(--space-2) 0 0" }}>
-            New listings and 7-day TVL momentum from DefiLlama&apos;s free API — not editorial calls.
+            New listings and 7-day TVL momentum from DefiLlama — data, not editorial calls.
           </p>
         </section>
       )}

@@ -17,6 +17,7 @@ import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { ValidatedExecuteButton } from "@/components/ValidatedExecuteButton";
 import { NotWired, OrderRow } from "@/components/thread/shared";
 import { recordExecution } from "@/lib/history";
+import { humanizeMessage } from "@/lib/errorText";
 
 const muted = { margin: "6px 0 0", fontSize: 12, color: "var(--color-neutral-500)" } as const;
 const errStyle = { margin: "4px 0 0", fontSize: 12, color: "var(--risk-bad, #c0392b)" } as const;
@@ -176,7 +177,7 @@ export function TxflowPerpExecuteButton({ leg, onFilled, baseQty, hedged = false
   return (
     <>
       {info}
-      {state.status === "error" && <p style={errStyle}>TxFlow: {state.error}</p>}
+      {state.status === "error" && <p style={errStyle}>TxFlow: {humanizeMessage(state.error)}</p>}
       {state.status === "error" && state.error === TXFLOW_BUILDER_RESTRICTED && (
         <a className="btn" style={{ fontSize: 12, alignSelf: "flex-start" }} href={TXFLOW_APP_URL} target="_blank" rel="noreferrer">
           Open app.txflow.com ↗
@@ -285,7 +286,7 @@ export function TxflowWithdrawButton({ leg, onDone }: { leg: TradeLeg; onDone?: 
   return (
     <>
       <OrderRow label="Withdraw" value={`${fmtUsd(amount)} USDC → Arbitrum (≈ ${fmtUsd(amount - TXFLOW_WITHDRAW_FEE_USD)} after the $${TXFLOW_WITHDRAW_FEE_USD} fee)`} valueColor="var(--color-accent-700)" />
-      {state.status === "error" && <p style={errStyle}>{state.error}</p>}
+      {state.status === "error" && <p style={errStyle}>{humanizeMessage(state.error)}</p>}
       <button className="btn btn-primary" style={{ fontSize: 13, marginTop: 6, cursor: "pointer" }} onClick={() => setConfirming(true)}>
         Withdraw {fmtUsd(amount)} from TxFlow →
       </button>
