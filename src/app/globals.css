@@ -1883,3 +1883,19 @@ body {
 .arb-open__line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; }
 .bot-where { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .bot-where .bot-hint { flex: 1 1 280px; }
+.arb-card { display: flex; flex-direction: column; gap: 6px; }
+.arb-card__sub { font-size: 11px; margin: 0; }
+.arb-card__size { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; }
+.arb-card__size input { width: 64px; font-size: 11px; padding: 1px 4px; }
+.arb-rows { display: flex; flex-direction: column; gap: 2px; }
+.arb-row { appearance: none; border: 1px solid transparent; background: none; font: inherit; color: inherit; cursor: pointer; display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; padding: 4px 6px; border-radius: var(--radius-md); font-size: 11px; text-align: left; font-variant-numeric: tabular-nums; }
+.arb-row:hover { background: color-mix(in srgb, var(--color-text) 4%, transparent); }
+.arb-row.is-hot { background: color-mix(in srgb, var(--risk-good) 8%, transparent); }
+.arb-row.is-on { border-color: var(--color-accent-500); }
+.arb-row__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.arb-row__net { font-weight: 600; }
+.arb-trade { display: flex; flex-direction: column; gap: 6px; padding: 8px; border: 1px solid var(--color-divider); border-radius: var(--radius-md); font-size: 12px; }
+.arb-trade .bot-card__head h6 { font-size: 11px; text-transform: none; letter-spacing: 0; }
+.arb-card__more summary { cursor: pointer; font-size: 11px; }
+.arb-card__alerts { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+.arb-card__alerts .arb-card__size input { width: 52px; }

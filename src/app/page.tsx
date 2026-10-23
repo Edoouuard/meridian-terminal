@@ -23,7 +23,7 @@ import { OPEN_BOT_EVENT, OPEN_TOOLS_EVENT, SHOW_BOT_EVENT } from "@/lib/neutralB
 import { NeutralBotHost } from "@/components/NeutralBotHost";
 import { executableCoverage } from "@/lib/coverage";
 
-import { ArbView, ARB_MIN_NET_PCT, useArbScan } from "@/components/ArbView";
+import { ArbView } from "@/components/ArbView";
 import { NeutralBotView } from "@/components/NeutralBotView";
 import { BotStatusChip } from "@/components/BotStatusChip";
 import { LifiPerpsConnectPanel } from "@/components/LifiPerpsConnectPanel";
@@ -169,9 +169,7 @@ export default function TerminalApp() {
     return () => window.removeEventListener(OPEN_STRATEGIES_EVENT, open);
   }, []);
   // The neutral bot has its own view in the centre column; "Run it as a bot" from a plan opens it.
-  const [centerView, setCenterView] = useState<"terminal" | "bot" | "arb">("terminal");
-  const arbScan = useArbScan(1000, FEATURES.perps);
-  const arbCount = (arbScan.data?.opportunities ?? []).filter((o) => o.netPct >= ARB_MIN_NET_PCT).length;
+  const [centerView, setCenterView] = useState<"terminal" | "bot">("terminal");
   useEffect(() => {
     const open = () => setCenterView("bot");
     window.addEventListener(OPEN_BOT_EVENT, open);
@@ -477,6 +475,7 @@ export default function TerminalApp() {
                 <>
                   <PerpVenuesSummary />
                   <NeutralBotPanel />
+                  <ArbView />
                   <div id={VENUE_ANCHOR.hyperliquid}>
                     <HyperliquidPanel />
                   </div>
@@ -515,19 +514,11 @@ export default function TerminalApp() {
               <button type="button" role="tab" aria-selected={centerView === "bot"} className={`center-switch__tab${centerView === "bot" ? " is-on" : ""}`} onClick={() => setCenterView("bot")}>
                 Neutral bot <span className="center-switch__badge">farm points</span>
               </button>
-              <button type="button" role="tab" aria-selected={centerView === "arb"} className={`center-switch__tab${centerView === "arb" ? " is-on" : ""}`} onClick={() => setCenterView("arb")}>
-                Arbitrage {arbCount > 0 && <span className="center-switch__badge center-switch__badge--hot">{arbCount} live</span>}
-              </button>
             </div>
           )}
           {centerView === "bot" && (
             <div className="col-scroll" style={{ flex: 1, minHeight: 0, minWidth: 0, padding: "var(--space-4)" }}>
               <NeutralBotView />
-            </div>
-          )}
-          {centerView === "arb" && (
-            <div className="col-scroll" style={{ flex: 1, minHeight: 0, minWidth: 0, padding: "var(--space-4)" }}>
-              <ArbView />
             </div>
           )}
           {/* Scrollable thread area */}

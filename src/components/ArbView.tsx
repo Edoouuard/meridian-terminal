@@ -90,32 +90,67 @@ export function ArbView() {
 
   const sel = opps.find((o) => keyOf(o) === selected) ?? null;
 
+  const [showAll, setShowAll] = useState(false);
+  const rows = opps.slice(0, showAll ? 15 : 4);
+
   return (
-    <section className="bot-view arb-view">
-      <div className="bot-hero bot-hero--info">
-        <div className="bot-hero__text">
-          <div className="bot-hero__title">
-            <h2>Arbitrage</h2>
-            <span className={`bot-pill bot-pill--${live.length ? "good" : "idle"}`}>
-              <span className="bot-pill__dot" aria-hidden />
-              {scan.isLoading ? "Scanning…" : `${live.length} opportunit${live.length === 1 ? "y" : "ies"}`}
-            </span>
-          </div>
-          <p className="bot-hero__sub">
-            Compares each token&apos;s price on-chain (its deepest DEX pool on Ethereum, Arbitrum, Base, Optimism) with its perp on Hyperliquid, Extended and TxFlow, every 30 s. When the gap pays more than the round trip costs, buy where it&apos;s cheap and sell where it&apos;s dear, the same quantity: no price exposure, and the gap is the profit once it closes.
-          </p>
-          <p className="bot-hero__status text-muted" style={{ fontSize: 12 }}>
-            {scan.data ? `${scan.data.dexCount} on-chain prices read at ${new Date(scan.data.fetchedAt).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}.` : "Reading prices…"} The perp leg trades by itself; every on-chain swap asks your wallet.
-          </p>
+    <section className="panel-card arb-card">
+      <div className="panel-card__head">
+        <h6 className="panel-card__title">Arbitrage scanner</h6>
+        <span className={`bot-pill bot-pill--${live.length ? "good" : "idle"}`}>
+          <span className="bot-pill__dot" aria-hidden />
+          {scan.isLoading ? "Scanning…" : live.length ? `${live.length} live` : "none now"}
+        </span>
+      </div>
+      <p className="text-muted arb-card__sub">
+        Token price on-chain (DEX) vs its perp on Hyperliquid, Extended, TxFlow, net of the round trip&apos;s costs, every 30 s.{" "}
+        <label className="arb-card__size">
+          Size $
+          <input type="number" min={10} value={size} onChange={(e) => setSize(Math.max(10, Number(e.target.value) || 10))} />
+        </label>
+      </p>
+
+      {positions.length > 0 && (
+        <div className="arb-card__open">
+          {positions.map((p) => (
+            <OpenArb key={p.id} p={p} now={opps.find((o) => o.base === p.base && o.dex.chainId === p.chainId && o.venue === p.venue) ?? null} onClosed={() => update(positions.filter((x) => x.id !== p.id))} />
+          ))}
         </div>
-        <div className="arb-controls">
-          <label className="bot-field">
-            <span>Trade size ($)</span>
-            <input type="number" min={10} value={size} onChange={(e) => setSize(Math.max(10, Number(e.target.value) || 10))} />
-          </label>
-          <label className="bot-field">
-            <span>Alert above (% net)</span>
-            <input type="number" step={0.05} value={minNet} onChange={(e) => setMinNet(Number(e.target.value) || 0)} />
+      )}
+
+      {scan.isError ? (
+        <p className="bot-problem">The scan failed: {String(scan.error)}</p>
+      ) : opps.length === 0 ? (
+        <p className="text-muted bot-empty">{scan.isLoading ? "Reading on-chain and perp prices…" : "No token is priced on both sides right now."}</p>
+      ) : (
+        <div className="arb-rows">
+          {rows.map((o) => (
+            <button key={keyOf(o)} type="button" className={`arb-row${o.netPct >= minNet ? " is-hot" : ""}${selected === keyOf(o) ? " is-on" : ""}`} onClick={() => setSelected(selected === keyOf(o) ? null : keyOf(o))} title={`On-chain $${px(o.dex.priceUsd)} (${o.dex.dex}) · ${o.venue} $${px(o.perpPx)} · costs ${o.costPct.toFixed(2)}% · funding ${pct(o.fundingPctPerDay, 3)}/day`}>
+              <span className="arb-row__name">
+                <strong>{o.base}</strong> <span className="text-muted">{chainName(o.dex.chainId)} ↔ {o.venue}</span>
+              </span>
+              <span className="arb-row__gap">{pct(o.gapPct)}</span>
+              <span className="arb-row__net" style={{ color: o.netPct > 0 ? "var(--risk-good)" : undefined }}>
+                {pct(o.netPct)} net
+              </span>
+            </button>
+          ))}
+          {opps.length > 4 && (
+            <button type="button" className="btn btn-secondary bot-mini" onClick={() => setShowAll((x) => !x)}>
+              {showAll ? "Fewer" : `All ${Math.min(15, opps.length)}`}
+            </button>
+          )}
+        </div>
+      )}
+
+      {sel && <ArbTrade o={sel} onClose={() => setSelected(null)} onOpened={(p) => update([p, ...positions])} />}
+
+      <details className="arb-card__more">
+        <summary className="text-muted">Alerts{detections.length ? ` · ${detections.length} detected` : ""}</summary>
+        <div className="arb-card__alerts">
+          <label className="arb-card__size">
+            Alert above
+            <input type="number" step={0.05} value={minNet} onChange={(e) => setMinNet(Number(e.target.value) || 0)} />% net
           </label>
           <button
             type="button"
@@ -131,95 +166,14 @@ export function ArbView() {
             Notify me
           </button>
         </div>
-      </div>
-
-      {positions.length > 0 && (
-        <div className="bot-card">
-          <div className="bot-card__head">
-            <h6>Open arbitrage trades</h6>
-            <span className="text-muted">{positions.length}</span>
-          </div>
-          {positions.map((p) => (
-            <OpenArb key={p.id} p={p} now={opps.find((o) => o.base === p.base && o.dex.chainId === p.chainId && o.venue === p.venue) ?? null} onClosed={() => update(positions.filter((x) => x.id !== p.id))} />
-          ))}
-        </div>
-      )}
-
-      <div className="bot-card">
-        <div className="bot-card__head">
-          <h6>Gaps now, at {usd(size)} a trade</h6>
-          <span className="text-muted">best first · costs: DEX fee + impact, gas, perp fee, in and out</span>
-        </div>
-        {scan.isError ? (
-          <p className="bot-problem">The scan failed: {String(scan.error)}</p>
-        ) : opps.length === 0 ? (
-          <p className="text-muted bot-empty">{scan.isLoading ? "Reading on-chain and perp prices…" : "No token is priced on both sides right now."}</p>
-        ) : (
-          <div className="arb-table-wrap">
-            <table className="bot-legs arb-table">
-              <thead>
-                <tr>
-                  <th>Token</th>
-                  <th>On-chain</th>
-                  <th>Perp</th>
-                  <th>Gap</th>
-                  <th>Costs</th>
-                  <th>Net</th>
-                  <th title="What the perp leg earns (+) or pays (−) a day while held">Funding/day</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                {opps.slice(0, 25).map((o) => (
-                  <tr key={keyOf(o)} className={o.netPct >= minNet ? "arb-row--hot" : undefined}>
-                    <td>
-                      <strong>{o.base}</strong> <span className="text-muted">{o.dex.symbol} · {chainName(o.dex.chainId)}</span>
-                    </td>
-                    <td>${px(o.dex.priceUsd)}</td>
-                    <td>
-                      ${px(o.perpPx)} <span className="text-muted">{o.venue}</span>
-                    </td>
-                    <td>{pct(o.gapPct)}</td>
-                    <td className="text-muted">{o.costPct.toFixed(2)}%</td>
-                    <td style={{ color: o.netPct > 0 ? "var(--risk-good)" : undefined, fontWeight: 600 }}>
-                      {pct(o.netPct)} <span className="text-muted">{usd(o.netUsd, true)}</span>
-                    </td>
-                    <td>{pct(o.fundingPctPerDay, 3)}</td>
-                    <td>
-                      <button type="button" className={`btn ${o.netPct > 0 ? "btn-primary" : "btn-secondary"} bot-mini`} onClick={() => setSelected(keyOf(o))}>
-                        {o.netPct > 0 ? "Trade" : "Details"}
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        {detections.map((d, i) => (
+          <p key={`${d.at}-${i}`} className="bot-hint">
+            {new Date(d.at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })} · {d.text}
+          </p>
+        ))}
         <p className="text-muted bot-footnote">
-          On-chain prices are each pool&apos;s mid price and the costs are estimates: Trade gets the exact on-chain price for your size before anything is signed. A perp can stay above or below spot while funding pays for it, so a gap may take time to close; the funding column says what holding costs or earns meanwhile.
+          On-chain prices are pool mid prices and costs are estimates: a trade gets the exact on-chain price first. The perp leg trades by itself; every on-chain swap asks your wallet. A perp can stay above or below spot while funding pays for it.
         </p>
-      </div>
-
-      {sel && <ArbTrade o={sel} onClose={() => setSelected(null)} onOpened={(p) => update([p, ...positions])} />}
-
-      <details className="bot-card bot-activity" open={detections.length > 0}>
-        <summary className="bot-card__head">
-          <h6>Detected</h6>
-          <span className="text-muted">{detections.length} since this view opened</span>
-        </summary>
-        {detections.length === 0 ? (
-          <p className="text-muted bot-empty">Nothing above {minNet}% net yet.</p>
-        ) : (
-          <div className="bot-log">
-            {detections.map((d, i) => (
-              <div key={`${d.at}-${i}`} className="bot-log__line bot-log__line--ok">
-                <span className="bot-log__time">{new Date(d.at).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}</span>
-                <span>{d.text}</span>
-              </div>
-            ))}
-          </div>
-        )}
       </details>
     </section>
   );
@@ -306,7 +260,7 @@ function ArbTrade({ o, onClose, onOpened }: { o: ArbOpportunity; onClose: () => 
   const order = quote && fromToken ? bridgeOrderFromQuote(quote.q, { address: fromToken.address as Address, symbol: fromToken.symbol, decimals: fromToken.decimals }, buy ? BigInt(Math.floor(o.sizeUsd * 1e6)) : BigInt(Math.floor(quote.tokens * 10 ** Math.min(o.dex.decimals, 12))) * 10n ** BigInt(Math.max(0, o.dex.decimals - 12)), o.dex.chainId) : null;
 
   return (
-    <div className="bot-card arb-trade">
+    <div className="arb-trade">
       <div className="bot-card__head">
         <h6>{plainDirection(o)}</h6>
         <button type="button" className="btn btn-secondary bot-mini" onClick={onClose}>
