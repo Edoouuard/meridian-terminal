@@ -46,8 +46,25 @@ export function forwardableExtendedHeaders(incoming: Headers): Headers {
   return out;
 }
 
-/** Base path of the relay for a network, as seen from the browser. */
-export function extendedRelayBase(network: ExtendedNetworkName, origin = typeof window === "undefined" ? "" : window.location.origin): string {
+/**
+ * Meridian's own origin when code runs on the server (the server bot): the
+ * relay is called over HTTPS like the browser does, so RFQ routing and
+ * headers stay in one place.
+ */
+export function serverOrigin(): string {
+  const host = process.env.MERIDIAN_ORIGIN ?? process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.VERCEL_URL;
+  return host ? (host.startsWith("http") ? host : `https://${host}`) : "";
+}
+
+/** The server bot's relay (set by lib/neutralBot/serverBot.ts): the token-guarded twin of /api/extended. */
+let serverRelay: string | null = null;
+export function setServerRelayBase(base: string | null): void {
+  serverRelay = base;
+}
+
+/** Base path of the relay for a network, as seen from the browser (or from the server bot, through its own relay). */
+export function extendedRelayBase(network: ExtendedNetworkName, origin = typeof window === "undefined" ? serverOrigin() : window.location.origin): string {
+  if (typeof window === "undefined" && serverRelay) return `${serverRelay}/${network}`;
   return `${origin}/api/extended/${network}`;
 }
 

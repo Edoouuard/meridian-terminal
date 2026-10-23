@@ -123,6 +123,11 @@ export function NeutralBotView() {
     staleTime: 15_000,
   });
   const funds = useVenueFunds(trader);
+  const serverStatus = useQuery({
+    queryKey: ["bot-server-status"],
+    queryFn: async () => (await (await fetch("/api/bot/server?status=1")).json()) as { configured: boolean; missing: string[] },
+    staleTime: 5 * 60_000,
+  });
   const [confirming, setConfirming] = useState<"start" | "close" | null>(null);
   const [morePairs, setMorePairs] = useState(false);
 
@@ -197,11 +202,11 @@ export function NeutralBotView() {
 
   return (
     <section className="bot-view" id={BOT_ANCHOR}>
-      <BotHero health={health} setup={setup}>
+      <BotHero health={health} setup={setup} onServer={s.onServer}>
         {!setup && (
           <div className="bot-hero__actions">
             {running ? (
-              <button type="button" className="btn btn-secondary" onClick={() => setBotState({ running: false, nextTickAt: null })}>
+              <button type="button" className="btn btn-secondary" disabled={busy} onClick={() => void botRunner()?.pause()}>
                 Pause
               </button>
             ) : (
@@ -464,11 +469,34 @@ export function NeutralBotView() {
                 Ready: {cfg.mode === "farm" ? `farm ${cfg.base} with ~${usd(cfg.notionalUsd)} a side on ${va} and ${vb} at ${cfg.leverage}x, ${pace ? INTENSITY[pace].label.toLowerCase() : "custom"} pace` : `carry ${cfg.base} on ${va} and ${vb} at ${cfg.leverage}x`}, stopping after {usd(cfg.maxFeesUsd)} of fees.
               </p>
             )}
+            <div className="bot-where">
+              <span className="bot-exec__label">Runs</span>
+              <div className="bot-seg" role="group" aria-label="Where the bot runs">
+                <button type="button" className={`btn ${s.onServer ? "btn-secondary" : "btn-primary"} bot-mini`} aria-pressed={!s.onServer} onClick={() => setBotState({ onServer: false })}>
+                  In this browser
+                </button>
+                <button type="button" className={`btn ${s.onServer ? "btn-primary" : "btn-secondary"} bot-mini`} aria-pressed={s.onServer} disabled={serverStatus.data ? !serverStatus.data.configured : false} onClick={() => setBotState({ onServer: true })}>
+                  On Meridian&apos;s server, 24/7
+                </button>
+              </div>
+              <span className="text-muted bot-hint">
+                {serverStatus.data && !serverStatus.data.configured
+                  ? `The server isn't set up for bots yet (missing: ${serverStatus.data.missing.join("; ")}).`
+                  : s.onServer
+                    ? "Keeps trading when this computer sleeps or the tab closes, until you pause or stop it. Your trading keys go to the server encrypted: the Hyperliquid and TxFlow ones can trade but not withdraw; Extended only withdraws to your own wallet. Start asks one wallet signature to prove it's you."
+                    : "Runs from this tab: if the computer sleeps, it stops trading until it wakes (the venue stops still protect the pair)."}
+              </span>
+            </div>
             <div className="bot-step__foot">
               <button type="button" className="btn btn-primary bot-start" disabled={busy || problems.length > 0} onClick={() => setConfirming("start")}>
-                {busy ? "Starting…" : "Start the bot →"}
+                {busy ? "Starting…" : s.onServer ? "Start on the server →" : "Start the bot →"}
               </button>
-              <span className="text-muted bot-footnote">It runs from this browser tab: keep it open. Pause or Stop &amp; close any time.</span>
+              <span className="text-muted bot-footnote">Pause or Stop &amp; close any time.</span>
+              {s.onServer && (
+                <button type="button" className="btn btn-secondary bot-mini" disabled={busy} onClick={() => void botRunner()?.forgetServer()}>
+                  Remove my bot and keys from the server
+                </button>
+              )}
             </div>
           </Step>
         </div>
@@ -596,11 +624,11 @@ export function NeutralBotView() {
             <p style={{ marginBottom: 6 }}>
               Stops on its own after {cfg.maxCycles} pairs or {usd(cfg.maxFeesUsd)} of fees{cfg.volumeTargetUsd > 0 ? `, or at ${usd(cfg.volumeTargetUsd)} of volume` : ""}, closing the pair first. A failed second leg is unwound at once; a leg it can&apos;t close stops the bot.
             </p>
-            <p>Market (taker) orders sent by the venues&apos; trading keys from this tab, without a wallet popup each time. Each leg can be liquidated on its own venue if the price moves ~{Math.round(liquidationMovePct(cfg.leverage))}% against it at {cfg.leverage}x: the bot closes both at ±{safetyStopPct(cfg)}%, and the Hyperliquid and TxFlow legs carry a venue stop at {venueStopPct(cfg)}%.</p>
+            <p>Orders sent by the venues&apos; trading keys {s.onServer ? "from Meridian's server" : "from this tab"}, without a wallet popup each time. Each leg can be liquidated on its own venue if the price moves ~{Math.round(liquidationMovePct(cfg.leverage))}% against it at {cfg.leverage}x: the bot closes both at ±{safetyStopPct(cfg)}%, and the Hyperliquid and TxFlow legs carry a venue stop at {venueStopPct(cfg)}%.</p>
           </div>
         }
         confirmLabel="Start trading"
-        warning="Real funds. The bot trades automatically while this tab is open."
+        warning={s.onServer ? "Real funds. The bot trades automatically on Meridian's server, 24/7, until you pause or stop it." : "Real funds. The bot trades automatically while this tab is open."}
         onConfirm={() => {
           setConfirming(null);
           void botRunner()?.start();
@@ -623,7 +651,7 @@ export function NeutralBotView() {
   );
 }
 
-function BotHero({ health, setup, children }: { health: ReturnType<typeof botHealth>; setup: boolean; children?: React.ReactNode }) {
+function BotHero({ health, setup, onServer, children }: { health: ReturnType<typeof botHealth>; setup: boolean; onServer: boolean; children?: React.ReactNode }) {
   return (
     <div className={`bot-hero bot-hero--${health.tone}`}>
       <div className="bot-hero__text">
@@ -637,7 +665,9 @@ function BotHero({ health, setup, children }: { health: ReturnType<typeof botHea
         <p className="bot-hero__sub">
           {setup
             ? "Farms points and airdrops on Hyperliquid, Extended and TxFlow with volume and open interest that has no price exposure: long on one venue, short on the other. Four steps below; nothing trades before you press Start."
-            : "Long on one venue, short on the other: price moves cancel out. It trades on its own while this tab is open."}
+            : onServer
+              ? "Long on one venue, short on the other: price moves cancel out. Runs on Meridian's server, 24/7: you can close this tab or let the computer sleep."
+              : "Long on one venue, short on the other: price moves cancel out. It trades on its own while this tab is open."}
         </p>
         {!setup && (
           <p className="bot-hero__status" role="status" aria-live="polite">
