@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createHash, createHmac } from "node:crypto";
 import { privateKeyToAccount } from "viem/accounts";
-import { open, seal } from "@/lib/server/secretBox";
+import { boxProblem, open, seal } from "@/lib/server/secretBox";
 import { verifyQstash } from "@/lib/server/qstash";
 import { botActionMessage, verifyBotAction } from "@/lib/neutralBot/serverBot";
 
@@ -53,5 +53,24 @@ describe("bot actions signed by the wallet", () => {
     expect(await verifyBotAction("close", acct.address, ts, sig)).toBe(false);
     expect(await verifyBotAction("start", "0x0000000000000000000000000000000000000001", ts, sig)).toBe(false);
     expect(await verifyBotAction("start", acct.address, ts, sig, ts + 6 * 60_000)).toBe(false);
+  });
+});
+
+describe("BOT_ENCRYPTION_KEY setup message", () => {
+  it("says whether the key is missing or too short, never its value", () => {
+    const prev = process.env.BOT_ENCRYPTION_KEY;
+    try {
+      delete process.env.BOT_ENCRYPTION_KEY;
+      expect(boxProblem()).toMatch(/isn't set/);
+      process.env.BOT_ENCRYPTION_KEY = "openssl rand -base64 48";
+      const msg = boxProblem() ?? "";
+      expect(msg).toMatch(/only 23 characters/);
+      expect(msg).not.toContain("openssl");
+      process.env.BOT_ENCRYPTION_KEY = "x".repeat(40);
+      expect(boxProblem()).toBeNull();
+    } finally {
+      if (prev === undefined) delete process.env.BOT_ENCRYPTION_KEY;
+      else process.env.BOT_ENCRYPTION_KEY = prev;
+    }
   });
 });

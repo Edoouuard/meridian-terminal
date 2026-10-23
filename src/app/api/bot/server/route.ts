@@ -10,7 +10,7 @@
 import { NextResponse, after } from "next/server";
 import { isAddress, type Address, type Hex } from "viem";
 import { kvConfigured } from "@/lib/server/kv";
-import { boxConfigured } from "@/lib/server/secretBox";
+import { boxProblem } from "@/lib/server/secretBox";
 import { ensureTickSchedule, qstashConfigured } from "@/lib/server/qstash";
 import { serverOrigin } from "@/lib/integrations/extendedProxy";
 import { forgetServerBot, loadRecord, pauseServerBot, publicState, startServerBot, tickServerBot, verifyBotAction, type BotAction, type BotKeys } from "@/lib/neutralBot/serverBot";
@@ -24,7 +24,7 @@ function missing(): string[] {
   return [
     !kvConfigured() && "Upstash Redis (KV_REST_API_URL, KV_REST_API_TOKEN)",
     !qstashConfigured() && "Upstash QStash (QSTASH_TOKEN, QSTASH_CURRENT_SIGNING_KEY, QSTASH_NEXT_SIGNING_KEY)",
-    !boxConfigured() && "BOT_ENCRYPTION_KEY (32+ random characters)",
+    boxProblem(),
   ].filter((x): x is string => !!x);
 }
 
