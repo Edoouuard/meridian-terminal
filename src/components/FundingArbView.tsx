@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AskButton } from "@/components/AskButton";
+import { ProtocolLogo } from "@/components/ProtocolLogo";
 import { fundingArbPrompt, HOLD_DAYS, PER_LEG_USD, type FundingArb, type FundingLeg } from "@/lib/markets/fundingArb";
 
 const pctYr = (x: number) => `${x >= 0 ? "+" : "−"}${Math.abs(x).toFixed(1)}%/yr`;
@@ -70,7 +71,12 @@ export function FundingArbView() {
                 <p className={`farb-card2__net ${a.netHoldPct >= 0 ? "farb-pos" : "farb-neg"}`}>{usd(fundingUsd - feesUsd)}</p>
                 <p className="farb-card2__per">a month, on ${PER_LEG_USD.toLocaleString("en-US")} each side</p>
                 <p className="farb-card2__how">
-                  Buy on <strong>{a.long.venue}</strong>, short on <strong>{a.short.venue}</strong>
+                  <span className="farb-side">
+                    Buy <ProtocolLogo name={a.long.venue} size={22} />
+                  </span>
+                  <span className="farb-side">
+                    Short <ProtocolLogo name={a.short.venue} size={22} />
+                  </span>
                 </p>
                 <AskButton label="Open the pair" prompt={fundingArbPrompt(a)} />
                 <details className="farb-card2__details">

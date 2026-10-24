@@ -44,8 +44,10 @@
   --color-accent-2-800: #f0ece4;
   --color-accent-2-900: #ffffff;
 
-  --font-heading: "Instrument Serif", Georgia, serif;
-  --font-heading-weight: 400;
+  /* As on the landing: Instrument Serif for the big headlines only, Inter for everything else. */
+  --font-display: "Instrument Serif", Georgia, serif;
+  --font-heading: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-heading-weight: 600;
   --font-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
 
   --space-1: 4.6px;
@@ -2204,3 +2206,33 @@ input[type="checkbox"], input[type="radio"] { accent-color: var(--ink-bg); }
   .app-nav__label { font-size: 10px; }
   .app-nav__icon { font-size: 16px; }
 }
+
+/* ---------- Protocol logos ---------- */
+.plogo { display: inline-grid; place-items: center; flex: none; border-radius: 50%; overflow: hidden; background: var(--color-neutral-200); box-shadow: 0 0 0 1.5px var(--glass-border); vertical-align: middle; }
+.plogo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.plogo__fallback { font-weight: 600; color: var(--color-text); line-height: 1; }
+.plogos { display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.yield-row__ident { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.farb-card2__how { display: flex; gap: 14px; align-items: center; }
+.farb-side { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--color-neutral-500); }
+.hold-row__symbol--logo { display: inline-flex; align-items: center; gap: 6px; }
+
+
+/* ---------- Type: display serif for headlines, Inter (with tight tracking) for the rest ---------- */
+h1, h2, .page__title, .settings__section, .farb__lead, .bot-hero h2, .bot-hero__title h2, .nav-brand, .empty-title { font-family: var(--font-display); font-weight: 400; letter-spacing: -0.01em; }
+h3, h4, h5 { letter-spacing: -0.015em; }
+.portfolio-value, .yield-row__apy, .farb-card2__net, .topbar__value, .scard .apy-figure, .bot-kpi__value { font-family: var(--font-body); font-weight: 600; letter-spacing: -0.03em; }
+.portfolio-value { font-size: 34px; }
+.yield-row__apy { font-size: 26px; }
+.farb-card2__net { font-size: 38px; }
+.quick-prompt__label { font-family: var(--font-body); font-weight: 600; font-size: 14.5px; letter-spacing: -0.01em; text-transform: none; }
+.bot-step__head h3 { font-family: var(--font-body); font-weight: 600; font-size: 18px; }
+.answer-head__text { font-family: var(--font-body); font-weight: 600; font-size: 18px; letter-spacing: -0.015em; }
+
+/* ---------- Friendlier chrome ---------- */
+.app-nav__icon { display: grid; place-items: center; height: 22px; }
+.app-nav__item { border-radius: 16px; }
+.app-nav__label { font-size: 11.5px; }
+.panel-card, .card, .farb-card2, .scard { border-radius: 18px; }
+.quick-prompt { border-radius: 18px !important; }
+.theme-toggle svg { display: block; }

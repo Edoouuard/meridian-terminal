@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { TOUR_PROMPTS, TOUR_STEPS, WELCOME_DISCONNECTED, placeTooltip, tourSteps } from "@/components/ProductTour";
+import { TOUR_DONE_KEY, TOUR_PROMPTS, TOUR_STEPS, WELCOME_DISCONNECTED, placeTooltip, tourSeen, tourSteps } from "@/components/ProductTour";
 
 const vp = { width: 1440, height: 900 };
 const card = { width: 340, height: 190 };
@@ -57,5 +57,20 @@ describe("product tour", () => {
     expect(TOUR_STEPS[0].body).toMatch(/wallet is connected/);
     expect(WELCOME_DISCONNECTED).not.toMatch(/is connected/);
     expect(WELCOME_DISCONNECTED).toMatch(/Connect a wallet/);
+  });
+});
+
+describe("when the tour starts on its own", () => {
+  const store = (items: Record<string, string>) => ({ getItem: (k: string) => items[k] ?? null });
+
+  it("without a wallet: once per browser", () => {
+    expect(tourSeen(store({}), undefined)).toBe(false);
+    expect(tourSeen(store({ [TOUR_DONE_KEY]: "1" }), undefined)).toBe(true);
+  });
+
+  it("a wallet connecting for the first time gets it, even after the tour was skipped without a wallet", () => {
+    const s = store({ [TOUR_DONE_KEY]: "1", "meridian:tourWallets:v1": JSON.stringify(["0xabc"]) });
+    expect(tourSeen(s, "0xDEF")).toBe(false);
+    expect(tourSeen(s, "0xABC")).toBe(true);
   });
 });

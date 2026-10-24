@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { Opportunity } from "@/lib/protocols/opportunities";
 import type { PerpVault } from "@/lib/markets/vaults";
 import { AskButton } from "@/components/AskButton";
+import { ProtocolLogo } from "@/components/ProtocolLogo";
 
 function fmtTvl(n: number): string {
   if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
@@ -34,10 +35,13 @@ function PerpVaultList({ onlyExec }: { onlyExec: boolean }) {
       {rows.map((v) => (
         <li key={v.id} className="yield-row">
           <div className="yield-row__head">
-            <span className="yield-row__name">
-              {v.name.toLowerCase().includes(v.protocol.toLowerCase()) ? v.name : `${v.protocol} ${v.name}`}
-              <span className="yield-row__where">
-                {v.asset} · {v.chain}
+            <span className="yield-row__ident">
+              <ProtocolLogo name={v.protocol} size={36} />
+              <span className="yield-row__name">
+                {v.name}
+                <span className="yield-row__where">
+                  {v.asset} · {v.chain}
+                </span>
               </span>
             </span>
             <span className="yield-row__apy">{v.aprPct.toFixed(2)}%</span>
@@ -57,6 +61,9 @@ function PerpVaultList({ onlyExec }: { onlyExec: boolean }) {
           )}
           <details className="yield-row__details">
             <summary>Details</summary>
+            <p>
+              {v.protocol} · {v.name} on {v.chain}
+            </p>
             <p>{v.strategy}.</p>
             {v.carriesTraderPnl && <p>Depositors take the other side of traders: when traders win, the vault loses.</p>}
             <p>
@@ -134,11 +141,12 @@ export function YieldsPanel() {
           {rows.map((o) => (
             <li key={`${o.project}-${o.chainId}-${o.symbol}`} className="yield-row">
               <div className="yield-row__head">
-                <span className="yield-row__name">
-                  {o.protocol}
-                  <span className="yield-row__where">
+                <span className="yield-row__ident">
+                  <ProtocolLogo name={o.protocol} slug={o.project} size={36} />
+                  <span className="yield-row__name">
                     {o.symbol}
-                    {o.shareSymbol ? ` → ${o.shareSymbol}` : ""} · {o.chain}
+                    {o.shareSymbol ? ` → ${o.shareSymbol}` : ""}
+                    <span className="yield-row__where">{o.chain}</span>
                   </span>
                 </span>
                 <span className="yield-row__apy">{o.apy.toFixed(2)}%</span>
@@ -146,8 +154,6 @@ export function YieldsPanel() {
               <div className="yield-row__meta">
                 <span className={`coverage-badge coverage-badge--${o.coverage}`}>{o.coverage === "execute" ? "In Meridian" : "Info only"}</span>
                 <span>{fmtTvl(o.tvlUsd)} deposited</span>
-                {o.apyReward > 0 && <span>incl. {o.apyReward.toFixed(1)}% rewards</span>}
-                {o.apyMean30d !== undefined && <span>30d {o.apyMean30d.toFixed(1)}%</span>}
               </div>
               {o.coverage === "execute" ? (
                 <AskButton
@@ -160,6 +166,18 @@ export function YieldsPanel() {
                   prompt={`${o.protocol} pays ${o.apy.toFixed(2)}% on ${o.symbol} on ${o.chain}. What's the closest thing Meridian can execute, and how do the risks compare?`}
                 />
               )}
+              <details className="yield-row__details">
+                <summary>Details</summary>
+                <p>
+                  {o.protocol} · {o.symbol} on {o.chain} · {fmtTvl(o.tvlUsd)} deposited
+                </p>
+                {(o.apyReward > 0 || o.apyMean30d !== undefined) && (
+                  <p>
+                    {o.apyReward > 0 && `Includes ${o.apyReward.toFixed(1)}% paid in reward tokens. `}
+                    {o.apyMean30d !== undefined && `30-day average ${o.apyMean30d.toFixed(1)}%.`}
+                  </p>
+                )}
+              </details>
             </li>
           ))}
         </ul>

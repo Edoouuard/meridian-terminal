@@ -35,6 +35,7 @@ import { useHaikuPortfolio } from "@/hooks/useHaikuPortfolio";
 import { AlphaPanel, ChainsPanel, NewsPanel, useNowTick } from "@/components/NewsFeed";
 import { YieldsPanel } from "@/components/YieldsPanel";
 import { SettingsPage } from "@/components/SettingsPage";
+import { Icon, type IconName } from "@/components/Icon";
 import { HelpPage } from "@/components/HelpPage";
 import { loadSettings, useUiSettings } from "@/lib/uiSettings";
 import { ACTIVE_CHAIN_IDS, CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
@@ -389,16 +390,16 @@ export default function TerminalApp() {
     { label: "Delta neutral", thesis: "Make it delta neutral, I don't want directional exposure", perps: true },
   ].filter((p) => FEATURES.perps || !("perps" in p));
 
-  const NAV: { id: Page; label: string; icon: string; tour?: string }[] = [
-    { id: "terminal", label: "Terminal", icon: "◆" },
-    { id: "portfolio", label: "Portfolio", icon: "▣" },
-    { id: "earn", label: "Earn", icon: "%", tour: "markets" },
-    ...(showPerps ? [{ id: "perps" as const, label: "Perps", icon: "⇄" }] : []),
-    { id: "discover", label: "Discover", icon: "✦" },
+  const NAV: { id: Page; label: string; icon: IconName; tour?: string }[] = [
+    { id: "terminal", label: "Terminal", icon: "chat" },
+    { id: "portfolio", label: "Portfolio", icon: "wallet" },
+    { id: "earn", label: "Earn", icon: "growth", tour: "markets" },
+    ...(showPerps ? [{ id: "perps" as const, label: "Perps", icon: "swap" as const }] : []),
+    { id: "discover", label: "Discover", icon: "compass" },
   ];
-  const NAV_END: { id: Page; label: string; icon: string }[] = [
-    { id: "help", label: "Help", icon: "?" },
-    { id: "settings", label: "Settings", icon: "⚙" },
+  const NAV_END: { id: Page; label: string; icon: IconName }[] = [
+    { id: "help", label: "Help", icon: "help" },
+    { id: "settings", label: "Settings", icon: "sliders" },
   ];
   const isLight = ui.theme === "light" || (ui.theme === "system" && typeof window !== "undefined" && !!window.matchMedia?.("(prefers-color-scheme: light)").matches);
 
@@ -495,7 +496,9 @@ export default function TerminalApp() {
           aria-label={isLight ? "Switch to night mode" : "Switch to day mode"}
           suppressHydrationWarning
         >
-          <span aria-hidden="true" suppressHydrationWarning>{isLight ? "☾" : "☀"}</span>
+          <span suppressHydrationWarning>
+            <Icon name={isLight ? "moon" : "sun"} size={17} />
+          </span>
         </button>
         <FeedbackButton lastRequest={thread[thread.length - 1]?.text} />
         <WalletConnectButton />
@@ -506,7 +509,7 @@ export default function TerminalApp() {
           {NAV.map((n) => (
             <button key={n.id} type="button" className={`app-nav__item${page === n.id ? " is-on" : ""}`} aria-current={page === n.id ? "page" : undefined} onClick={() => goTo(n.id)} data-tour={n.tour}>
               <span className="app-nav__icon" aria-hidden="true">
-                {n.icon}
+                <Icon name={n.icon} size={21} />
               </span>
               <span className="app-nav__label">{n.label}</span>
               {n.id === "portfolio" && trackedStrategies.length > 0 && <span className="app-nav__count">{trackedStrategies.length}</span>}
@@ -516,7 +519,7 @@ export default function TerminalApp() {
           {NAV_END.map((n) => (
             <button key={n.id} type="button" className={`app-nav__item app-nav__item--end${page === n.id ? " is-on" : ""}`} aria-current={page === n.id ? "page" : undefined} onClick={() => goTo(n.id)}>
               <span className="app-nav__icon" aria-hidden="true">
-                {n.icon}
+                <Icon name={n.icon} size={21} />
               </span>
               <span className="app-nav__label">{n.label}</span>
             </button>
@@ -554,8 +557,8 @@ export default function TerminalApp() {
                       textAlign: "center",
                     }}>
                       <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", alignItems: "center" }}>
-                        <h3 style={{
-                          fontFamily: "var(--font-heading)",
+                        <h3 className="empty-title" style={{
+                          fontFamily: "var(--font-display)",
                           color: "var(--color-text)",
                           margin: 0,
                           fontSize: 28,

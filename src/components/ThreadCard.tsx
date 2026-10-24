@@ -1,5 +1,6 @@
 "use client";
 
+import { ProtocolLogos } from "@/components/ProtocolLogo";
 import { useState } from "react";
 import { ThreadItem, fmtUsd } from "@/lib/data";
 import type { TradePlan } from "@/lib/tradePlan";
@@ -88,7 +89,7 @@ function CompareCard({ plan, isActive, isRecommended, onSelect }: {
       </span>
       {view.protocols.length > 0 && (
         <span className="scard__protocols">
-          {view.protocols.map((p) => <span key={p} className="protocol-pill">{p}</span>)}
+          <ProtocolLogos names={view.protocols} size={22} />
         </span>
       )}
     </button>
