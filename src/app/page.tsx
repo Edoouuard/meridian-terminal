@@ -25,6 +25,7 @@ import { executableCoverage } from "@/lib/coverage";
 
 import { ArbView } from "@/components/ArbView";
 import { FundingArbView } from "@/components/FundingArbView";
+import { ToolGroup, ToolItem } from "@/components/ToolItem";
 import { NeutralBotView } from "@/components/NeutralBotView";
 import { BotStatusChip } from "@/components/BotStatusChip";
 import { LidoWithdrawalsPanel } from "@/components/LidoWithdrawalsPanel";
@@ -183,7 +184,13 @@ export default function TerminalApp() {
     const open = (e: Event) => {
       const anchor = (e as CustomEvent<unknown>).detail;
       setLeftTab("venues");
-      if (typeof anchor === "string") setTimeout(() => document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+      if (typeof anchor === "string")
+        setTimeout(() => {
+          const el = document.getElementById(anchor);
+          // Tools may have just mounted: open the venue's row before scrolling to it.
+          if (el instanceof HTMLDetailsElement) el.open = true;
+          el?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 80);
     };
     window.addEventListener(OPEN_TOOLS_EVENT, open);
     return () => window.removeEventListener(OPEN_TOOLS_EVENT, open);
@@ -455,39 +462,58 @@ export default function TerminalApp() {
           {leftTab === "risk" && (
             <>
               <RiskPanel live={live} isConnected={isConnected} />
-              <PerpPositionsPanel />
+              {isConnected && <PerpPositionsPanel />}
             </>
           )}
           {leftTab === "venues" && (
             <>
-              {!isConnected && (
-                <section className="panel-card">
-                  <h6 className="panel-card__title">Tools</h6>
-                  <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
-                    Bridge funds between chains and claim Lido withdrawals here once a wallet is connected. Strategies add the bridges they need on their own.
-                  </p>
-                </section>
-              )}
-              <BridgePanel />
-              <LidoWithdrawalsPanel />
+              {!isConnected && <p className="tools-hint text-muted">Connect a wallet to bridge, claim withdrawals and fund perp venues. Strategies add the bridges they need on their own.</p>}
               {FEATURES.perps && (
-                <>
-                  <PerpVenuesSummary />
-                  <NeutralBotPanel />
-                  <FundingArbView />
-                  <ArbView />
-                  <div id={VENUE_ANCHOR.hyperliquid}>
-                    <HyperliquidPanel />
-                  </div>
-                  <div data-tour="extended" id={VENUE_ANCHOR.extended}>
-                    <ExtendedConnectPanel />
-                  </div>
-                  <div id={VENUE_ANCHOR.txflow}>
-                    <TxflowPanel />
-                  </div>
-                </>
+                <ToolGroup label="Opportunities">
+                  <ToolItem title="Funding arbitrage" summary="Long one venue, short another: earn the funding gap">
+                    <FundingArbView />
+                  </ToolItem>
+                  <ToolItem title="Price arbitrage" summary="Token on-chain vs its perp, net of costs">
+                    <ArbView />
+                  </ToolItem>
+                  <ToolItem title="Neutral bot" summary="Farm points delta-neutral, on autopilot">
+                    <NeutralBotPanel />
+                  </ToolItem>
+                </ToolGroup>
               )}
-              {FEATURES.solana && <SolanaPanel />}
+              <ToolGroup label="Move funds">
+                <ToolItem title="Bridge" summary="Move funds between chains">
+                  <BridgePanel />
+                </ToolItem>
+                <ToolItem title="Lido withdrawals" summary="Claim finalized stETH withdrawals">
+                  <LidoWithdrawalsPanel />
+                </ToolItem>
+              </ToolGroup>
+              {FEATURES.perps && (
+                <ToolGroup label="Perp venues">
+                  <ToolItem title="Accounts" summary="Hyperliquid, Extended, TxFlow at a glance" defaultOpen>
+                    <PerpVenuesSummary />
+                  </ToolItem>
+                  <ToolItem id={VENUE_ANCHOR.hyperliquid} title="Hyperliquid" summary="Deposit, withdraw, HLP, staking">
+                    <HyperliquidPanel />
+                  </ToolItem>
+                  <div className="tool-wrap" data-tour="extended">
+                    <ToolItem id={VENUE_ANCHOR.extended} title="Extended" summary="Connect, deposit and trade on Extended">
+                      <ExtendedConnectPanel />
+                    </ToolItem>
+                  </div>
+                  <ToolItem id={VENUE_ANCHOR.txflow} title="TxFlow" summary="Connect, deposit and trade on TxFlow">
+                    <TxflowPanel />
+                  </ToolItem>
+                </ToolGroup>
+              )}
+              {FEATURES.solana && (
+                <ToolGroup label="Solana">
+                  <ToolItem title="Solana wallet" summary="Balances and transfers on Solana">
+                    <SolanaPanel />
+                  </ToolItem>
+                </ToolGroup>
+              )}
 
             </>
           )}

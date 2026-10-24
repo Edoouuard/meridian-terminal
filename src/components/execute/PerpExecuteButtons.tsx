@@ -312,9 +312,9 @@ export function PerpExecuteButton({
         padding: "2px 8px",
         cursor: "pointer",
         border: "1px solid var(--color-divider)",
-        background: orderType === t ? "var(--color-accent-700)" : "none",
-        color: orderType === t ? "#fff" : "var(--color-text)",
-        borderRadius: 4,
+        background: orderType === t ? "#fff" : "none",
+        color: orderType === t ? "#0a0a0a" : "var(--color-text)",
+        borderRadius: 999,
       }}
     >
       {label}

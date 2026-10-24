@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { CELEBRATE_EVENT, deployedUsd, isMoveLeg, openStrategies, type CelebrateDetail } from "@/lib/strategyTracker";
 import { fmtPct } from "@/lib/strategyView";
 
-const CONFETTI_COLORS = ["#b68235", "#e1ad66", "#facb8d", "#27ae60", "#5a3b0a", "#ffe3bf"];
+const CONFETTI_COLORS = ["#ffffff", "#ece6da", "#bdb5a6", "#7cc58a", "#8ea0ad", "#f5d9a8"];
 const PIECES = 42;
 
 function fmtUsd(v: number): string {

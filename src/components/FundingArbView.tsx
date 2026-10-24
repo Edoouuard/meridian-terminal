@@ -52,11 +52,7 @@ export function FundingArbView() {
         <h6 className="panel-card__title">Funding arbitrage</h6>
         <span className="text-muted" style={{ fontSize: 11 }}>{isLoading ? "reading…" : `${pairs.length} pairs`}</span>
       </div>
-      <p className="text-muted farb-card__sub">
-        Same quantity long on one venue, short on another: price moves cancel, you keep the funding the short receives minus what the long pays.
-        Ranked on the last 7 days&apos; realised funding (today&apos;s rate alone often sits on a cap or spikes for an hour), net of taker fees to
-        open and close both legs. Figures for ${PER_LEG_USD.toLocaleString("en-US")} per leg held {HOLD_DAYS} days.
-      </p>
+      <p className="text-muted farb-card__sub">Net of fees for ${PER_LEG_USD.toLocaleString("en-US")} per leg held {HOLD_DAYS} days, on the last 7 days&apos; funding.</p>
 
       {rows.length > 0 ? (
         <ul className="farb-list">
@@ -102,10 +98,15 @@ export function FundingArbView() {
           {showAll ? "Show fewer" : `Show ${Math.min(pairs.length, 12) - 4} more`}
         </button>
       )}
-      <p className="text-muted" style={{ fontSize: 10, margin: 0 }}>
-        Risks: the spread can flip (funding is reset every hour), the price gap between venues can widen, and a leg can be liquidated if the price runs
-        while the other leg&apos;s profit sits on another venue. Keep leverage low and margin on both sides.
-      </p>
+      <details className="how-computed">
+        <summary>How it works</summary>
+        <p className="text-muted">
+          Same quantity long on one venue and short on another: price moves cancel, you keep the funding the short receives minus what the long pays.
+          Ranked on the last 7 days&apos; realised funding (today&apos;s rate alone often sits on a cap or spikes for an hour), net of taker fees to open
+          and close both legs. Risks: the spread can flip (funding resets every hour), the price gap between venues can widen, and a leg can be
+          liquidated if the price runs while the other leg&apos;s profit sits on another venue. Keep leverage low and margin on both sides.
+        </p>
+      </details>
     </section>
   );
 }
