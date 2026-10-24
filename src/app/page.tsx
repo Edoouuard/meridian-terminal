@@ -12,7 +12,7 @@ import { HistoryPanel } from "@/components/HistoryPanel";
 import { StrategiesPanel } from "@/components/StrategiesPanel";
 import { PortfolioDayChange, PortfolioHoldings } from "@/components/PortfolioHoldings";
 import { Celebration } from "@/components/Celebration";
-import { ProductTour, startTour, TOUR_OPEN_TAB_EVENT } from "@/components/ProductTour";
+import { ProductTour, TOUR_OPEN_TAB_EVENT } from "@/components/ProductTour";
 import { OPEN_STRATEGIES_EVENT, useTrackedStrategies } from "@/lib/strategyTracker";
 import { HyperliquidPanel } from "@/components/HyperliquidPanel";
 import { ExtendedConnectPanel } from "@/components/ExtendedConnectPanel";
@@ -34,6 +34,9 @@ import { LiveAsset, useLivePortfolio } from "@/hooks/useLivePortfolio";
 import { useHaikuPortfolio } from "@/hooks/useHaikuPortfolio";
 import { AlphaPanel, ChainsPanel, NewsPanel, useNowTick } from "@/components/NewsFeed";
 import { YieldsPanel } from "@/components/YieldsPanel";
+import { SettingsPage } from "@/components/SettingsPage";
+import { HelpPage } from "@/components/HelpPage";
+import { loadSettings, useUiSettings } from "@/lib/uiSettings";
 import { ACTIVE_CHAIN_IDS, CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
 import { FEATURES } from "@/lib/features";
 import { deployableUsd } from "@/lib/budgetFit";
@@ -60,7 +63,7 @@ const LIVE_TRACKED_PROTOCOLS = /aave|spark|compound|morpho|fluid|yearn|sky|ethen
 const CHAIN_NAMES = SUPPORTED_CHAINS.map((c) => CHAIN_LABEL[c.id]).join(", ");
 import { ThreadItem, fmtUsd } from "@/lib/data";
 
-const PAGES = ["terminal", "portfolio", "earn", "perps", "discover"] as const;
+const PAGES = ["terminal", "portfolio", "earn", "perps", "discover", "help", "settings"] as const;
 type Page = (typeof PAGES)[number];
 type PerpsTab = "bot" | "funding" | "arb" | "accounts";
 
@@ -165,10 +168,14 @@ export default function TerminalApp() {
     if (typeof window !== "undefined") window.history.replaceState(null, "", next === "terminal" ? window.location.pathname : `#${next}`);
   }, []);
   // A link to #earn, #perps… opens that page.
+  const [ui, updateUi] = useUiSettings();
+  const showPerps = FEATURES.perps && ui.showAdvanced;
   useEffect(() => {
+    // A link to a page opens it; no link opens the page chosen in Settings.
     const fromHash = () => {
       const h = window.location.hash.slice(1);
       if ((PAGES as readonly string[]).includes(h)) setPage(h as Page);
+      else if (!h) setPage(loadSettings().startPage);
     };
     fromHash();
     window.addEventListener("hashchange", fromHash);
@@ -264,6 +271,8 @@ export default function TerminalApp() {
 
   // Auto-scroll to bottom when thread changes or analysis starts
   useEffect(() => {
+    // Nothing to follow on the empty start screen: scrolling would hide its heading on a phone.
+    if (thread.length === 0 && !isAnalyzing) return;
     threadEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [thread, isAnalyzing, pendingText]);
 
@@ -384,9 +393,14 @@ export default function TerminalApp() {
     { id: "terminal", label: "Terminal", icon: "◆" },
     { id: "portfolio", label: "Portfolio", icon: "▣" },
     { id: "earn", label: "Earn", icon: "%", tour: "markets" },
-    ...(FEATURES.perps ? [{ id: "perps" as const, label: "Perps", icon: "⇄" }] : []),
+    ...(showPerps ? [{ id: "perps" as const, label: "Perps", icon: "⇄" }] : []),
     { id: "discover", label: "Discover", icon: "✦" },
   ];
+  const NAV_END: { id: Page; label: string; icon: string }[] = [
+    { id: "help", label: "Help", icon: "?" },
+    { id: "settings", label: "Settings", icon: "⚙" },
+  ];
+  const isLight = ui.theme === "light" || (ui.theme === "system" && typeof window !== "undefined" && !!window.matchMedia?.("(prefers-color-scheme: light)").matches);
 
   const portfolioCard = (
     <section className="panel-card" data-tour="portfolio">
@@ -459,7 +473,7 @@ export default function TerminalApp() {
           {ACTIVE_CHAIN_IDS.length} chains · {EXECUTABLE_PROTOCOLS} protocols
         </span>
         <span className="topbar__spacer" />
-        {FEATURES.perps && (
+        {showPerps && (
           <BotStatusChip
             onOpen={() => {
               setPerpsTab("bot");
@@ -473,8 +487,15 @@ export default function TerminalApp() {
             {fmtUsd(portfolioValue)}
           </button>
         )}
-        <button type="button" className="tour-trigger" onClick={startTour} title="Take the product tour">
-          Tour
+        <button
+          type="button"
+          className="theme-toggle"
+          onClick={() => updateUi({ theme: isLight ? "dark" : "light" })}
+          title={isLight ? "Switch to night mode" : "Switch to day mode"}
+          aria-label={isLight ? "Switch to night mode" : "Switch to day mode"}
+          suppressHydrationWarning
+        >
+          <span aria-hidden="true" suppressHydrationWarning>{isLight ? "☾" : "☀"}</span>
         </button>
         <FeedbackButton lastRequest={thread[thread.length - 1]?.text} />
         <WalletConnectButton />
@@ -489,6 +510,15 @@ export default function TerminalApp() {
               </span>
               <span className="app-nav__label">{n.label}</span>
               {n.id === "portfolio" && trackedStrategies.length > 0 && <span className="app-nav__count">{trackedStrategies.length}</span>}
+            </button>
+          ))}
+          <span className="app-nav__spacer" />
+          {NAV_END.map((n) => (
+            <button key={n.id} type="button" className={`app-nav__item app-nav__item--end${page === n.id ? " is-on" : ""}`} aria-current={page === n.id ? "page" : undefined} onClick={() => goTo(n.id)}>
+              <span className="app-nav__icon" aria-hidden="true">
+                {n.icon}
+              </span>
+              <span className="app-nav__label">{n.label}</span>
             </button>
           ))}
         </nav>
@@ -518,7 +548,7 @@ export default function TerminalApp() {
                       display: "flex",
                       flexDirection: "column",
                       alignItems: "center",
-                      justifyContent: "center",
+                      justifyContent: "safe center",
                       gap: "var(--space-6)",
                       padding: "var(--space-8) var(--space-4)",
                       textAlign: "center",
@@ -540,7 +570,7 @@ export default function TerminalApp() {
                           maxWidth: 440,
                           lineHeight: 1.7,
                         }}>
-                          Describe your goal. Meridian fetches live rates across every protocol and designs strategies at different risk levels.
+                          Say what you want in plain words. Meridian finds the best options across DeFi and builds the steps; you approve each one.
                         </p>
                         {!isConnected && (
                           <p className="text-muted" style={{ margin: 0, fontSize: 12 }}>
@@ -548,7 +578,7 @@ export default function TerminalApp() {
                           </p>
                         )}
                       </div>
-                      {FEATURES.perps && (
+                      {showPerps && (
                         <button
                           type="button"
                           className="bot-promo"
@@ -559,7 +589,7 @@ export default function TerminalApp() {
                         >
                           <span className="bot-promo__tag">Neutral bot</span>
                           <span className="bot-promo__title">Farm points and airdrops on autopilot</span>
-                          <span className="bot-promo__text">Delta-neutral volume and open interest across Hyperliquid, Extended and TxFlow, at random times and sizes, monitored live.</span>
+                          <span className="bot-promo__text">Earns exchange points on Hyperliquid, Extended and TxFlow without betting on the price. It runs on its own; you stay in control.</span>
                           <span className="bot-promo__go" aria-hidden="true">Open →</span>
                         </button>
                       )}
@@ -663,7 +693,7 @@ export default function TerminalApp() {
             <div className="page col-scroll">
               <header className="page__head">
                 <h1 className="page__title">Earn</h1>
-                <p className="page__sub">Live yields on every protocol Meridian covers, and the vaults perp exchanges run, read from each protocol. Executable rows build the deposit for you.</p>
+                <p className="page__sub">The best live rates for your stablecoins, ETH and HYPE, and the vaults run by perp exchanges. Rows marked “In Meridian” build the deposit for you in one go.</p>
               </header>
               <div className="page__narrow">
                 <YieldsPanel />
@@ -671,12 +701,26 @@ export default function TerminalApp() {
             </div>
           )}
 
-          {page === "perps" && FEATURES.perps && (
+          {page === "perps" && !showPerps && (
+            <div className="page col-scroll">
+              <header className="page__head">
+                <h1 className="page__title">Perps</h1>
+                <p className="page__sub">The advanced perp tools are hidden. Turn them back on in Settings → Advanced tools.</p>
+              </header>
+              <div>
+                <button type="button" className="btn btn-primary" onClick={() => goTo("settings")}>
+                  Open Settings
+                </button>
+              </div>
+            </div>
+          )}
+
+          {page === "perps" && showPerps && (
             <div className="page col-scroll">
               <header className="page__head page__head--row">
                 <div>
                   <h1 className="page__title">Perps</h1>
-                  <p className="page__sub">Delta-neutral farming, funding and price arbitrage across Hyperliquid, Extended and TxFlow, and your accounts on each.</p>
+                  <p className="page__sub">Earn without betting on the price: farm points, capture funding and price gaps between exchanges, and manage your exchange accounts.</p>
                 </div>
                 <div className="seg" role="tablist" aria-label="Perps">
                   {(
@@ -725,6 +769,26 @@ export default function TerminalApp() {
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {page === "settings" && (
+            <div className="page col-scroll">
+              <header className="page__head">
+                <h1 className="page__title">Settings</h1>
+                <p className="page__sub">Make Meridian yours: day or night, text size, where it opens and which tools show.</p>
+              </header>
+              <SettingsPage />
+            </div>
+          )}
+
+          {page === "help" && (
+            <div className="page col-scroll">
+              <header className="page__head">
+                <h1 className="page__title">Help</h1>
+                <p className="page__sub">New to DeFi or to Meridian? Start here: short answers, a one-minute tour, and a way to reach us.</p>
+              </header>
+              <HelpPage />
             </div>
           )}
 
@@ -782,7 +846,7 @@ export default function TerminalApp() {
                   <textarea
                     ref={textareaRef}
                     className="input"
-                    placeholder="Describe what you want: yield, exposure, hedge, airdrops..."
+                    placeholder="Ask Meridian anything…"
                     value={promptText}
                     disabled={isAnalyzing}
                     onChange={(e) => {

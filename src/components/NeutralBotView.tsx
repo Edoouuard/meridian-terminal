@@ -273,11 +273,15 @@ export function NeutralBotView() {
               </div>
             }
           >
-            <p className="bot-step__lead text-muted">
-              {cfg.mode === "farm"
-                ? "The bot opens the same size long on one venue and short on the other, so price moves cancel out, then closes and reopens it on a random schedule. Every opening and closing is volume and open interest on both venues: what their points and airdrops reward. Cheapest first."
-                : "The bot holds the pair while one venue pays more funding than the other, and closes it when the spread fades. Best spread first."}
-            </p>
+            <p className="bot-step__lead">{cfg.mode === "farm" ? "Pick the coin and the two exchanges. Cheapest first." : "Pick the coin and the two exchanges. Best funding gap first."}</p>
+            <details className="bot-explain">
+              <summary>How this works</summary>
+              <p className="text-muted">
+                {cfg.mode === "farm"
+                  ? "The bot opens the same size long on one venue and short on the other, so price moves cancel out, then closes and reopens it on a random schedule. Every opening and closing is volume and open interest on both venues: what their points and airdrops reward."
+                  : "The bot holds the pair while one venue pays more funding than the other, and closes it when the spread fades."}
+              </p>
+            </details>
             {markets.isLoading ? (
               <p className="text-muted bot-empty">Reading the venues&apos; markets…</p>
             ) : choices.length === 0 ? (
@@ -678,7 +682,7 @@ function BotHero({ health, setup, onServer, children }: { health: ReturnType<typ
         </div>
         <p className="bot-hero__sub">
           {setup
-            ? "Farms points and airdrops on Hyperliquid, Extended and TxFlow with volume and open interest that has no price exposure: long on one venue, short on the other. Four steps below; nothing trades before you press Start."
+            ? "Farms points and airdrops on Hyperliquid, Extended and TxFlow without betting on the price: it buys on one exchange and shorts the same amount on another. Four steps; nothing trades until you press Start."
             : onServer
               ? "Long on one venue, short on the other: price moves cancel out. Runs on Meridian's server, 24/7: you can close this tab or let the computer sleep."
               : "Long on one venue, short on the other: price moves cancel out. It trades on its own while this tab is open."}

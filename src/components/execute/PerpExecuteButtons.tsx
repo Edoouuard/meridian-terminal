@@ -312,8 +312,8 @@ export function PerpExecuteButton({
         padding: "2px 8px",
         cursor: "pointer",
         border: "1px solid var(--color-divider)",
-        background: orderType === t ? "#fff" : "none",
-        color: orderType === t ? "#0a0a0a" : "var(--color-text)",
+        background: orderType === t ? "var(--ink-bg)" : "none",
+        color: orderType === t ? "var(--ink-fg)" : "var(--color-text)",
         borderRadius: 999,
       }}
     >

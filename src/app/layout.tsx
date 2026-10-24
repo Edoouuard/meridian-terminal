@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "@/providers/Providers";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { THEME_BOOT_SCRIPT } from "@/lib/themeBoot";
 
 export const metadata: Metadata = {
   title: "Meridian: DeFi Terminal",
@@ -12,7 +13,10 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="en" data-theme="dark" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOT_SCRIPT }} />
+      </head>
       <body>
         <ErrorBoundary>
           <Providers>{children}</Providers>
