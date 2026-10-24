@@ -1,5 +1,6 @@
 "use client";
 
+import { ProtocolLogo } from "@/components/ProtocolLogo";
 import { useMemo, useState } from "react";
 import type { LivePortfolio } from "@/hooks/useLivePortfolio";
 import { useLivePrices } from "@/hooks/useLivePrices";
@@ -254,7 +255,9 @@ export function PortfolioHoldings({ live }: { live: LivePortfolio }) {
                   {view.lending.map((l, i) => (
                     <li key={i} className="hold-row">
                       <span className="hold-row__main">
-                        <span className="hold-row__symbol">{l.protocol}</span>
+                        <span className="hold-row__symbol hold-row__symbol--logo">
+                          <ProtocolLogo name={l.protocol} size={18} /> {l.protocol}
+                        </span>
                         <span className="hold-row__sub">
                           Supplied {fmtUsd(l.collateralUsd)}
                           {l.debtUsd > 0 && <> · Borrowed {fmtUsd(l.debtUsd)}</>}

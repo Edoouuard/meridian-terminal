@@ -99,17 +99,40 @@ export function startTour(): void {
   if (typeof window !== "undefined") window.dispatchEvent(new Event(START_EVENT));
 }
 
-function readDone(): boolean {
+/** Wallets that have seen the tour in this browser (lowercased addresses). */
+const TOUR_WALLETS_KEY = "meridian:tourWallets:v1";
+
+/**
+ * Has this visitor seen the tour? Without a wallet: once per browser. With a
+ * wallet: once per wallet, so a newly connected wallet gets it even after the
+ * visitor skipped it before connecting.
+ */
+export function tourSeen(storage: Pick<Storage, "getItem">, address: string | undefined): boolean {
+  if (!address) return storage.getItem(TOUR_DONE_KEY) === "1";
   try {
-    return window.localStorage.getItem(TOUR_DONE_KEY) === "1";
+    const seen = JSON.parse(storage.getItem(TOUR_WALLETS_KEY) ?? "[]") as unknown;
+    return Array.isArray(seen) && seen.includes(address.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+function readDone(address: string | undefined): boolean {
+  try {
+    return tourSeen(window.localStorage, address);
   } catch {
     return true;
   }
 }
 
-function markDone(): void {
+function markDone(address: string | undefined): void {
   try {
     window.localStorage.setItem(TOUR_DONE_KEY, "1");
+    if (address) {
+      const raw = JSON.parse(window.localStorage.getItem(TOUR_WALLETS_KEY) ?? "[]") as unknown;
+      const seen = Array.isArray(raw) ? (raw as string[]) : [];
+      if (!seen.includes(address.toLowerCase())) window.localStorage.setItem(TOUR_WALLETS_KEY, JSON.stringify([...seen, address.toLowerCase()].slice(-50)));
+    }
   } catch {
     /* private mode: the tour may show again, harmless */
   }
@@ -138,7 +161,7 @@ export function placeTooltip(
  * shown again once finished or skipped, and replayable from the top bar.
  */
 export function ProductTour() {
-  const { isConnected } = useAccount();
+  const { isConnected, address } = useAccount();
   const [index, setIndex] = useState<number | null>(null);
   const [rect, setRect] = useState<DOMRect | null>(null);
   const [viewport, setViewport] = useState({ width: 1280, height: 800 });
@@ -146,12 +169,12 @@ export function ProductTour() {
   /** The card's rendered height, so it is placed by its real size (the last step is tall). */
   const [cardHeight, setCardHeight] = useState<number | null>(null);
 
-  // The first visit in this browser starts the tour once, wallet connected or not.
+  // Starts on its own on the first visit, and again for each wallet that connects for the first time.
   useEffect(() => {
-    if (readDone()) return;
+    if (readDone(address)) return;
     const t = setTimeout(() => setIndex((i) => (i === null ? 0 : i)), AUTO_START_MS);
     return () => clearTimeout(t);
-  }, []);
+  }, [address]);
 
   useEffect(() => {
     const start = () => setIndex(0);
@@ -205,10 +228,10 @@ export function ProductTour() {
   }, [index]);
 
   const close = useCallback(() => {
-    markDone();
+    markDone(address);
     setIndex(null);
-  }, []);
-  const next = useCallback(() => setIndex((i) => (i === null ? null : i + 1 < TOUR_STEPS.length ? i + 1 : (markDone(), null))), []);
+  }, [address]);
+  const next = useCallback(() => setIndex((i) => (i === null ? null : i + 1 < TOUR_STEPS.length ? i + 1 : (markDone(address), null))), [address]);
   const send = useCallback(
     (prompt: string) => {
       close();

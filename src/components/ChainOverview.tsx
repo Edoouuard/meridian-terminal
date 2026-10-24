@@ -1,5 +1,6 @@
 "use client";
 
+import { ProtocolLogo, ProtocolLogos } from "@/components/ProtocolLogo";
 import { useQuery } from "@tanstack/react-query";
 import type { LiveChainOverview } from "@/app/api/chains/route";
 import { AskButton } from "@/components/AskButton";
@@ -79,9 +80,12 @@ export function ChainOverview({ hideDivider }: { hideDivider?: boolean } = {}) {
             <ExecutableOn chainId={chain.chainId} />
             {chain.topProtocols.length > 0 && (
               <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5 }}>
+                <span className="text-muted" style={{ fontSize: 10, alignSelf: "center" }}>
+                  Biggest
+                </span>
                 {chain.topProtocols.map((p) => (
-                  <span key={p.name} className="protocol-pill">
-                    {p.name} · {fmtUsd(p.tvlUsd)}
+                  <span key={p.name} title={`${p.name} · ${fmtUsd(p.tvlUsd)}`}>
+                    <ProtocolLogo name={p.name} size={22} />
                   </span>
                 ))}
               </div>
@@ -110,11 +114,7 @@ function ExecutableOn({ chainId }: { chainId?: number }) {
       <span className="text-muted" style={{ fontSize: 10, alignSelf: "center" }}>
         Meridian · {exec.length}
       </span>
-      {exec.map((p) => (
-        <span key={p} className="protocol-pill protocol-pill--exec">
-          {p}
-        </span>
-      ))}
+      <ProtocolLogos names={exec} size={22} />
     </div>
   );
 }
