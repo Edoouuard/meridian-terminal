@@ -96,7 +96,7 @@ export function ArbView() {
   return (
     <section className="panel-card arb-card">
       <div className="panel-card__head">
-        <h6 className="panel-card__title">Arbitrage scanner</h6>
+        <h6 className="panel-card__title">Price arbitrage · DEX ↔ perp</h6>
         <span className={`bot-pill bot-pill--${live.length ? "good" : "idle"}`}>
           <span className="bot-pill__dot" aria-hidden />
           {scan.isLoading ? "Scanning…" : live.length ? `${live.length} live` : "none now"}

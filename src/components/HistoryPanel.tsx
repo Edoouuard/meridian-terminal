@@ -17,9 +17,9 @@ function fmtAmount(rec: OrderRecord): string {
 }
 
 const STATUS_META: Record<OrderStatus, { label: string; color: string; bg: string }> = {
-  confirmed: { label: "confirmed", color: "#7d5411", bg: "#fff3e4" },
-  error: { label: "error", color: "#b03a2e", bg: "#fbeeea" },
-  pending: { label: "pending", color: "#605d5d", bg: "#efecec" },
+  confirmed: { label: "confirmed", color: "var(--risk-good)", bg: "color-mix(in srgb, var(--risk-good) 14%, transparent)" },
+  error: { label: "error", color: "var(--risk-bad)", bg: "color-mix(in srgb, var(--risk-bad) 14%, transparent)" },
+  pending: { label: "pending", color: "var(--color-neutral-600)", bg: "var(--color-neutral-200)" },
 };
 
 function shortHash(hash: string): string {

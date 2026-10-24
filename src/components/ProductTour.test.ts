@@ -14,10 +14,10 @@ describe("product tour", () => {
     expect(TOUR_STEPS.filter((s) => s.prompts)).toHaveLength(1);
   });
 
-  it("with perps: shows Extended (opening the Tools tab) and every use-case prompt", () => {
+  it("with perps: shows Extended (opening Perps → Accounts) and every use-case prompt", () => {
     const steps = tourSteps(true);
     const ext = steps.find((s) => s.target === "extended");
-    expect(ext?.tab).toBe("venues");
+    expect(ext?.tab).toBe("perps-accounts");
     expect(ext?.body).toMatch(/three signatures/);
     // The prerequisites the owner hit: an account opened on extended.exchange with the same wallet, and a balance.
     expect(ext?.body).toMatch(/extended\.exchange with this same wallet/);

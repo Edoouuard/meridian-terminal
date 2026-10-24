@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useAccount } from "wagmi";
 import { ThreadCard } from "@/components/ThreadCard";
@@ -18,12 +18,12 @@ import { HyperliquidPanel } from "@/components/HyperliquidPanel";
 import { ExtendedConnectPanel } from "@/components/ExtendedConnectPanel";
 import { TxflowPanel } from "@/components/TxflowPanel";
 import { PerpVenuesSummary, VENUE_ANCHOR } from "@/components/PerpVenuesSummary";
-import { NeutralBotPanel } from "@/components/NeutralBotPanel";
 import { OPEN_BOT_EVENT, OPEN_TOOLS_EVENT, SHOW_BOT_EVENT } from "@/lib/neutralBot/bus";
 import { NeutralBotHost } from "@/components/NeutralBotHost";
 import { executableCoverage } from "@/lib/coverage";
 
 import { ArbView } from "@/components/ArbView";
+import { FundingArbView } from "@/components/FundingArbView";
 import { NeutralBotView } from "@/components/NeutralBotView";
 import { BotStatusChip } from "@/components/BotStatusChip";
 import { LidoWithdrawalsPanel } from "@/components/LidoWithdrawalsPanel";
@@ -32,7 +32,8 @@ import { SolanaPanel } from "@/components/SolanaPanel";
 import { BridgePanel } from "@/components/BridgePanel";
 import { LiveAsset, useLivePortfolio } from "@/hooks/useLivePortfolio";
 import { useHaikuPortfolio } from "@/hooks/useHaikuPortfolio";
-import { NewsFeed } from "@/components/NewsFeed";
+import { AlphaPanel, ChainsPanel, NewsPanel, useNowTick } from "@/components/NewsFeed";
+import { YieldsPanel } from "@/components/YieldsPanel";
 import { ACTIVE_CHAIN_IDS, CHAIN_LABEL, SUPPORTED_CHAINS } from "@/lib/onchain";
 import { FEATURES } from "@/lib/features";
 import { deployableUsd } from "@/lib/budgetFit";
@@ -58,6 +59,10 @@ const LIVE_TRACKED_PROTOCOLS = /aave|spark|compound|morpho|fluid|yearn|sky|ethen
 
 const CHAIN_NAMES = SUPPORTED_CHAINS.map((c) => CHAIN_LABEL[c.id]).join(", ");
 import { ThreadItem, fmtUsd } from "@/lib/data";
+
+const PAGES = ["terminal", "portfolio", "earn", "perps", "discover"] as const;
+type Page = (typeof PAGES)[number];
+type PerpsTab = "bot" | "funding" | "arb" | "accounts";
 
 /** Protocols Meridian signs into, across its chains (lib/coverage.ts). */
 const EXECUTABLE_PROTOCOLS = executableCoverage().protocols.length;
@@ -152,51 +157,80 @@ export default function TerminalApp() {
   const threadEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  // Everything below Positions used to stack 9 panels in one long scroll
-  // (Risk, Perp positions, 4 venue connect panels, History, Chains, Solana) --
-  // grouped into tabs so the left column stays scannable instead of dense.
-  const [leftTab, setLeftTab] = useState<"risk" | "strategies" | "venues" | "activity">("risk");
-  const sideTabsRef = useRef<HTMLDivElement>(null);
-  // "Monitor it" from the celebration opens the Strategies tab.
+  // One page per job, picked in the nav rail; the ask bar stays under every page.
+  const [page, setPage] = useState<Page>("terminal");
+  const [perpsTab, setPerpsTab] = useState<PerpsTab>("bot");
+  const goTo = useCallback((next: Page) => {
+    setPage(next);
+    if (typeof window !== "undefined") window.history.replaceState(null, "", next === "terminal" ? window.location.pathname : `#${next}`);
+  }, []);
+  // A link to #earn, #perps… opens that page.
   useEffect(() => {
-    const open = () => {
-      setLeftTab("strategies");
-      sideTabsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const fromHash = () => {
+      const h = window.location.hash.slice(1);
+      if ((PAGES as readonly string[]).includes(h)) setPage(h as Page);
     };
+    fromHash();
+    window.addEventListener("hashchange", fromHash);
+    return () => window.removeEventListener("hashchange", fromHash);
+  }, []);
+  /** Opens a page, then scrolls to (and unfolds) an element on it once it has rendered. */
+  const openAt = useCallback(
+    (next: Page, anchor?: string) => {
+      goTo(next);
+      if (anchor)
+        setTimeout(() => {
+          const el = document.getElementById(anchor);
+          if (el instanceof HTMLDetailsElement) el.open = true;
+          el?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 80);
+    },
+    [goTo],
+  );
+  // "Monitor it" from the celebration opens the strategies on the Portfolio page.
+  useEffect(() => {
+    const open = () => openAt("portfolio", "portfolio-strategies");
     window.addEventListener(OPEN_STRATEGIES_EVENT, open);
     return () => window.removeEventListener(OPEN_STRATEGIES_EVENT, open);
-  }, []);
-  // The neutral bot has its own view in the centre column; "Run it as a bot" from a plan opens it.
-  const [centerView, setCenterView] = useState<"terminal" | "bot">("terminal");
+  }, [openAt]);
+  // "Run it as a bot" from a plan opens the neutral bot under Perps.
   useEffect(() => {
-    const open = () => setCenterView("bot");
+    const open = () => {
+      setPerpsTab("bot");
+      goTo("perps");
+    };
     window.addEventListener(OPEN_BOT_EVENT, open);
     window.addEventListener(SHOW_BOT_EVENT, open);
     return () => {
       window.removeEventListener(OPEN_BOT_EVENT, open);
       window.removeEventListener(SHOW_BOT_EVENT, open);
     };
-  }, []);
-  // "Deposit on Extended" from the bot: Tools, at that venue's panel.
+  }, [goTo]);
+  // "Deposit on Extended" from the bot: Perps → Accounts, at that venue.
   useEffect(() => {
     const open = (e: Event) => {
       const anchor = (e as CustomEvent<unknown>).detail;
-      setLeftTab("venues");
-      if (typeof anchor === "string") setTimeout(() => document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+      setPerpsTab("accounts");
+      openAt("perps", typeof anchor === "string" ? anchor : undefined);
     };
     window.addEventListener(OPEN_TOOLS_EVENT, open);
     return () => window.removeEventListener(OPEN_TOOLS_EVENT, open);
-  }, []);
-  // A tour step pointing inside a side tab opens it first.
+  }, [openAt]);
+  // A tour step pointing at another page opens it first.
   useEffect(() => {
     const open = (e: Event) => {
       const tab = (e as CustomEvent<unknown>).detail;
-      if (tab === "risk" || tab === "strategies" || tab === "venues" || tab === "activity") setLeftTab(tab);
+      if (tab === "terminal") goTo("terminal");
+      if (tab === "perps-accounts") {
+        setPerpsTab("accounts");
+        goTo("perps");
+      }
     };
     window.addEventListener(TOUR_OPEN_TAB_EVENT, open);
     return () => window.removeEventListener(TOUR_OPEN_TAB_EVENT, open);
-  }, []);
+  }, [goTo]);
 
+  const now = useNowTick();
   const { isConnected, address, chain } = useAccount();
   const extendedSigner = useExtendedAccount();
   const trackedStrategies = useTrackedStrategies(address);
@@ -235,7 +269,7 @@ export default function TerminalApp() {
 
   // Submit a thesis to the LLM engine (used by both input and quick prompts)
   async function submitThesis(text: string) {
-    setCenterView("terminal");
+    goTo("terminal");
     const typed = text.trim();
     if (!typed || isAnalyzing) return;
     // A reply to the planner's question carries the original request with it.
@@ -346,13 +380,75 @@ export default function TerminalApp() {
     { label: "Delta neutral", thesis: "Make it delta neutral, I don't want directional exposure", perps: true },
   ].filter((p) => FEATURES.perps || !("perps" in p));
 
+  const NAV: { id: Page; label: string; icon: string; tour?: string }[] = [
+    { id: "terminal", label: "Terminal", icon: "◆" },
+    { id: "portfolio", label: "Portfolio", icon: "▣" },
+    { id: "earn", label: "Earn", icon: "%", tour: "markets" },
+    ...(FEATURES.perps ? [{ id: "perps" as const, label: "Perps", icon: "⇄" }] : []),
+    { id: "discover", label: "Discover", icon: "✦" },
+  ];
+
+  const portfolioCard = (
+    <section className="panel-card" data-tour="portfolio">
+                <div className="panel-card__head">
+                  <h6 className="panel-card__title">Portfolio</h6>
+                  <span className={`live-chip${isConnected ? " live-chip--on" : ""}`}>{isConnected ? (live.isLoading ? "Reading…" : "Live") : "No wallet"}</span>
+                </div>
+                {portfolioValue !== null && <p className="portfolio-value">{fmtUsd(portfolioValue)}</p>}
+                {isConnected && <PortfolioDayChange live={live} />}
+                {!isConnected && (
+                  <div className="empty-hint">
+                    <p>Connect a wallet to see your balances and positions across {ACTIVE_CHAIN_IDS.length} chains, and to execute strategies.</p>
+                    <WalletConnectButton />
+                  </div>
+                )}
+
+              </section>
+  );
+  const holdingsCard = (
+    <>
+            {isConnected && (
+              <section className="panel-card">
+                <div className="panel-card__head">
+                  <h6 className="panel-card__title">Holdings</h6>
+                  <span className="text-muted" style={{ fontSize: 11 }}>{livePositions.length || ""}</span>
+                </div>
+                {livePositions.length > 0 ? (
+                  <>
+                    <PortfolioHoldings live={live} />
+                    {haikuExtraPositions.length > 0 && (
+                      <ul className="position-list" style={{ marginTop: 8 }}>
+                        {haikuExtraPositions.map((p, i) => (
+                          <li key={i} className="position-row">
+                            <span className="position-row__main">
+                              <span className="position-row__asset">{`${p.protocol} ${p.type}`}</span>
+                              <span className="position-row__venue">{`${p.asset} · chain ${p.chainId}`}</span>
+                            </span>
+                            <span className="position-row__amount">{fmtUsd(p.depositedUsd)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
+                    {live.isLoading
+                      ? "Reading your wallet balances and Aave position…"
+                      : `Nothing found yet across ${CHAIN_NAMES}. Fund this wallet, or ask for a strategy and Meridian will tell you what's needed.`}
+                  </p>
+                )}
+              </section>
+            )}
+    </>
+  );
+
   return (
     <div className="app-shell" style={{ background: "var(--color-bg)", color: "var(--color-text)", height: "100vh", display: "flex", flexDirection: "column" }}>
       <TickerBanner />
       {FEATURES.perps && <NeutralBotHost />}
       <Celebration />
       <ProductTour />
-      <div className="nav topbar" style={{ background: "var(--color-surface)", flex: "none" }}>
+      <div className="nav topbar" style={{ flex: "none" }}>
         <Link href="/" className="nav-brand" style={{ color: "var(--color-text)" }}>
           Meridian
         </Link>
@@ -363,12 +459,19 @@ export default function TerminalApp() {
           {ACTIVE_CHAIN_IDS.length} chains · {EXECUTABLE_PROTOCOLS} protocols
         </span>
         <span className="topbar__spacer" />
-        {FEATURES.perps && <BotStatusChip onOpen={() => setCenterView("bot")} />}
+        {FEATURES.perps && (
+          <BotStatusChip
+            onOpen={() => {
+              setPerpsTab("bot");
+              goTo("perps");
+            }}
+          />
+        )}
         {portfolioValue !== null && (
-          <span className="topbar__value" title="Wallet balances plus tracked positions">
+          <button type="button" className="topbar__value" title="Wallet balances plus tracked positions" onClick={() => goTo("portfolio")}>
             <span className="topbar__value-label">Portfolio</span>
             {fmtUsd(portfolioValue)}
-          </span>
+          </button>
         )}
         <button type="button" className="tour-trigger" onClick={startTour} title="Take the product tour">
           Tour
@@ -377,339 +480,347 @@ export default function TerminalApp() {
         <WalletConnectButton />
       </div>
 
-      <div className="app-grid" style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "290px 1fr 320px", overflow: "hidden" }}>
-        {/* Portfolio column */}
-        <div className="col-scroll app-col-portfolio side-col" style={{ minWidth: 0, borderRight: "1px solid var(--color-divider)" }}>
-          <section className="panel-card" data-tour="portfolio">
-            <div className="panel-card__head">
-              <h6 className="panel-card__title">Portfolio</h6>
-              <span className={`live-chip${isConnected ? " live-chip--on" : ""}`}>{isConnected ? (live.isLoading ? "Reading…" : "Live") : "No wallet"}</span>
-            </div>
-            {portfolioValue !== null && <p className="portfolio-value">{fmtUsd(portfolioValue)}</p>}
-            {isConnected && <PortfolioDayChange live={live} />}
-            {!isConnected && (
-              <div className="empty-hint">
-                <p>Connect a wallet to see your balances and positions across {ACTIVE_CHAIN_IDS.length} chains, and to execute strategies.</p>
-                <WalletConnectButton />
-              </div>
-            )}
-
-          </section>
-
-          {isConnected && (
-            <section className="panel-card">
-              <div className="panel-card__head">
-                <h6 className="panel-card__title">Holdings</h6>
-                <span className="text-muted" style={{ fontSize: 11 }}>{livePositions.length || ""}</span>
-              </div>
-              {livePositions.length > 0 ? (
-                <>
-                  <PortfolioHoldings live={live} />
-                  {haikuExtraPositions.length > 0 && (
-                    <ul className="position-list" style={{ marginTop: 8 }}>
-                      {haikuExtraPositions.map((p, i) => (
-                        <li key={i} className="position-row">
-                          <span className="position-row__main">
-                            <span className="position-row__asset">{`${p.protocol} ${p.type}`}</span>
-                            <span className="position-row__venue">{`${p.asset} · chain ${p.chainId}`}</span>
-                          </span>
-                          <span className="position-row__amount">{fmtUsd(p.depositedUsd)}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </>
-              ) : (
-                <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
-                  {live.isLoading
-                    ? "Reading your wallet balances and Aave position…"
-                    : `Nothing found yet across ${CHAIN_NAMES}. Fund this wallet, or ask for a strategy and Meridian will tell you what's needed.`}
-                </p>
-              )}
-            </section>
-          )}
-
-          <div className="seg side-tabs" role="tablist" aria-label="Portfolio tools" ref={sideTabsRef} data-tour="tabs">
-            <label className="seg-opt">
-              <input type="radio" name="left-tab" checked={leftTab === "risk"} onChange={() => setLeftTab("risk")} />
-              <span>Risk</span>
-            </label>
-            <label className="seg-opt">
-              <input type="radio" name="left-tab" checked={leftTab === "strategies"} onChange={() => setLeftTab("strategies")} />
-              <span>
-                Strategies
-                {trackedStrategies.length > 0 && <span className="tab-count">{trackedStrategies.length}</span>}
+      <div className="app-body">
+        <nav className="app-nav" aria-label="Pages" data-tour="nav">
+          {NAV.map((n) => (
+            <button key={n.id} type="button" className={`app-nav__item${page === n.id ? " is-on" : ""}`} aria-current={page === n.id ? "page" : undefined} onClick={() => goTo(n.id)} data-tour={n.tour}>
+              <span className="app-nav__icon" aria-hidden="true">
+                {n.icon}
               </span>
-            </label>
-            <label className="seg-opt">
-              <input type="radio" name="left-tab" checked={leftTab === "venues"} onChange={() => setLeftTab("venues")} />
-              <span>Tools</span>
-            </label>
-            <label className="seg-opt">
-              <input type="radio" name="left-tab" checked={leftTab === "activity"} onChange={() => setLeftTab("activity")} />
-              <span>History</span>
-            </label>
-          </div>
+              <span className="app-nav__label">{n.label}</span>
+              {n.id === "portfolio" && trackedStrategies.length > 0 && <span className="app-nav__count">{trackedStrategies.length}</span>}
+            </button>
+          ))}
+        </nav>
 
-          {leftTab === "risk" && (
-            <>
-              <RiskPanel live={live} isConnected={isConnected} />
-              <PerpPositionsPanel />
-            </>
-          )}
-          {leftTab === "venues" && (
-            <>
-              {!isConnected && (
-                <section className="panel-card">
-                  <h6 className="panel-card__title">Tools</h6>
-                  <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
-                    Bridge funds between chains and claim Lido withdrawals here once a wallet is connected. Strategies add the bridges they need on their own.
-                  </p>
-                </section>
-              )}
-              <BridgePanel />
-              <LidoWithdrawalsPanel />
-              {FEATURES.perps && (
-                <>
-                  <PerpVenuesSummary />
-                  <NeutralBotPanel />
-                  <ArbView />
-                  <div id={VENUE_ANCHOR.hyperliquid}>
-                    <HyperliquidPanel />
-                  </div>
-                  <div data-tour="extended" id={VENUE_ANCHOR.extended}>
-                    <ExtendedConnectPanel />
-                  </div>
-                  <div id={VENUE_ANCHOR.txflow}>
-                    <TxflowPanel />
-                  </div>
-                </>
-              )}
-              {FEATURES.solana && <SolanaPanel />}
-
-            </>
-          )}
-          {leftTab === "strategies" && <StrategiesPanel />}
-          {leftTab === "activity" && <HistoryPanel />}
-        </div>
-
-        {/* Trade column — chat-first layout */}
-        <div className="app-col-trade" style={{ display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0 }}>
-          {FEATURES.perps && (
-            <div className="center-switch" role="tablist" aria-label="Main view">
-              <button type="button" role="tab" aria-selected={centerView === "terminal"} className={`center-switch__tab${centerView === "terminal" ? " is-on" : ""}`} onClick={() => setCenterView("terminal")}>
-                Terminal
-              </button>
-              <button type="button" role="tab" aria-selected={centerView === "bot"} className={`center-switch__tab${centerView === "bot" ? " is-on" : ""}`} onClick={() => setCenterView("bot")}>
-                Neutral bot <span className="center-switch__badge">farm points</span>
-              </button>
-            </div>
-          )}
-          {centerView === "bot" && (
-            <div className="col-scroll" style={{ flex: 1, minHeight: 0, minWidth: 0, padding: "var(--space-4)" }}>
-              <NeutralBotView />
-            </div>
-          )}
-          {/* Scrollable thread area */}
-          <div
-            ref={scrollContainerRef}
-            className="col-scroll"
-            style={{
-              display: centerView !== "terminal" ? "none" : "flex",
-              flex: 1,
-              minHeight: 0,
-              minWidth: 0,
-              flexDirection: "column",
-              gap: "var(--space-3)",
-              padding: "var(--space-4)",
-              paddingBottom: "var(--space-2)",
-            }}
-          >
-            {thread.length === 0 && !isAnalyzing && (
-              <div style={{
-                flex: 1,
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "var(--space-6)",
-                padding: "var(--space-8) var(--space-4)",
-                textAlign: "center",
-              }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", alignItems: "center" }}>
-                  <h3 style={{
-                    fontFamily: "var(--font-heading)",
-                    color: "var(--color-text)",
-                    margin: 0,
-                    fontSize: 28,
-                    letterSpacing: "-0.02em",
-                  }}>
-                    What do you want to do?
-                  </h3>
-                  <p style={{
-                    margin: 0,
-                    fontSize: 14,
-                    color: "color-mix(in srgb, var(--color-text) 50%, transparent)",
-                    maxWidth: 440,
-                    lineHeight: 1.7,
-                  }}>
-                    Describe your goal. Meridian fetches live rates across every protocol and designs strategies at different risk levels.
-                  </p>
-                  {!isConnected && (
-                    <p className="text-muted" style={{ margin: 0, fontSize: 12 }}>
-                      Connect a wallet to fit strategies to your real balances and execute them. You can explore without one.
-                    </p>
+        <main className="app-main">
+          {page === "terminal" && (
+            <div className="page-terminal">
+              <div className="page-terminal__thread">
+      {/* Scrollable thread area */}
+                <div
+                  ref={scrollContainerRef}
+                  className="col-scroll"
+                  style={{
+                    display: "flex",
+                    flex: 1,
+                    minHeight: 0,
+                    minWidth: 0,
+                    flexDirection: "column",
+                    gap: "var(--space-3)",
+                    padding: "var(--space-4)",
+                    paddingBottom: "var(--space-2)",
+                  }}
+                >
+                  {thread.length === 0 && !isAnalyzing && (
+                    <div style={{
+                      flex: 1,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "var(--space-6)",
+                      padding: "var(--space-8) var(--space-4)",
+                      textAlign: "center",
+                    }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-2)", alignItems: "center" }}>
+                        <h3 style={{
+                          fontFamily: "var(--font-heading)",
+                          color: "var(--color-text)",
+                          margin: 0,
+                          fontSize: 28,
+                          letterSpacing: "-0.02em",
+                        }}>
+                          What do you want to do?
+                        </h3>
+                        <p style={{
+                          margin: 0,
+                          fontSize: 14,
+                          color: "color-mix(in srgb, var(--color-text) 50%, transparent)",
+                          maxWidth: 440,
+                          lineHeight: 1.7,
+                        }}>
+                          Describe your goal. Meridian fetches live rates across every protocol and designs strategies at different risk levels.
+                        </p>
+                        {!isConnected && (
+                          <p className="text-muted" style={{ margin: 0, fontSize: 12 }}>
+                            Connect a wallet to fit strategies to your real balances and execute them. You can explore without one.
+                          </p>
+                        )}
+                      </div>
+                      {FEATURES.perps && (
+                        <button
+                          type="button"
+                          className="bot-promo"
+                          onClick={() => {
+                            setPerpsTab("bot");
+                            goTo("perps");
+                          }}
+                        >
+                          <span className="bot-promo__tag">Neutral bot</span>
+                          <span className="bot-promo__title">Farm points and airdrops on autopilot</span>
+                          <span className="bot-promo__text">Delta-neutral volume and open interest across Hyperliquid, Extended and TxFlow, at random times and sizes, monitored live.</span>
+                          <span className="bot-promo__go" aria-hidden="true">Open →</span>
+                        </button>
+                      )}
+                      <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+                        gap: 8,
+                        width: "100%",
+                        maxWidth: 600,
+                      }}>
+                        {QUICK_PROMPTS.map((qp) => (
+                          <button
+                            key={qp.label}
+                            className="btn btn-secondary quick-prompt"
+                            disabled={isAnalyzing}
+                            onClick={() => submitThesis(qp.thesis)}
+                          >
+                            <span className="quick-prompt__label">{qp.label}</span>
+                            <span className="quick-prompt__hint">{qp.hint}</span>
+                            <span className="quick-prompt__go" aria-hidden="true">→</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   )}
+
+                  {thread.map((item, i) => (
+                    <ThreadCard
+                      key={i}
+                      item={item}
+                      onSelectVariant={(plan) => selectVariant(i, plan)}
+                      onAnswer={i === thread.length - 1 && !isAnalyzing ? (answer) => void submitThesis(answer) : undefined}
+                    />
+                  ))}
+
+                  {isAnalyzing && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
+                      <div className="user-bubble">
+                        <p>{pendingText}</p>
+                      </div>
+                      <div className="ai-bubble">
+                        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                          {[
+                            "Reading your portfolio & market context",
+                            "Fetching live rates across protocols",
+                            "Designing risk-tiered strategies",
+                          ].map((step, i) => (
+                            <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, opacity: analyzeStep >= i ? 1 : 0.3, transition: "opacity 0.4s" }}>
+                              {analyzeStep > i ? (
+                                <span style={{ width: 16, height: 16, fontSize: 13, color: "var(--color-accent)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>&#10003;</span>
+                              ) : analyzeStep === i ? (
+                                <span style={{ display: "inline-block", width: 16, height: 16, borderRadius: "50%", border: "2px solid var(--color-accent)", borderTopColor: "transparent", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />
+                              ) : (
+                                <span style={{ width: 16, height: 16, borderRadius: "50%", border: "1.5px solid var(--color-divider)", flexShrink: 0 }} />
+                              )}
+                              <span style={{ fontSize: 13, color: analyzeStep >= i ? "var(--color-text)" : "var(--color-neutral-400)" }}>{step}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div ref={threadEndRef} />
                 </div>
-                {FEATURES.perps && (
-                  <button type="button" className="bot-promo" onClick={() => setCenterView("bot")}>
-                    <span className="bot-promo__tag">Neutral bot</span>
-                    <span className="bot-promo__title">Farm points and airdrops on autopilot</span>
-                    <span className="bot-promo__text">Delta-neutral volume and open interest across Hyperliquid, Extended and TxFlow, at random times and sizes, monitored live.</span>
-                    <span className="bot-promo__go" aria-hidden="true">Open →</span>
-                  </button>
-                )}
-                <div style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
-                  gap: 8,
-                  width: "100%",
-                  maxWidth: 600,
-                }}>
-                  {QUICK_PROMPTS.map((qp) => (
-                    <button
-                      key={qp.label}
-                      className="btn btn-secondary quick-prompt"
-                      disabled={isAnalyzing}
-                      onClick={() => submitThesis(qp.thesis)}
-                    >
-                      <span className="quick-prompt__label">{qp.label}</span>
-                      <span className="quick-prompt__hint">{qp.hint}</span>
-                      <span className="quick-prompt__go" aria-hidden="true">→</span>
-                    </button>
+              </div>
+              <aside className="page-terminal__context col-scroll side-col">
+      {portfolioCard}
+                <RiskPanel live={live} isConnected={isConnected} />
+              </aside>
+            </div>
+          )}
+
+          {page === "portfolio" && (
+            <div className="page col-scroll">
+              <header className="page__head">
+                <h1 className="page__title">Portfolio</h1>
+                <p className="page__sub">Your balances and positions across {ACTIVE_CHAIN_IDS.length} chains, the risk they carry, the strategies you put to work and every transaction.</p>
+              </header>
+              <div className="page__grid">
+                <div className="page__col">
+        {portfolioCard}
+                {holdingsCard}
+                  {isConnected && <PerpPositionsPanel />}
+                  <BridgePanel />
+                  <LidoWithdrawalsPanel />
+                  {FEATURES.solana && <SolanaPanel />}
+                </div>
+                <div className="page__col">
+                  <RiskPanel live={live} isConnected={isConnected} />
+                  <div id="portfolio-strategies">
+                    <StrategiesPanel />
+                  </div>
+                  <HistoryPanel />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {page === "earn" && (
+            <div className="page col-scroll">
+              <header className="page__head">
+                <h1 className="page__title">Earn</h1>
+                <p className="page__sub">Live yields on every protocol Meridian covers, and the vaults perp exchanges run, read from each protocol. Executable rows build the deposit for you.</p>
+              </header>
+              <div className="page__narrow">
+                <YieldsPanel />
+              </div>
+            </div>
+          )}
+
+          {page === "perps" && FEATURES.perps && (
+            <div className="page col-scroll">
+              <header className="page__head page__head--row">
+                <div>
+                  <h1 className="page__title">Perps</h1>
+                  <p className="page__sub">Delta-neutral farming, funding and price arbitrage across Hyperliquid, Extended and TxFlow, and your accounts on each.</p>
+                </div>
+                <div className="seg" role="tablist" aria-label="Perps">
+                  {(
+                    [
+                      ["bot", "Neutral bot"],
+                      ["funding", "Funding arbitrage"],
+                      ["arb", "Price arbitrage"],
+                      ["accounts", "Accounts"],
+                    ] as const
+                  ).map(([id, label]) => (
+                    <label key={id} className="seg-opt">
+                      <input type="radio" name="perps-tab" checked={perpsTab === id} onChange={() => setPerpsTab(id)} />
+                      <span>{label}</span>
+                    </label>
                   ))}
                 </div>
-              </div>
-            )}
-
-            {thread.map((item, i) => (
-              <ThreadCard
-                key={i}
-                item={item}
-                onSelectVariant={(plan) => selectVariant(i, plan)}
-                onAnswer={i === thread.length - 1 && !isAnalyzing ? (answer) => void submitThesis(answer) : undefined}
-              />
-            ))}
-
-            {isAnalyzing && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)" }}>
-                <div className="user-bubble">
-                  <p>{pendingText}</p>
+              </header>
+              {perpsTab === "bot" && <NeutralBotView />}
+              {perpsTab === "funding" && (
+                <div className="page__narrow">
+                  <FundingArbView />
                 </div>
-                <div className="ai-bubble">
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {[
-                      "Reading your portfolio & market context",
-                      "Fetching live rates across protocols",
-                      "Designing risk-tiered strategies",
-                    ].map((step, i) => (
-                      <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, opacity: analyzeStep >= i ? 1 : 0.3, transition: "opacity 0.4s" }}>
-                        {analyzeStep > i ? (
-                          <span style={{ width: 16, height: 16, fontSize: 13, color: "var(--color-accent)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>&#10003;</span>
-                        ) : analyzeStep === i ? (
-                          <span style={{ display: "inline-block", width: 16, height: 16, borderRadius: "50%", border: "2px solid var(--color-accent)", borderTopColor: "transparent", animation: "spin 0.8s linear infinite", flexShrink: 0 }} />
-                        ) : (
-                          <span style={{ width: 16, height: 16, borderRadius: "50%", border: "1.5px solid var(--color-divider)", flexShrink: 0 }} />
-                        )}
-                        <span style={{ fontSize: 13, color: analyzeStep >= i ? "var(--color-text)" : "var(--color-neutral-400)" }}>{step}</span>
-                      </div>
-                    ))}
+              )}
+              {perpsTab === "arb" && (
+                <div className="page__narrow">
+                  <ArbView />
+                </div>
+              )}
+              {perpsTab === "accounts" && (
+                <div className="page__grid">
+                  <div className="page__col">
+                    <PerpVenuesSummary />
+                    {!isConnected && <p className="text-muted" style={{ fontSize: 13, margin: 0 }}>Connect a wallet to open, fund and follow your accounts on Hyperliquid, Extended and TxFlow.</p>}
+                    <div id={VENUE_ANCHOR.hyperliquid}>
+                      <HyperliquidPanel />
+                    </div>
+                    <PerpPositionsPanel />
+                  </div>
+                  <div className="page__col">
+                    <div data-tour="extended" id={VENUE_ANCHOR.extended}>
+                      <ExtendedConnectPanel />
+                    </div>
+                    <div id={VENUE_ANCHOR.txflow}>
+                      <TxflowPanel />
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
-
-            <div ref={threadEndRef} />
-          </div>
-
-          {/* Sticky input bar */}
-          <div style={{
-            flex: "none",
-            padding: "var(--space-2) var(--space-4) var(--space-3)",
-            borderTop: "1px solid var(--color-divider)",
-            background: "var(--color-bg)",
-          }}>
-            {thread.length > 0 && !isAnalyzing && (
-              <div className="followups">
-                {FOLLOW_UPS.map((f) => (
-                  <button
-                    key={f.label}
-                    className="btn btn-secondary"
-                    style={{ fontSize: 11, padding: "2px 8px" }}
-                    disabled={isAnalyzing}
-                    onClick={() => submitThesis(f.thesis)}
-                  >
-                    {f.label}
-                  </button>
-                ))}
-                <button
-                  className="btn btn-secondary"
-                  style={{ fontSize: 11, padding: "2px 8px", marginLeft: "auto", color: "var(--color-neutral-500)" }}
-                  onClick={() => setThread([])}
-                  title="Start a new conversation"
-                >
-                  New chat
-                </button>
-              </div>
-            )}
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }} data-tour="composer">
-              <textarea
-                ref={textareaRef}
-                className="input"
-                placeholder="Describe what you want: yield, exposure, hedge, airdrops..."
-                value={promptText}
-                disabled={isAnalyzing}
-                onChange={(e) => {
-                  setPromptText(e.target.value);
-                  // Auto-grow
-                  const ta = e.target;
-                  ta.style.height = "auto";
-                  ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    submitThesis(promptText);
-                    // Reset height
-                    if (textareaRef.current) textareaRef.current.style.height = "auto";
-                  }
-                }}
-                rows={1}
-                style={{ fontSize: 14, resize: "none", lineHeight: 1.5 }}
-              />
-              <button
-                className="btn btn-primary btn-icon"
-                aria-label="Send"
-                onClick={() => {
-                  submitThesis(promptText);
-                  if (textareaRef.current) textareaRef.current.style.height = "auto";
-                }}
-                disabled={isAnalyzing || !promptText.trim()}
-                style={{ flexShrink: 0 }}
-              >
-                &#8593;
-              </button>
+              )}
             </div>
-            <p className="text-muted composer-hint" style={{ margin: "4px 0 0", fontSize: 10, textAlign: "center" }}>
-              Enter to send &middot; Shift+Enter for a new line &middot; <kbd>/</kbd> to focus
-            </p>
-          </div>
-        </div>
+          )}
 
-        {/* News / Alpha column */}
-        <div className="col-scroll app-col-news side-col" style={{ minWidth: 0, borderLeft: "1px solid var(--color-divider)" }} data-tour="markets">
-          <NewsFeed />
-        </div>
+          {page === "discover" && (
+            <div className="page col-scroll">
+              <header className="page__head">
+                <h1 className="page__title">Discover</h1>
+                <p className="page__sub">Crypto headlines, new protocols and momentum, points programs and the chains Meridian covers. Ask Meridian about any of it.</p>
+              </header>
+              <div className="page__grid page__grid--3">
+                <div className="page__col">
+                  <NewsPanel now={now} />
+                </div>
+                <div className="page__col">
+                  <AlphaPanel now={now} />
+                </div>
+                <div className="page__col">
+                  <ChainsPanel />
+                </div>
+              </div>
+            </div>
+          )}
+
+              {/* Sticky input bar */}
+              <div style={{
+                flex: "none",
+                padding: "var(--space-2) var(--space-4) var(--space-3)",
+                borderTop: "1px solid var(--color-divider)",
+                background: "var(--color-bg)",
+              }}>
+                {page === "terminal" && thread.length > 0 && !isAnalyzing && (
+                  <div className="followups">
+                    {FOLLOW_UPS.map((f) => (
+                      <button
+                        key={f.label}
+                        className="btn btn-secondary"
+                        style={{ fontSize: 11, padding: "2px 8px" }}
+                        disabled={isAnalyzing}
+                        onClick={() => submitThesis(f.thesis)}
+                      >
+                        {f.label}
+                      </button>
+                    ))}
+                    <button
+                      className="btn btn-secondary"
+                      style={{ fontSize: 11, padding: "2px 8px", marginLeft: "auto", color: "var(--color-neutral-500)" }}
+                      onClick={() => setThread([])}
+                      title="Start a new conversation"
+                    >
+                      New chat
+                    </button>
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }} data-tour="composer">
+                  <textarea
+                    ref={textareaRef}
+                    className="input"
+                    placeholder="Describe what you want: yield, exposure, hedge, airdrops..."
+                    value={promptText}
+                    disabled={isAnalyzing}
+                    onChange={(e) => {
+                      setPromptText(e.target.value);
+                      // Auto-grow
+                      const ta = e.target;
+                      ta.style.height = "auto";
+                      ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.shiftKey) {
+                        e.preventDefault();
+                        submitThesis(promptText);
+                        // Reset height
+                        if (textareaRef.current) textareaRef.current.style.height = "auto";
+                      }
+                    }}
+                    rows={1}
+                    style={{ fontSize: 14, resize: "none", lineHeight: 1.5 }}
+                  />
+                  <button
+                    className="btn btn-primary btn-icon"
+                    aria-label="Send"
+                    onClick={() => {
+                      submitThesis(promptText);
+                      if (textareaRef.current) textareaRef.current.style.height = "auto";
+                    }}
+                    disabled={isAnalyzing || !promptText.trim()}
+                    style={{ flexShrink: 0 }}
+                  >
+                    &#8593;
+                  </button>
+                </div>
+                <p className="text-muted composer-hint" style={{ margin: "4px 0 0", fontSize: 10, textAlign: "center" }}>
+                  Enter to send &middot; Shift+Enter for a new line &middot; <kbd>/</kbd> to focus
+                </p>
+              </div>
+        </main>
       </div>
     </div>
   );

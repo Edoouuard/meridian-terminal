@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { AlphaEntry, AlphaTag } from "@/app/api/alpha/route";
 import { ChainOverview } from "@/components/ChainOverview";
 import { AskButton } from "@/components/AskButton";
-import { YieldsPanel } from "@/components/YieldsPanel";
+import { AirdropCalendar } from "@/components/AirdropCalendar";
 import { newsPrompt, type NewsItem } from "@/lib/news";
 
 const ALPHA_TAG_CLASS: Record<AlphaTag, string> = {
@@ -126,97 +126,54 @@ function NewsPanel({ now }: { now: number }) {
   );
 }
 
-/**
- * The "Chains / Alpha" column — Meridian's pitch is being the overlay across
- * every DeFi protocol/chain it supports, so this slot leads with exactly
- * that live coverage (ChainOverview) rather than a Hyperliquid-only market
- * ticker. (This replaced an earlier "Market"/"News" tab that only ever
- * covered Hyperliquid perps — too narrow for what this column should show.)
- *   - Chains: live chain x protocol TVL coverage from DefiLlama (see
- *     ChainOverview / /api/chains).
- *   - Alpha: newly-listed protocols and 7-day TVL momentum, derived from
- *     DefiLlama's free /protocols API (see /api/alpha) — real `listedAt` and
- *     `change_7d` fields, not editorialized "points farm" / "airdrop rumor"
- *     content, since there is no honest free source for that.
- * When the Alpha feed is down, the tab says so instead of falling back to
- * stale content that looks live but isn't.
- */
-export function NewsFeed() {
-  const [tab, setTab] = useState<"yields" | "news" | "chains" | "alpha">("yields");
-  const now = useNowTick();
-
+/** Newly listed protocols and 7-day TVL momentum (DefiLlama via /api/alpha), then the points-program calendar. */
+export function AlphaPanel({ now }: { now: number }) {
   const alpha = useAlpha();
   const alphaEntries = alpha.data ?? [];
-
   return (
     <>
-      <div className="seg side-tabs" style={{ gridTemplateColumns: "repeat(4, 1fr)" }}>
-        <label className="seg-opt">
-          <input type="radio" name="feed-tab" checked={tab === "yields"} onChange={() => setTab("yields")} />
-          <span>Yields</span>
-        </label>
-        <label className="seg-opt">
-          <input type="radio" name="feed-tab" checked={tab === "news"} onChange={() => setTab("news")} />
-          <span>News</span>
-        </label>
-        <label className="seg-opt">
-          <input type="radio" name="feed-tab" checked={tab === "chains"} onChange={() => setTab("chains")} />
-          <span>Chains</span>
-        </label>
-        <label className="seg-opt">
-          <input type="radio" name="feed-tab" checked={tab === "alpha"} onChange={() => setTab("alpha")} />
-          <span>Alpha</span>
-        </label>
-      </div>
-
-      {tab === "yields" ? (
-        <YieldsPanel />
-      ) : tab === "news" ? (
-        <NewsPanel now={now} />
-      ) : tab === "chains" ? (
-        <section className="panel-card">
-          <ChainOverview hideDivider />
-        </section>
-      ) : (
-        <section className="panel-card" style={{ gap: 0 }}>
-          <div className="panel-card__head">
-            <h6 className="panel-card__title">Alpha</h6>
-            <span className="text-muted" style={{ fontSize: 11 }}>{alphaEntries.length > 0 ? `DefiLlama · ${fmtAge(now - alpha.dataUpdatedAt)}` : ""}</span>
-          </div>
-          {alphaEntries.length > 0 ? (
-            alphaEntries.map((a, i) => (
-              <div key={i} style={{ padding: "var(--space-2) 0", borderBottom: "1px solid var(--color-divider)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                  <span className={`tag ${ALPHA_TAG_CLASS[a.tag]}`} style={{ marginBottom: 4 }}>
-                    {a.protocol}
-                  </span>
-                  <span
-                    style={{
-                      fontSize: 12,
-                      fontVariantNumeric: "tabular-nums",
-                      color: a.metric.startsWith("-") ? "var(--risk-serious)" : "var(--color-accent-700)",
-                    }}
-                  >
-                    {a.metric}
-                  </span>
-                </div>
-                <p style={{ margin: "4px 0 0", fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }} className="text-muted">
-                  {a.tag}
-                </p>
-                <p style={{ margin: "4px 0 0", fontSize: 13, lineHeight: 1.4 }}>{a.text}</p>
-                <AskButton label="Ask about this" prompt={`Tell me about ${a.protocol}: ${a.text} Is there a safe way to get exposure or yield from it with Meridian?`} />
+      <section className="panel-card" style={{ gap: 0 }}>
+        <div className="panel-card__head">
+          <h6 className="panel-card__title">Alpha</h6>
+          <span className="text-muted" style={{ fontSize: 11 }}>{alphaEntries.length > 0 ? `DefiLlama · ${fmtAge(now - alpha.dataUpdatedAt)}` : ""}</span>
+        </div>
+        {alphaEntries.length > 0 ? (
+          alphaEntries.map((a, i) => (
+            <div key={i} className="alpha-row">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <span className={`tag ${ALPHA_TAG_CLASS[a.tag]}`} style={{ marginBottom: 4 }}>
+                  {a.protocol}
+                </span>
+                <span style={{ fontSize: 12, fontVariantNumeric: "tabular-nums", color: a.metric.startsWith("-") ? "var(--risk-serious)" : "var(--risk-good)" }}>{a.metric}</span>
               </div>
-            ))
-          ) : (
-            <p className="text-muted" style={{ fontSize: 12, margin: "var(--space-2) 0 0" }}>
-              {alpha.isLoading ? "Fetching live protocol data…" : "No new listings to show right now."}
-            </p>
-          )}
-          <p className="text-muted" style={{ fontSize: 10, margin: "var(--space-2) 0 0" }}>
-            New listings and 7-day TVL momentum from DefiLlama — data, not editorial calls.
+              <p style={{ margin: "4px 0 0", fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase" }} className="text-muted">
+                {a.tag}
+              </p>
+              <p style={{ margin: "4px 0 0", fontSize: 13, lineHeight: 1.4 }}>{a.text}</p>
+              <AskButton label="Ask about this" prompt={`Tell me about ${a.protocol}: ${a.text} Is there a safe way to get exposure or yield from it with Meridian?`} />
+            </div>
+          ))
+        ) : (
+          <p className="text-muted" style={{ fontSize: 12, margin: "var(--space-2) 0 0" }}>
+            {alpha.isLoading ? "Fetching live protocol data…" : "No new listings to show right now."}
           </p>
-        </section>
-      )}
+        )}
+        <p className="text-muted" style={{ fontSize: 10, margin: "var(--space-2) 0 0" }}>
+          New listings and 7-day TVL momentum from DefiLlama — data, not editorial calls.
+        </p>
+      </section>
+      <AirdropCalendar now={now} />
     </>
   );
 }
+
+/** Chain x protocol coverage (DefiLlama via /api/chains). */
+export function ChainsPanel() {
+  return (
+    <section className="panel-card">
+      <ChainOverview hideDivider />
+    </section>
+  );
+}
+
+export { NewsPanel, useNowTick };

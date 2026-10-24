@@ -376,16 +376,22 @@ export function RiskPanel({ live, isConnected }: { live?: LivePortfolio; isConne
         </p>
       </details>
 
-      <div style={{ display: "flex", flexDirection: "column", gap: "var(--space-3)", marginTop: "var(--space-3)" }}>
-        {suggestions.map((s, i) => (
-          <SuggestionBar key={i} suggestion={s} canAsk={isConnected} />
-        ))}
-        {suggestions.length === 0 && (
-          <p style={{ fontSize: 12, margin: 0 }} className="text-muted">
-            Your book looks healthy — no risk optimizations to suggest right now.
-          </p>
-        )}
-      </div>
+      {suggestions.length > 0 ? (
+        <details className="risk-whatifs" open={isConnected}>
+          <summary>
+            {isConnected ? `${suggestions.length} suggestion${suggestions.length > 1 ? "s" : ""} to lower your risk` : `What-ifs (${suggestions.length})`}
+          </summary>
+          <div className="risk-whatifs__list">
+            {suggestions.map((s, i) => (
+              <SuggestionBar key={i} suggestion={s} canAsk={isConnected} />
+            ))}
+          </div>
+        </details>
+      ) : (
+        <p style={{ fontSize: 12, margin: 0 }} className="text-muted">
+          Your book looks healthy — no risk optimizations to suggest right now.
+        </p>
+      )}
     </section>
   );
 }
