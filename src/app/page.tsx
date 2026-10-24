@@ -24,8 +24,8 @@ import { NeutralBotHost } from "@/components/NeutralBotHost";
 import { executableCoverage } from "@/lib/coverage";
 
 import { ArbView } from "@/components/ArbView";
+import { FundingArbView } from "@/components/FundingArbView";
 import { NeutralBotView } from "@/components/NeutralBotView";
-import { MarketsView } from "@/components/MarketsView";
 import { BotStatusChip } from "@/components/BotStatusChip";
 import { LidoWithdrawalsPanel } from "@/components/LidoWithdrawalsPanel";
 import { PerpPositionsPanel } from "@/components/PerpPositionsPanel";
@@ -168,7 +168,7 @@ export default function TerminalApp() {
     return () => window.removeEventListener(OPEN_STRATEGIES_EVENT, open);
   }, []);
   // The neutral bot has its own view in the centre column; "Run it as a bot" from a plan opens it.
-  const [centerView, setCenterView] = useState<"terminal" | "bot" | "markets">("terminal");
+  const [centerView, setCenterView] = useState<"terminal" | "bot">("terminal");
   useEffect(() => {
     const open = () => setCenterView("bot");
     window.addEventListener(OPEN_BOT_EVENT, open);
@@ -474,6 +474,7 @@ export default function TerminalApp() {
                 <>
                   <PerpVenuesSummary />
                   <NeutralBotPanel />
+                  <FundingArbView />
                   <ArbView />
                   <div id={VENUE_ANCHOR.hyperliquid}>
                     <HyperliquidPanel />
@@ -496,27 +497,19 @@ export default function TerminalApp() {
 
         {/* Trade column — chat-first layout */}
         <div className="app-col-trade" style={{ display: "flex", flexDirection: "column", minHeight: 0, minWidth: 0 }}>
-          <div className="center-switch" role="tablist" aria-label="Main view">
-            <button type="button" role="tab" aria-selected={centerView === "terminal"} className={`center-switch__tab${centerView === "terminal" ? " is-on" : ""}`} onClick={() => setCenterView("terminal")}>
-              Terminal
-            </button>
-            {FEATURES.perps && (
+          {FEATURES.perps && (
+            <div className="center-switch" role="tablist" aria-label="Main view">
+              <button type="button" role="tab" aria-selected={centerView === "terminal"} className={`center-switch__tab${centerView === "terminal" ? " is-on" : ""}`} onClick={() => setCenterView("terminal")}>
+                Terminal
+              </button>
               <button type="button" role="tab" aria-selected={centerView === "bot"} className={`center-switch__tab${centerView === "bot" ? " is-on" : ""}`} onClick={() => setCenterView("bot")}>
                 Neutral bot <span className="center-switch__badge">farm points</span>
               </button>
-            )}
-            <button type="button" role="tab" aria-selected={centerView === "markets"} className={`center-switch__tab${centerView === "markets" ? " is-on" : ""}`} onClick={() => setCenterView("markets")}>
-              Markets <span className="center-switch__badge">arb · vaults · airdrops</span>
-            </button>
-          </div>
+            </div>
+          )}
           {centerView === "bot" && (
             <div className="col-scroll" style={{ flex: 1, minHeight: 0, minWidth: 0, padding: "var(--space-4)" }}>
               <NeutralBotView />
-            </div>
-          )}
-          {centerView === "markets" && (
-            <div className="col-scroll" style={{ flex: 1, minHeight: 0, minWidth: 0, padding: "var(--space-4)" }}>
-              <MarketsView />
             </div>
           )}
           {/* Scrollable thread area */}

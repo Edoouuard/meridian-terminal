@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { AlphaEntry, AlphaTag } from "@/app/api/alpha/route";
 import { ChainOverview } from "@/components/ChainOverview";
 import { AskButton } from "@/components/AskButton";
+import { AirdropCalendar } from "@/components/AirdropCalendar";
 import { YieldsPanel } from "@/components/YieldsPanel";
 import { newsPrompt, type NewsItem } from "@/lib/news";
 
@@ -178,6 +179,7 @@ export function NewsFeed() {
           <ChainOverview hideDivider />
         </section>
       ) : (
+        <>
         <section className="panel-card" style={{ gap: 0 }}>
           <div className="panel-card__head">
             <h6 className="panel-card__title">Alpha</h6>
@@ -216,6 +218,8 @@ export function NewsFeed() {
             New listings and 7-day TVL momentum from DefiLlama — data, not editorial calls.
           </p>
         </section>
+        <AirdropCalendar now={now} />
+        </>
       )}
     </>
   );

@@ -1,43 +1,55 @@
 /**
- * vaults.ts — the vaults perp exchanges run themselves (market making,
- * liquidations), side by side: TVL, the exchange's own APR, the 30-day
- * return when the feed gives one, the lock, and where to deposit.
+ * vaults.ts — the vaults perp DEXs run for depositors (market making,
+ * liquidations, or being the counterparty to traders), each read from the
+ * protocol's own public API (fetched in /api/perp-vaults) and shown in
+ * Yields next to the lending and staking pools.
  *
- * Each figure comes from the exchange's public API (fetched in
- * /api/perp-vaults); a vault whose API doesn't answer is listed with no
- * numbers rather than a guessed one. Read on 24 Oct 2026:
- *   - Hyperliquid HLP: POST /info {type: "vaultDetails"} → `apr` (fraction)
- *     and `portfolio` histories (account value, PnL by window);
- *   - Extended Vault: GET /api/v1/vault/public/summary → `equity`,
- *     `last30dApr` (fraction), `numberOfDepositors`;
- *   - Paradex GigaVault: GET /v1/vaults/summary?address=… → `tvl`,
- *     `roi_30d` (fraction, not annualised), `last_month_return` (already
- *     annualised: 0.206 next to a 30-day ROI of 0.0157), `num_depositors`.
- * Each exchange computes its APR its own way; the `aprMethod` line says how.
+ * Every parser takes the raw answer and returns one vault, or null when the
+ * answer is missing or doesn't carry an APR: a vault is never listed with a
+ * guessed figure. Shapes checked against the live APIs on 24 Oct 2026:
+ *   - Hyperliquid HLP: POST /info {type: "vaultDetails"} → `apr` (fraction),
+ *     `portfolio` [["month", {accountValueHistory}] …];
+ *   - Extended Vault: /api/v1/vault/public/summary → data.`last30dApr`
+ *     (fraction), data.`equity`;
+ *   - Lighter LLP: /api/v1/publicPoolsMetadata?index=…&limit=1 →
+ *     public_pools[].`annual_percentage_yield` (%), `total_asset_value`;
+ *   - Paradex GigaVault: /v1/vaults/summary?address=… →
+ *     results[].`last_month_return` (fraction, already annualised), `tvl`;
+ *   - Jupiter JLP: perps-api /v1/jlp-info → `jlpApyPct` (%), `aumUsdFormatted`;
+ *   - GMX GLV: /apy?period=30d → glvs[token].`apy` (fraction), and
+ *     /glvs/info → glvs[] names and markets[].`balanceUsd` (30 decimals);
+ *   - Gains gUSDC: /api/apr?chainId=… → collateralRewards[USDC].`vaultApr`
+ *     (%), `vaultTvl` (6 decimals);
+ *   - dYdX MegaVault: indexer /v4/vault/v1/megavault/historicalPnl → daily
+ *     `equity` and cumulative `totalPnl`; dYdX publishes no APR, so it is
+ *     the last 30 days' PnL over the equity at the start, annualised.
+ * Each protocol computes its figure its own way; `method` says how.
  */
 
 export const HLP_ADDRESS = "0xdfc24b077bc1425ad1dea75bcb6f8158e10df303";
 export const PARADEX_GIGAVAULT_ADDRESS = "0x5f43c92dbe4e995115f351254407e7e84abf04cbe32a536345b9d6c36bc750f";
+/** Lighter lists public pools from this account index downwards: the first one is the LLP. */
+export const LIGHTER_LLP_QUERY_INDEX = "281474976710655";
 
 export interface PerpVault {
-  id: "hlp" | "extended" | "paradex";
+  id: string;
+  protocol: string;
   name: string;
-  venue: string;
   chain: string;
+  /** What you deposit. */
   asset: string;
   /** What earns the yield. */
   strategy: string;
+  /** The protocol's own APR (or APY), in %. */
+  aprPct: number;
   tvlUsd: number | null;
-  /** The exchange's own APR, in %. */
-  aprPct: number | null;
-  /** How the exchange computes it. */
-  aprMethod: string;
-  /** Return over the last 30 days, in % (not annualised), when the feed gives it. */
-  return30dPct: number | null;
-  depositors: number | null;
+  /** How the protocol computes the figure. */
+  method: string;
   lock: string;
-  /** Meridian deposits into it from the terminal (a prompt), else the exchange's page. */
-  meridianPrompt?: string;
+  /** Depositors are the counterparty to traders: a winning trader is a loss for the vault. */
+  carriesTraderPnl: boolean;
+  /** Meridian deposits into it from the terminal; otherwise it is a comparison. */
+  executable: boolean;
   url: string;
 }
 
@@ -46,88 +58,221 @@ const num = (v: unknown): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-const STATIC: Record<PerpVault["id"], Omit<PerpVault, "tvlUsd" | "aprPct" | "return30dPct" | "depositors">> = {
-  hlp: {
-    id: "hlp",
-    name: "HLP",
-    venue: "Hyperliquid",
-    chain: "Hyperliquid L1",
-    asset: "USDC",
-    strategy: "Market making and liquidations",
-    aprMethod: "Hyperliquid's figure, from the vault's recent PnL over its equity",
-    lock: "4 days per deposit",
-    meridianPrompt: "Deposit USDC into Hyperliquid's HLP vault",
-    url: "https://app.hyperliquid.xyz/vaults/" + HLP_ADDRESS,
-  },
-  extended: {
-    id: "extended",
-    name: "Extended Vault",
-    venue: "Extended",
-    chain: "Starknet",
-    asset: "USDC",
-    strategy: "Liquidations, lending in Extended's money market, a share of fees",
-    aprMethod: "Extended's last-30-day APR",
-    lock: "24 hours",
-    url: "https://app.extended.exchange/vault",
-  },
-  paradex: {
-    id: "paradex",
-    name: "GigaVault",
-    venue: "Paradex",
-    chain: "Paradex (Starknet appchain)",
-    asset: "USDC",
-    strategy: "Market making across Paradex markets, liquidations, platform fees",
-    aprMethod: "Paradex's figure: last month's return, annualised",
-    lock: "1 day",
-    url: "https://app.paradex.trade/vaults/" + PARADEX_GIGAVAULT_ADDRESS,
-  },
-};
+/** An APR outside this band (in %) is a broken feed, not a yield. */
+const saneApr = (pct: number | null): pct is number => pct !== null && pct > -100 && pct < 1000;
 
 type HistoryPoint = [number, string | number];
-type PortfolioWindow = { accountValueHistory?: HistoryPoint[]; pnlHistory?: HistoryPoint[] };
 
-/** HLP from vaultDetails: APR, TVL (latest account value), 30-day PnL over the account value 30 days ago. */
-export function parseHlp(json: unknown): PerpVault {
+/** HLP from vaultDetails: Hyperliquid's APR; TVL is the latest account value of the month window. */
+export function parseHlp(json: unknown): PerpVault | null {
   const d = (json ?? {}) as { apr?: unknown; portfolio?: unknown };
   const apr = num(d.apr);
-  const month = Array.isArray(d.portfolio) ? ((d.portfolio as [string, PortfolioWindow][]).find((w) => Array.isArray(w) && w[0] === "month")?.[1] ?? null) : null;
+  if (apr === null || !saneApr(apr * 100)) return null;
+  const month = Array.isArray(d.portfolio)
+    ? ((d.portfolio as [string, { accountValueHistory?: HistoryPoint[] }][]).find((w) => Array.isArray(w) && w[0] === "month")?.[1] ?? null)
+    : null;
   const values = (month?.accountValueHistory ?? []).map((p) => num(p?.[1])).filter((v): v is number => v !== null);
-  const pnls = (month?.pnlHistory ?? []).map((p) => num(p?.[1])).filter((v): v is number => v !== null);
-  const tvl = values.length ? values[values.length - 1] : null;
-  const start = values.length ? values[0] : null;
-  const pnl = pnls.length >= 2 ? pnls[pnls.length - 1] - pnls[0] : null;
   return {
-    ...STATIC.hlp,
-    tvlUsd: tvl,
-    aprPct: apr !== null ? apr * 100 : null,
-    return30dPct: pnl !== null && start ? (pnl / start) * 100 : null,
-    // vaultDetails lists at most 100 followers: their count is not the number of depositors.
-    depositors: null,
+    id: "hlp",
+    protocol: "Hyperliquid",
+    name: "HLP",
+    chain: "Hyperliquid L1",
+    asset: "USDC",
+    strategy: "Market making and liquidations on every Hyperliquid market",
+    aprPct: apr * 100,
+    tvlUsd: values.length ? values[values.length - 1] : null,
+    method: "Hyperliquid's APR, from the vault's recent PnL over its equity",
+    lock: "4 days per deposit",
+    carriesTraderPnl: true,
+    executable: true,
+    url: "https://app.hyperliquid.xyz/vaults/" + HLP_ADDRESS,
   };
 }
 
-/** Extended's vault summary: equity, last-30-day APR, depositors. */
-export function parseExtendedVault(json: unknown): PerpVault {
+/** Extended's vault summary: last-30-day APR and equity. */
+export function parseExtendedVault(json: unknown): PerpVault | null {
   const d = ((json as { data?: unknown })?.data ?? {}) as Record<string, unknown>;
   const apr = num(d.last30dApr);
-  return { ...STATIC.extended, tvlUsd: num(d.equity), aprPct: apr !== null ? apr * 100 : null, return30dPct: null, depositors: num(d.numberOfDepositors) };
+  if (apr === null || !saneApr(apr * 100)) return null;
+  return {
+    id: "extended",
+    protocol: "Extended",
+    name: "Extended Vault",
+    chain: "Starknet",
+    asset: "USDC",
+    strategy: "Market making, liquidations, lending in Extended's money market",
+    aprPct: apr * 100,
+    tvlUsd: num(d.equity),
+    method: "Extended's last-30-day APR",
+    lock: "24 hours",
+    carriesTraderPnl: true,
+    executable: false,
+    url: "https://app.extended.exchange/vault",
+  };
 }
 
-/** Paradex's vault summary for the GigaVault: TVL, 30-day ROI, and last month's return (Paradex annualises it) as the APR. */
-export function parseParadexVault(json: unknown): PerpVault {
+/** Lighter's public pools from LIGHTER_LLP_QUERY_INDEX: the pool named LLP. */
+export function parseLighterLlp(json: unknown): PerpVault | null {
+  const pools = (json as { public_pools?: unknown })?.public_pools;
+  const p = Array.isArray(pools) ? (pools as Record<string, unknown>[]).find((x) => /\bLLP\b/.test(String(x?.name ?? ""))) : undefined;
+  const apy = num(p?.annual_percentage_yield);
+  if (!p || !saneApr(apy)) return null;
+  return {
+    id: "lighter-llp",
+    protocol: "Lighter",
+    name: "LLP",
+    chain: "Lighter (Ethereum ZK rollup)",
+    asset: "USDC",
+    strategy: "Market making and liquidations on Lighter",
+    aprPct: apy,
+    tvlUsd: num(p.total_asset_value),
+    method: "Lighter's annualised yield on the pool's share price",
+    lock: "None stated",
+    carriesTraderPnl: true,
+    executable: false,
+    url: "https://app.lighter.xyz/public-pools",
+  };
+}
+
+/** Paradex's vault summary for the GigaVault: last month's return, which Paradex already annualises. */
+export function parseParadexVault(json: unknown): PerpVault | null {
   const rows = (json as { results?: unknown })?.results;
-  const d = (Array.isArray(rows) ? (rows as Record<string, unknown>[]).find((r) => String(r?.address ?? "").toLowerCase() === PARADEX_GIGAVAULT_ADDRESS) : undefined) ?? {};
-  const month = num(d.last_month_return);
-  const roi30 = num(d.roi_30d);
-  return { ...STATIC.paradex, tvlUsd: num(d.tvl), aprPct: month !== null ? month * 100 : null, return30dPct: roi30 !== null ? roi30 * 100 : null, depositors: num(d.num_depositors) };
+  const d = Array.isArray(rows) ? (rows as Record<string, unknown>[]).find((r) => String(r?.address ?? "").toLowerCase() === PARADEX_GIGAVAULT_ADDRESS) : undefined;
+  const month = num(d?.last_month_return);
+  if (!d || month === null || !saneApr(month * 100)) return null;
+  return {
+    id: "paradex-gigavault",
+    protocol: "Paradex",
+    name: "GigaVault",
+    chain: "Paradex (Starknet appchain)",
+    asset: "USDC",
+    strategy: "Market making across Paradex markets, liquidations, platform fees",
+    aprPct: month * 100,
+    tvlUsd: num(d.tvl),
+    method: "Paradex's figure: last month's return, annualised",
+    lock: "1 day",
+    carriesTraderPnl: true,
+    executable: false,
+    url: "https://app.paradex.trade/vaults/" + PARADEX_GIGAVAULT_ADDRESS,
+  };
 }
 
-/** A vault whose API didn't answer: listed, with no numbers. */
-export function emptyVault(id: PerpVault["id"]): PerpVault {
-  return { ...STATIC[id], tvlUsd: null, aprPct: null, return30dPct: null, depositors: null };
+/** Jupiter's JLP: Jupiter's APY and the pool's AUM. */
+export function parseJlp(json: unknown): PerpVault | null {
+  const d = (json ?? {}) as Record<string, unknown>;
+  const apy = num(d.jlpApyPct);
+  if (!saneApr(apy)) return null;
+  return {
+    id: "jlp",
+    protocol: "Jupiter",
+    name: "JLP",
+    chain: "Solana",
+    asset: "SOL, ETH, BTC, USDC, USDT basket",
+    strategy: "Counterparty to Jupiter Perps traders: fees, borrow and trader losses",
+    aprPct: apy,
+    tvlUsd: num(d.aumUsdFormatted),
+    method: "Jupiter's APY from the fees paid to the pool (excludes the basket's price moves)",
+    lock: "None (swap in and out)",
+    carriesTraderPnl: true,
+    executable: false,
+    url: "https://jup.ag/perps-earn",
+  };
 }
 
-/** Highest APR first; vaults with no figure last. */
-export function rankVaults(vaults: PerpVault[]): PerpVault[] {
-  return [...vaults].sort((a, b) => (b.aprPct ?? -Infinity) - (a.aprPct ?? -Infinity));
+const GMX_USD_DECIMALS = 1e30;
+
+/** GMX GLVs: APY from /apy, names and TVL (sum of market balances) from /glvs/info. Unlisted GLVs are left out. */
+export function parseGmxGlvs(apyJson: unknown, infoJson: unknown, chain: string): PerpVault[] {
+  const apy = ((apyJson as { glvs?: unknown })?.glvs ?? {}) as Record<string, { apy?: unknown }>;
+  const glvs = (infoJson as { glvs?: unknown })?.glvs;
+  if (!Array.isArray(glvs)) return [];
+  const byToken = new Map(Object.entries(apy).map(([k, v]) => [k.toLowerCase(), num(v?.apy)]));
+  const out: PerpVault[] = [];
+  for (const g of glvs as { name?: unknown; glvToken?: unknown; isListed?: unknown; markets?: unknown }[]) {
+    if (typeof g?.glvToken !== "string" || g.isListed === false) continue;
+    const a = byToken.get(g.glvToken.toLowerCase());
+    if (a === null || a === undefined || !saneApr(a * 100)) continue;
+    const markets = Array.isArray(g.markets) ? (g.markets as { balanceUsd?: unknown }[]) : [];
+    const tvl = markets.reduce((s, m) => s + (num(m?.balanceUsd) ?? 0), 0) / GMX_USD_DECIMALS;
+    const name = typeof g.name === "string" ? g.name : "GLV";
+    out.push({
+      id: `gmx-${g.glvToken.toLowerCase()}`,
+      protocol: "GMX",
+      name,
+      chain,
+      asset: name.replace(/^GLV\s*\[|\]$/g, "").replace("-", " / "),
+      strategy: "Liquidity for GMX markets, rebalanced across them: fees, borrow and trader losses",
+      aprPct: a * 100,
+      tvlUsd: tvl > 0 ? tvl : null,
+      method: "GMX's 30-day APY (excludes the tokens' price moves)",
+      lock: "None (withdraw any time, subject to liquidity)",
+      carriesTraderPnl: true,
+      executable: false,
+      url: "https://app.gmx.io/#/pools",
+    });
+  }
+  return out;
+}
+
+/** Gains Network's gUSDC vault on one chain: Gains' vault APR, TVL in USDC (6 decimals). */
+export function parseGainsUsdc(json: unknown, chain: string): PerpVault | null {
+  const rows = (json as { collateralRewards?: unknown })?.collateralRewards;
+  const r = Array.isArray(rows) ? (rows as Record<string, unknown>[]).find((x) => x?.symbol === "USDC") : undefined;
+  const apr = num(r?.vaultApr);
+  if (!r || !saneApr(apr)) return null;
+  const tvl = num(r.vaultTvl);
+  return {
+    id: `gains-usdc-${chain.toLowerCase()}`,
+    protocol: "Gains Network",
+    name: "gUSDC",
+    chain,
+    asset: "USDC",
+    strategy: "Counterparty to gTrade traders: fees and trader losses",
+    aprPct: apr,
+    tvlUsd: tvl !== null ? tvl / 1e6 : null,
+    method: "Gains' vault APR from the fees paid to the vault",
+    lock: "Withdrawals requested an epoch ahead (1 to 3 epochs)",
+    carriesTraderPnl: true,
+    executable: false,
+    url: "https://gains.trade/vaults",
+  };
+}
+
+const DAY_MS = 86_400_000;
+
+/** dYdX MegaVault: PnL of the last ~30 days (cumulative totalPnl) over the equity at the start, annualised. Null under 7 days of history. */
+export function parseMegavault(json: unknown, now = Date.now()): PerpVault | null {
+  const rows = (json as { megavaultPnl?: unknown })?.megavaultPnl;
+  if (!Array.isArray(rows)) return null;
+  const pts = (rows as Record<string, unknown>[])
+    .map((r) => ({ t: Date.parse(String(r?.createdAt ?? "")), equity: num(r?.equity), pnl: num(r?.totalPnl) }))
+    .filter((p): p is { t: number; equity: number; pnl: number } => Number.isFinite(p.t) && p.equity !== null && p.pnl !== null)
+    .sort((a, b) => a.t - b.t);
+  if (pts.length < 2) return null;
+  const last = pts[pts.length - 1];
+  const start = pts.find((p) => p.t >= now - 30 * DAY_MS) ?? pts[0];
+  const days = (last.t - start.t) / DAY_MS;
+  if (days < 7 || !(start.equity > 0)) return null;
+  const aprPct = ((last.pnl - start.pnl) / start.equity) * (365 / days) * 100;
+  if (!saneApr(aprPct)) return null;
+  return {
+    id: "dydx-megavault",
+    protocol: "dYdX",
+    name: "MegaVault",
+    chain: "dYdX Chain",
+    asset: "USDC",
+    strategy: "Market making across dYdX markets",
+    aprPct,
+    tvlUsd: last.equity,
+    method: "Meridian's figure: last 30 days' PnL over the equity at the start, annualised (dYdX publishes none)",
+    lock: "None (withdrawals may pay a slippage fee)",
+    carriesTraderPnl: true,
+    executable: false,
+    url: "https://dydx.trade/vaults",
+  };
+}
+
+/** The vaults that answered, highest APR first. */
+export function rankVaults(vaults: (PerpVault | null)[]): PerpVault[] {
+  return vaults.filter((v): v is PerpVault => v !== null).sort((a, b) => b.aprPct - a.aprPct);
 }
