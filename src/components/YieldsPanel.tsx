@@ -35,7 +35,7 @@ function PerpVaultList({ onlyExec }: { onlyExec: boolean }) {
         <li key={v.id} className="yield-row">
           <div className="yield-row__head">
             <span className="yield-row__name">
-              {v.protocol} {v.name}
+              {v.name.toLowerCase().includes(v.protocol.toLowerCase()) ? v.name : `${v.protocol} ${v.name}`}
               <span className="yield-row__where">
                 {v.asset} · {v.chain}
               </span>
@@ -43,21 +43,9 @@ function PerpVaultList({ onlyExec }: { onlyExec: boolean }) {
             <span className="yield-row__apy">{v.aprPct.toFixed(2)}%</span>
           </div>
           <div className="yield-row__meta">
-            <span className={`coverage-badge coverage-badge--${v.executable ? "execute" : "compare"}`}>{v.executable ? "Executable" : "Compare"}</span>
-            {v.tvlUsd !== null && <span>{fmtTvl(v.tvlUsd)} TVL</span>}
+            <span className={`coverage-badge coverage-badge--${v.executable ? "execute" : "compare"}`}>{v.executable ? "In Meridian" : "Info only"}</span>
+            {v.tvlUsd !== null && <span>{fmtTvl(v.tvlUsd)} deposited</span>}
             <span>Lock: {v.lock}</span>
-          </div>
-          <div className="yield-row__meta">
-            <span>{v.strategy}.</span>
-            {v.carriesTraderPnl && <span>Depositors take the other side of traders: the vault can lose.</span>}
-          </div>
-          <div className="yield-row__meta">
-            <span title={v.method}>
-              {v.method} ·{" "}
-              <a href={v.url} target="_blank" rel="noreferrer">
-                {v.protocol}
-              </a>
-            </span>
           </div>
           {v.executable ? (
             <AskButton label="Put my funds here" prompt={`Deposit USDC into ${v.protocol}'s ${v.name} vault (${v.aprPct.toFixed(2)}% APR now, ${v.lock} lock). Size it to my wallet.`} />
@@ -67,6 +55,17 @@ function PerpVaultList({ onlyExec }: { onlyExec: boolean }) {
               prompt={`${v.protocol}'s ${v.name} vault on ${v.chain} shows ${v.aprPct.toFixed(2)}% (${v.method}). How does it compare with Hyperliquid's HLP and what Meridian can execute, risks included?`}
             />
           )}
+          <details className="yield-row__details">
+            <summary>Details</summary>
+            <p>{v.strategy}.</p>
+            {v.carriesTraderPnl && <p>Depositors take the other side of traders: when traders win, the vault loses.</p>}
+            <p>
+              {v.method} ·{" "}
+              <a href={v.url} target="_blank" rel="noreferrer">
+                {v.protocol}
+              </a>
+            </p>
+          </details>
         </li>
       ))}
     </ul>
@@ -76,7 +75,7 @@ function PerpVaultList({ onlyExec }: { onlyExec: boolean }) {
 /**
  * Best live yields across every protocol Meridian covers: lending, staking
  * and pools from DefiLlama (/api/opportunities), and perp DEX vaults from
- * the protocols themselves. Executable rows offer to build the deposit; the
+ * the protocols themselves. Rows Meridian executes offer to build the deposit; the
  * others are there to compare, honestly labelled.
  */
 export function YieldsPanel() {
@@ -124,7 +123,7 @@ export function YieldsPanel() {
         </div>
         <label className="yields-toggle">
           <input type="checkbox" checked={onlyExec} onChange={(e) => setOnlyExec(e.target.checked)} />
-          Executable only{data && kind !== "vaults" ? ` (${execCount})` : ""}
+          Only what Meridian can do{data && kind !== "vaults" ? ` (${execCount})` : ""}
         </label>
       </div>
 
@@ -145,8 +144,8 @@ export function YieldsPanel() {
                 <span className="yield-row__apy">{o.apy.toFixed(2)}%</span>
               </div>
               <div className="yield-row__meta">
-                <span className={`coverage-badge coverage-badge--${o.coverage}`}>{o.coverage === "execute" ? "Executable" : "Compare"}</span>
-                <span>{fmtTvl(o.tvlUsd)} TVL</span>
+                <span className={`coverage-badge coverage-badge--${o.coverage}`}>{o.coverage === "execute" ? "In Meridian" : "Info only"}</span>
+                <span>{fmtTvl(o.tvlUsd)} deposited</span>
                 {o.apyReward > 0 && <span>incl. {o.apyReward.toFixed(1)}% rewards</span>}
                 {o.apyMean30d !== undefined && <span>30d {o.apyMean30d.toFixed(1)}%</span>}
               </div>
@@ -177,8 +176,8 @@ export function YieldsPanel() {
           </>
         ) : (
           <>
-        Single-asset pools with at least $5M TVL on Meridian&apos;s chains (incl. HyperEVM), from DefiLlama. &ldquo;Executable&rdquo; means
-        Meridian builds and simulates the deposit itself.
+        Single-asset pools with at least $5M deposited on Meridian&apos;s chains (incl. HyperEVM), from DefiLlama. &ldquo;In Meridian&rdquo; means
+        Meridian builds and simulates the deposit for you.
           </>
         )}
       </p>

@@ -44,67 +44,75 @@ export function FundingArbView() {
     staleTime: 2 * 60_000,
   });
   const pairs = data?.pairs ?? [];
-  const rows = pairs.slice(0, showAll ? 12 : 4);
+  const rows = pairs.slice(0, showAll ? 12 : 6);
 
   return (
-    <section className="panel-card farb-card">
-      <div className="panel-card__head">
-        <h6 className="panel-card__title">Funding arbitrage</h6>
-        <span className="text-muted" style={{ fontSize: 11 }}>{isLoading ? "reading…" : `${pairs.length} pairs`}</span>
+    <section className="farb">
+      <div className="farb__intro">
+        <p className="farb__lead">Earn the gap in funding between two exchanges, without betting on the price.</p>
+        <p className="text-muted farb__sub">
+          Estimated profit for ${PER_LEG_USD.toLocaleString("en-US")} on each side over {HOLD_DAYS} days, after fees, from the last 7 days.
+        </p>
       </div>
-      <p className="text-muted farb-card__sub">Net of fees for ${PER_LEG_USD.toLocaleString("en-US")} per leg held {HOLD_DAYS} days, on the last 7 days&apos; funding.</p>
 
       {rows.length > 0 ? (
-        <ul className="farb-list">
+        <ul className="farb-grid">
           {rows.map((a) => {
             const spread = a.spread7dPct ?? a.spreadNowPct;
             const fundingUsd = (spread / 100) * PER_LEG_USD * (HOLD_DAYS / 365);
             const feesUsd = (a.roundTripFeePct / 100) * PER_LEG_USD;
             return (
-              <li key={`${a.base}-${a.long.venue}-${a.short.venue}`} className="farb-row">
-                <div className="farb-row__head">
-                  <span className="farb-row__base">{a.base}</span>
-                  <span className={`farb-row__net ${a.netHoldPct >= 0 ? "farb-pos" : "farb-neg"}`}>
-                    {usd(fundingUsd - feesUsd)} <span className="text-muted">net · {HOLD_DAYS}d</span>
-                  </span>
+              <li key={`${a.base}-${a.long.venue}-${a.short.venue}`} className="farb-card2">
+                <div className="farb-card2__top">
+                  <span className="farb-card2__base">{a.base}</span>
+                  <span className={`farb-card2__badge${a.basis === "7d" ? "" : " farb-card2__badge--warn"}`}>{a.basis === "7d" ? "7-day track record" : "No history yet"}</span>
                 </div>
-                <LegLine side="Long" leg={a.long} earnsPct={a.longEarnsPct} />
-                <LegLine side="Short" leg={a.short} earnsPct={a.shortEarnsPct} />
-                <div className="farb-row__meta">
-                  <span>
-                    Spread {pctYr(a.spreadNowPct)} now · {a.spread7dPct === null ? "no 7d history (TxFlow)" : `${pctYr(a.spread7dPct)} over 7d`}
-                  </span>
-                  <span>
-                    Funding {usd(fundingUsd)} − fees ${feesUsd.toFixed(0)}
-                    {a.breakEvenDays !== null ? ` · pays back in ${a.breakEvenDays < 1 ? "<1" : Math.ceil(a.breakEvenDays)} d` : ""}
-                  </span>
-                  <span title="Short's price minus long's. Positive: you also gain it if the two venues' prices converge; it can widen too.">
-                    Price gap {a.priceGapPct >= 0 ? "+" : "−"}
-                    {Math.abs(a.priceGapPct).toFixed(3)}%
-                  </span>
-                </div>
+                <p className={`farb-card2__net ${a.netHoldPct >= 0 ? "farb-pos" : "farb-neg"}`}>{usd(fundingUsd - feesUsd)}</p>
+                <p className="farb-card2__per">a month, on ${PER_LEG_USD.toLocaleString("en-US")} each side</p>
+                <p className="farb-card2__how">
+                  Buy on <strong>{a.long.venue}</strong>, short on <strong>{a.short.venue}</strong>
+                </p>
                 <AskButton label="Open the pair" prompt={fundingArbPrompt(a)} />
+                <details className="farb-card2__details">
+                  <summary>Details</summary>
+                  <LegLine side="Long" leg={a.long} earnsPct={a.longEarnsPct} />
+                  <LegLine side="Short" leg={a.short} earnsPct={a.shortEarnsPct} />
+                  <div className="farb-row__meta">
+                    <span>
+                      Spread {pctYr(a.spreadNowPct)} now · {a.spread7dPct === null ? "no 7-day history (TxFlow)" : `${pctYr(a.spread7dPct)} over 7 days`}
+                    </span>
+                    <span>
+                      Funding {usd(fundingUsd)} − fees ${feesUsd.toFixed(0)}
+                      {a.breakEvenDays !== null ? ` · fees paid back in ${a.breakEvenDays < 1 ? "<1" : Math.ceil(a.breakEvenDays)} days` : ""}
+                    </span>
+                    <span title="Short's price minus long's. Positive: you also gain it if the two venues' prices converge; it can widen too.">
+                      Price gap between venues {a.priceGapPct >= 0 ? "+" : "−"}
+                      {Math.abs(a.priceGapPct).toFixed(3)}%
+                    </span>
+                  </div>
+                </details>
               </li>
             );
           })}
         </ul>
       ) : (
-        <p className="text-muted" style={{ fontSize: 12, margin: 0 }}>
-          {isLoading ? "Reading funding on Hyperliquid, Extended and TxFlow…" : "No pair pays after fees over the last 7 days right now."}
+        <p className="text-muted" style={{ fontSize: 14, margin: 0 }}>
+          {isLoading ? "Reading funding on Hyperliquid, Extended and TxFlow…" : "No pair pays after fees over the last 7 days right now. Check back later."}
         </p>
       )}
-      {pairs.length > 4 && (
-        <button type="button" className="btn btn-secondary bot-mini" onClick={() => setShowAll((v) => !v)}>
-          {showAll ? "Show fewer" : `Show ${Math.min(pairs.length, 12) - 4} more`}
+      {pairs.length > 6 && (
+        <button type="button" className="btn btn-secondary" onClick={() => setShowAll((v) => !v)}>
+          {showAll ? "Show fewer" : `Show ${Math.min(pairs.length, 12) - 6} more`}
         </button>
       )}
-      <details className="how-computed">
-        <summary>How it works</summary>
+      <details className="how-computed farb__how">
+        <summary>How it works and the risks</summary>
         <p className="text-muted">
-          Same quantity long on one venue and short on another: price moves cancel, you keep the funding the short receives minus what the long pays.
-          Ranked on the last 7 days&apos; realised funding (today&apos;s rate alone often sits on a cap or spikes for an hour), net of taker fees to open
-          and close both legs. Risks: the spread can flip (funding resets every hour), the price gap between venues can widen, and a leg can be
-          liquidated if the price runs while the other leg&apos;s profit sits on another venue. Keep leverage low and margin on both sides.
+          You hold the same amount long on one exchange and short on another. When the price moves, one side gains what the other loses, so the
+          price doesn&apos;t matter; what you keep is the funding the short side receives minus what the long side pays. Pairs are ranked on the last
+          7 days of real funding (today&apos;s rate alone often sits on a cap or spikes for an hour), after the trading fees to open and close both
+          sides. Risks: the gap can flip (funding resets every hour), the two exchanges&apos; prices can drift apart, and one side can be liquidated if
+          the price runs while the other side&apos;s profit sits on the other exchange. Keep leverage low and margin on both sides.
         </p>
       </details>
     </section>
