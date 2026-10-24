@@ -3,6 +3,7 @@ import { zeroAddress } from "viem";
 import {
   applySender,
   buildExecution,
+  displayAmount,
   normalizeAmount,
   type ExecutionPlan,
   type Order,
@@ -465,5 +466,18 @@ describe("execution — applySender with a nested tuple sender field", () => {
     const plan = buildExecution(swapOrder()) as ExecutionPlan;
     const res = applySender(plan, undefined);
     expect((res as { error: string }).error).toBe("wallet not connected");
+  });
+});
+describe("confirmation amounts are shown in human units", () => {
+  it("a base-unit bigint is converted with the token's decimals, thousands split by thin spaces, never a comma", () => {
+    expect(displayAmount(BigInt(29_200_000), 6)).toBe("29.2");
+    expect(displayAmount(BigInt("1234567890000"), 6)).toBe("1 234 567.89");
+    expect(displayAmount("35", 6)).toBe("35");
+    expect(displayAmount(BigInt("1500000000000000000"), 18)).toBe("1.5");
+  });
+
+  it("the description a person confirms says 29.2 USDC, not 29200000", () => {
+    const plan = buildExecution({ type: "supply", protocol: "aave", token: "0xaf88d065e77c8cC2239327C5EDb3A432268e5831", symbol: "USDC", amount: BigInt(29_200_000), chainId: 42161, decimals: 6 });
+    expect("description" in plan && plan.description).toBe("Supply 29.2 USDC as collateral to Aave v3 on Arbitrum");
   });
 });

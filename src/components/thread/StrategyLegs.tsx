@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useAccount } from "wagmi";
 import type { StakeYieldEntry } from "@/app/api/stake-yield/route";
 import { needsLiveCompletion, resolveOrderForLeg, protocolLabel } from "@/lib/assetMap";
-import type { Order } from "@/lib/execution";
+import { displayAmount, type Order } from "@/lib/execution";
 import { chainIdFromName, legChainId } from "@/lib/chains";
 import { ACTIVE_CHAIN_IDS, CHAIN_LABEL, isActiveChain } from "@/lib/onchain";
 import { FundsArrivalGate } from "@/components/thread/FundsArrivalGate";
@@ -15,7 +15,6 @@ import { useStrategyExecutor, type LegStatus } from "@/hooks/useStrategyExecutor
 import { useLivePrices } from "@/hooks/useLivePrices";
 import { useVaultRisk } from "@/hooks/useVaultRisk";
 import { PHILIDOR_PROTOCOL_ID, philidorAssetQuery } from "@/lib/integrations/philidor";
-import { formatBaseUnits } from "@/lib/quote";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { FEATURES } from "@/lib/features";
 import { isBuildingVenue } from "@/lib/buildingVenues";
@@ -123,10 +122,7 @@ export function StrategyLegs({ plan }: { plan: TradePlan }) {
   const pairSeq = FEATURES.perps ? oneClickPair(plan) : null;
   const pairUntouched = pairSeq && pairSeq.every((i) => remaining.includes(i));
 
-  const orderAmountDisplay = (order: Order): string =>
-    typeof order.amount === "bigint"
-      ? `${formatBaseUnits(order.amount, order.decimals ?? 18)} ${order.symbol ?? ""}`
-      : `${String(order.amount)} ${order.symbol ?? ""}`;
+  const orderAmountDisplay = (order: Order): string => `${displayAmount(order.amount, order.decimals ?? 18)} ${order.symbol ?? ""}`;
 
   if (plan.legs.length === 0) return null;
 

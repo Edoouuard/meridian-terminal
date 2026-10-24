@@ -1,5 +1,6 @@
 import type { Abi, Address } from "viem";
 import { parseUnits, zeroAddress } from "viem";
+import { formatBaseUnits } from "./quote";
 import { AAVE_V3_POOL_BY_CHAIN, CHAIN_LABEL, COMPOUND_V3_USDC_COMET_BY_CHAIN, STETH_ADDRESS, SPARK_POOL_BY_CHAIN, SDAI_VAULT, ROCKET_DEPOSIT_POOL, FRXETH_MINTER } from "./onchain";
 import { SWAP_ROUTER02_EXACT_INPUT_SINGLE_ABI, UNISWAP_SWAP_ROUTER02_BY_CHAIN } from "./integrations/uniswap";
 import { ERC4626_DEPOSIT_ABI, ERC4626_WITHDRAW_ABI } from "./integrations/morpho";
@@ -371,6 +372,19 @@ export function normalizeAmount(
   return { value: raw };
 }
 
+/**
+ * An order amount as a person reads it in a confirmation: human units
+ * (base-unit bigints converted with the token's decimals), a "." for
+ * decimals and thin spaces between thousands — never a comma, which a
+ * reader using "," as the decimal mark would take for a decimal point.
+ */
+export function displayAmount(amount: bigint | string, decimals: number): string {
+  const human = typeof amount === "bigint" ? formatBaseUnits(amount, decimals) : String(amount).trim();
+  const m = /^(-?)(\d+)(\.\d+)?$/.exec(human);
+  if (!m) return human;
+  return `${m[1]}${m[2].replace(/\B(?=(\d{3})+(?!\d))/g, "\u202f")}${m[3] ?? ""}`;
+}
+
 function fail(message: string): { error: string } {
   return { error: message };
 }
@@ -384,6 +398,8 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
   if (!Number.isFinite(chainId) || chainId <= 0) return fail(`invalid chainId '${order.chainId}'`);
   const chainLabel = CHAIN_LABEL[chainId] ?? `chain ${chainId}`;
   const decimals = order.decimals ?? 18;
+  // Orders carry base units (29.2 USDC = 29200000n): descriptions show human units.
+  const shown = displayAmount(order.amount, decimals);
   const assetLabel = order.symbol ?? "token";
 
   switch (order.protocol) {
@@ -405,7 +421,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           // the connected sender by applySender via `senderIndex`.
           args: [token, amount.value, AAVE_INTEREST_RATE_MODE_VARIABLE, zeroAddress],
           senderIndex: 3,
-          description: `Repay ${order.amount} ${assetLabel} of Aave v3 debt (variable rate) on ${chainLabel}`,
+          description: `Repay ${shown} ${assetLabel} of Aave v3 debt (variable rate) on ${chainLabel}`,
           riskNote: `Moves real funds on ${chainLabel} — confirm the amount before signing. This reduces your open Aave debt.`,
         };
       }
@@ -418,7 +434,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           // [asset, amount, onBehalfOf, referralCode] — onBehalfOf patched by applySender.
           args: [token, amount.value, zeroAddress, AAVE_REFERRAL_CODE],
           senderIndex: 2,
-          description: `Supply ${order.amount} ${assetLabel} as collateral to Aave v3 on ${chainLabel}`,
+          description: `Supply ${shown} ${assetLabel} as collateral to Aave v3 on ${chainLabel}`,
           riskNote: `Moves real funds on ${chainLabel} — confirm the amount before signing. Your supply earns yield and can be used as collateral (subject to liquidation).`,
         };
       }
@@ -433,8 +449,8 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           args: [spender, amount.value],
           description:
             spender === pool
-              ? `Approve Aave v3 to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`
-              : `Approve ${spender.slice(0, 10)}… to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`,
+              ? `Approve Aave v3 to spend up to ${shown} ${assetLabel} on ${chainLabel}`
+              : `Approve ${spender.slice(0, 10)}… to spend up to ${shown} ${assetLabel} on ${chainLabel}`,
           riskNote: `Approval lets the spender transfer up to this amount of ${assetLabel}. Confirm the spender before signing.`,
         };
       }
@@ -446,7 +462,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           functionName: "withdraw",
           args: [token, amount.value, zeroAddress], // `to` patched to the connected sender
           senderIndex: 2,
-          description: `Withdraw ${order.amount} ${assetLabel} from Aave v3 on ${chainLabel}`,
+          description: `Withdraw ${shown} ${assetLabel} from Aave v3 on ${chainLabel}`,
           riskNote: `Withdraws ${assetLabel} collateral from Aave on ${chainLabel}. Watch your health factor — confirm before signing.`,
         };
       }
@@ -458,7 +474,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           functionName: "borrow",
           args: [token, amount.value, AAVE_INTEREST_RATE_MODE_VARIABLE, AAVE_REFERRAL_CODE, zeroAddress],
           senderIndex: 4,
-          description: `Borrow ${order.amount} ${assetLabel} against Aave collateral on ${chainLabel} (variable rate)`,
+          description: `Borrow ${shown} ${assetLabel} against Aave collateral on ${chainLabel} (variable rate)`,
           riskNote: `Borrowing creates Aave debt on ${chainLabel} and lowers your health factor. Confirm before signing.`,
         };
       }
@@ -485,8 +501,8 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           args: [token, amount.value],
           description:
             order.type === "repay"
-              ? `Repay ${order.amount} ${assetLabel} of Compound III debt on ${chainLabel}`
-              : `Supply ${order.amount} ${assetLabel} to Compound III on ${chainLabel}`,
+              ? `Repay ${shown} ${assetLabel} of Compound III debt on ${chainLabel}`
+              : `Supply ${shown} ${assetLabel} to Compound III on ${chainLabel}`,
           riskNote:
             order.type === "repay"
               ? `Moves real funds on ${chainLabel} — confirm the amount before signing. This reduces your open Compound III debt.`
@@ -502,8 +518,8 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           args: [token, amount.value],
           description:
             order.type === "borrow"
-              ? `Borrow ${order.amount} ${assetLabel} against Compound III collateral on ${chainLabel}`
-              : `Withdraw ${order.amount} ${assetLabel} from Compound III on ${chainLabel}`,
+              ? `Borrow ${shown} ${assetLabel} against Compound III collateral on ${chainLabel}`
+              : `Withdraw ${shown} ${assetLabel} from Compound III on ${chainLabel}`,
           riskNote:
             order.type === "borrow"
               ? `Borrowing creates Compound III debt on ${chainLabel} and lowers your borrowing capacity. Confirm before signing.`
@@ -520,8 +536,8 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           args: [spender, amount.value],
           description:
             spender === comet
-              ? `Approve Compound III to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`
-              : `Approve ${spender.slice(0, 10)}… to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`,
+              ? `Approve Compound III to spend up to ${shown} ${assetLabel} on ${chainLabel}`
+              : `Approve ${spender.slice(0, 10)}… to spend up to ${shown} ${assetLabel} on ${chainLabel}`,
           riskNote: `Approval lets the spender transfer up to this amount of ${assetLabel}. Confirm the spender before signing.`,
         };
       }
@@ -538,7 +554,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         chainId,
         address: to,
         value: amount.value,
-        description: `Send ${order.amount} native ${CHAIN_LABEL[chainId] ?? "ETH"} to ${to} on ${chainLabel}`,
+        description: `Send ${shown} native ${CHAIN_LABEL[chainId] ?? "ETH"} to ${to} on ${chainLabel}`,
         riskNote: `Moves real funds on ${chainLabel} — confirm the recipient and amount before signing. Native transfers are irreversible once confirmed.`,
       };
     }
@@ -560,7 +576,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           abi: ERC20_TRANSFER_ABI,
           functionName: "transfer",
           args: [to, amount.value],
-          description: `Deposit ${order.amount} USDC into your Hyperliquid account (official Bridge2 on Arbitrum)`,
+          description: `Deposit ${shown} USDC into your Hyperliquid account (official Bridge2 on Arbitrum)`,
           riskNote: "Hyperliquid credits the USDC to the sending address within about a minute. Trading, HLP deposits and HYPE staking then run from Meridian on that account.",
         };
       }
@@ -571,7 +587,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           abi: ERC20_TRANSFER_ABI,
           functionName: "transfer",
           args: [to, amount.value],
-          description: `Move ${order.amount} ${assetLabel} from HyperEVM into your Hyperliquid spot balance`,
+          description: `Move ${shown} ${assetLabel} from HyperEVM into your Hyperliquid spot balance`,
           riskNote: "Sent to the token's HyperCore system address: Hyperliquid credits it to your own spot balance at the next block. It can be moved back from the Hyperliquid app.",
         };
       }
@@ -581,7 +597,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         abi: ERC20_TRANSFER_ABI,
         functionName: "transfer",
         args: [to, amount.value],
-        description: `Send ${order.amount} ${assetLabel} to ${to} on ${chainLabel}`,
+        description: `Send ${shown} ${assetLabel} to ${to} on ${chainLabel}`,
         riskNote: `Moves real ${assetLabel} on ${chainLabel} — confirm the recipient and amount before signing. Token transfers are irreversible once confirmed.`,
       };
     }
@@ -599,7 +615,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           functionName: "submit",
           args: [zeroAddress],
           value: amount.value,
-          description: `Stake ${order.amount} ETH via Lido on ${chainLabel} for stETH`,
+          description: `Stake ${shown} ETH via Lido on ${chainLabel} for stETH`,
           riskNote: `Moves real ETH on ${chainLabel} and mints stETH 1:1 — unwinding later goes through Lido's own withdrawal queue, not an instant reverse. Confirm the amount before signing.`,
         };
       }
@@ -614,7 +630,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           abi: ERC20_APPROVE_ABI,
           functionName: "approve",
           args: [spender, amount.value],
-          description: `Approve Lido's withdrawal queue to spend up to ${order.amount} stETH on ${chainLabel}`,
+          description: `Approve Lido's withdrawal queue to spend up to ${shown} stETH on ${chainLabel}`,
           riskNote: `Approval lets the withdrawal queue transfer up to this amount of stETH. Confirm before signing.`,
         };
       }
@@ -630,7 +646,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           // [amounts, owner] — owner patched to the connected sender by applySender via `senderIndex`.
           args: [[amount.value], zeroAddress],
           senderIndex: 1,
-          description: `Request withdrawal of ${order.amount} stETH from Lido on ${chainLabel}`,
+          description: `Request withdrawal of ${shown} stETH from Lido on ${chainLabel}`,
           riskNote: `This locks your stETH into Lido's withdrawal queue — it is not instant. Once the queue finalizes your request (Lido's oracle, typically a few days), come back and claim the ETH.`,
         };
       }
@@ -670,8 +686,8 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           args: [spender, amount.value],
           description:
             spender === router
-              ? `Approve Uniswap v3 to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`
-              : `Approve ${spender.slice(0, 10)}… to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`,
+              ? `Approve Uniswap v3 to spend up to ${shown} ${assetLabel} on ${chainLabel}`
+              : `Approve ${spender.slice(0, 10)}… to spend up to ${shown} ${assetLabel} on ${chainLabel}`,
           riskNote: `Approval lets the spender transfer up to this amount of ${assetLabel}. Confirm the spender before signing.`,
         };
       }
@@ -705,7 +721,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           ],
           senderIndex: 0,
           senderTupleKey: "recipient",
-          description: `Swap ${order.amount} ${assetLabel} via Uniswap v3 on ${chainLabel} (minimum output enforced by a live quote)`,
+          description: `Swap ${shown} ${assetLabel} via Uniswap v3 on ${chainLabel} (minimum output enforced by a live quote)`,
           riskNote: `Moves real funds on ${chainLabel} — the minimum you receive is enforced on-chain from a live quote taken just before signing.`,
         };
       }
@@ -728,7 +744,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           abi: ERC20_APPROVE_ABI,
           functionName: "approve",
           args: [spender, amount.value],
-          description: `Approve this Morpho vault to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`,
+          description: `Approve this Morpho vault to spend up to ${shown} ${assetLabel} on ${chainLabel}`,
           riskNote: `Approval lets the vault transfer up to this amount of ${assetLabel}. Confirm the vault address before signing.`,
         };
       }
@@ -744,7 +760,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           // [assets, receiver] — receiver patched to the connected sender by applySender via `senderIndex`.
           args: [amount.value, zeroAddress],
           senderIndex: 1,
-          description: `Deposit ${order.amount} ${assetLabel} into a Morpho vault on ${chainLabel}`,
+          description: `Deposit ${shown} ${assetLabel} into a Morpho vault on ${chainLabel}`,
           riskNote: `Moves real funds on ${chainLabel} into a third-party Morpho vault — its live risk tier was shown before you confirmed.`,
         };
       }
@@ -761,7 +777,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           // connected sender (a self-withdrawal never needs an allowance check).
           args: [amount.value, zeroAddress, zeroAddress],
           senderIndices: [1, 2],
-          description: `Withdraw ${order.amount} ${assetLabel} from a Morpho vault on ${chainLabel}`,
+          description: `Withdraw ${shown} ${assetLabel} from a Morpho vault on ${chainLabel}`,
           riskNote: `Withdraws real funds from a Morpho vault on ${chainLabel} back to your wallet. Confirm the amount before signing.`,
         };
       }
@@ -783,7 +799,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         return {
           chainId, address: token, abi: ERC20_APPROVE_ABI, functionName: "approve",
           args: [spender, amount.value],
-          description: `Approve Spark to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`,
+          description: `Approve Spark to spend up to ${shown} ${assetLabel} on ${chainLabel}`,
           riskNote: `Approval lets the spender transfer up to this amount of ${assetLabel}. Confirm before signing.`,
         };
       }
@@ -791,7 +807,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         return {
           chainId, address: pool, abi: AAVE_V3_POOL_SUPPLY_ABI, functionName: "supply",
           args: [token, amount.value, zeroAddress, BigInt(0)], senderIndex: 2,
-          description: `Supply ${order.amount} ${assetLabel} as collateral to Spark on ${chainLabel}`,
+          description: `Supply ${shown} ${assetLabel} as collateral to Spark on ${chainLabel}`,
           riskNote: `Moves real funds on ${chainLabel} — confirm the amount before signing. Your supply earns yield and can be used as collateral (subject to liquidation).`,
         };
       }
@@ -799,7 +815,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         return {
           chainId, address: pool, abi: AAVE_V3_POOL_REPAY_ABI, functionName: "repay",
           args: [token, amount.value, AAVE_INTEREST_RATE_MODE_VARIABLE, zeroAddress], senderIndex: 3,
-          description: `Repay ${order.amount} ${assetLabel} of Spark debt (variable rate) on ${chainLabel}`,
+          description: `Repay ${shown} ${assetLabel} of Spark debt (variable rate) on ${chainLabel}`,
           riskNote: `Moves real funds on ${chainLabel} — confirm the amount before signing. This reduces your open Spark debt.`,
         };
       }
@@ -807,7 +823,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         return {
           chainId, address: pool, abi: AAVE_V3_POOL_WITHDRAW_ABI, functionName: "withdraw",
           args: [token, amount.value, zeroAddress], senderIndex: 2,
-          description: `Withdraw ${order.amount} ${assetLabel} from Spark on ${chainLabel}`,
+          description: `Withdraw ${shown} ${assetLabel} from Spark on ${chainLabel}`,
           riskNote: `Withdraws ${assetLabel} collateral from Spark on ${chainLabel}. Watch your health factor — confirm before signing.`,
         };
       }
@@ -815,7 +831,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         return {
           chainId, address: pool, abi: AAVE_V3_POOL_BORROW_ABI, functionName: "borrow",
           args: [token, amount.value, AAVE_INTEREST_RATE_MODE_VARIABLE, BigInt(0), zeroAddress], senderIndex: 4,
-          description: `Borrow ${order.amount} ${assetLabel} against Spark collateral on ${chainLabel} (variable rate)`,
+          description: `Borrow ${shown} ${assetLabel} against Spark collateral on ${chainLabel} (variable rate)`,
           riskNote: `Borrowing creates Spark debt on ${chainLabel} and lowers your health factor. Confirm before signing.`,
         };
       }
@@ -834,7 +850,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         return {
           chainId, address: token, abi: ERC20_APPROVE_ABI, functionName: "approve",
           args: [spender, amount.value],
-          description: `Approve sDAI vault to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`,
+          description: `Approve sDAI vault to spend up to ${shown} ${assetLabel} on ${chainLabel}`,
           riskNote: `Approval lets the vault transfer up to this amount of ${assetLabel}. Confirm before signing.`,
         };
       }
@@ -842,7 +858,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         return {
           chainId, address: SDAI_VAULT, abi: ERC4626_DEPOSIT_ABI, functionName: "deposit",
           args: [amount.value, zeroAddress], senderIndex: 1,
-          description: `Deposit ${order.amount} ${assetLabel} into sDAI (Maker DSR) on ${chainLabel}`,
+          description: `Deposit ${shown} ${assetLabel} into sDAI (Maker DSR) on ${chainLabel}`,
           riskNote: `Moves real funds on ${chainLabel} into Maker's DAI Savings Rate vault — your DAI earns the DSR yield continuously.`,
         };
       }
@@ -850,7 +866,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         return {
           chainId, address: SDAI_VAULT, abi: ERC4626_WITHDRAW_ABI, functionName: "withdraw",
           args: [amount.value, zeroAddress, zeroAddress], senderIndices: [1, 2],
-          description: `Withdraw ${order.amount} ${assetLabel} from sDAI (Maker DSR) on ${chainLabel}`,
+          description: `Withdraw ${shown} ${assetLabel} from sDAI (Maker DSR) on ${chainLabel}`,
           riskNote: `Withdraws DAI from the Maker DSR vault back to your wallet. Confirm the amount before signing.`,
         };
       }
@@ -870,6 +886,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         return fail(`${entry.shareSymbol} takes ${entry.assetSymbol}, not ${assetLabel}`);
       }
       const amount = normalizeAmount(order.amount, entry.assetDecimals);
+      const shownVault = displayAmount(order.amount, entry.assetDecimals);
       if ("error" in amount) return amount;
       const name = `${entry.protocol} ${entry.shareSymbol}`;
 
@@ -877,7 +894,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         return {
           chainId, address: token, abi: ERC20_APPROVE_ABI, functionName: "approve",
           args: [entry.vault, amount.value],
-          description: `Approve ${name} to spend up to ${order.amount} ${entry.assetSymbol} on ${chainLabel}`,
+          description: `Approve ${name} to spend up to ${shownVault} ${entry.assetSymbol} on ${chainLabel}`,
           riskNote: `Approval lets the ${name} vault transfer up to this amount of ${entry.assetSymbol}, nothing more.`,
         };
       }
@@ -885,7 +902,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         return {
           chainId, address: entry.vault, abi: ERC4626_DEPOSIT_ABI, functionName: "deposit",
           args: [amount.value, zeroAddress], senderIndex: 1,
-          description: `Deposit ${order.amount} ${entry.assetSymbol} into ${name} on ${chainLabel}`,
+          description: `Deposit ${shownVault} ${entry.assetSymbol} into ${name} on ${chainLabel}`,
           riskNote: `Moves real funds into ${name}. Exit: ${entry.exit}.`,
         };
       }
@@ -894,7 +911,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         return {
           chainId, address: entry.vault, abi: ERC4626_WITHDRAW_ABI, functionName: "withdraw",
           args: [amount.value, zeroAddress, zeroAddress], senderIndices: [1, 2],
-          description: `Withdraw ${order.amount} ${entry.assetSymbol} from ${name} on ${chainLabel}`,
+          description: `Withdraw ${shownVault} ${entry.assetSymbol} from ${name} on ${chainLabel}`,
           riskNote: `Withdraws from ${name} back to your wallet.`,
         };
       }
@@ -913,7 +930,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         return {
           chainId, address: token, abi: WETH_DEPOSIT_ABI, functionName: "deposit",
           args: [], value: amount.value,
-          description: `Wrap ${order.amount} ETH into WETH on ${chainLabel}`,
+          description: `Wrap ${shown} ETH into WETH on ${chainLabel}`,
           riskNote: `Converts native ETH to WETH (wrapped ETH) 1:1. WETH is needed for most DeFi interactions. Fully reversible via unwrap.`,
         };
       }
@@ -922,7 +939,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         return {
           chainId, address: token, abi: WETH_WITHDRAW_ABI, functionName: "withdraw",
           args: [amount.value],
-          description: `Unwrap ${order.amount} WETH into native ETH on ${chainLabel}`,
+          description: `Unwrap ${shown} WETH into native ETH on ${chainLabel}`,
           riskNote: `Converts WETH back to native ETH 1:1. Fully reversible via wrap.`,
         };
       }
@@ -942,7 +959,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         functionName: "deposit",
         args: [],
         value: amount.value,
-        description: `Stake ${order.amount} ETH via Rocket Pool on ${chainLabel} for rETH`,
+        description: `Stake ${shown} ETH via Rocket Pool on ${chainLabel} for rETH`,
         riskNote: `Moves real ETH on ${chainLabel} and mints rETH at the current exchange rate. Rocket Pool is decentralized staking — rETH accrues staking yield via its exchange rate.`,
       };
     }
@@ -961,7 +978,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         args: [zeroAddress], // recipient patched to connected sender
         senderIndex: 0,
         value: amount.value,
-        description: `Stake ${order.amount} ETH via Frax on ${chainLabel} for sfrxETH`,
+        description: `Stake ${shown} ETH via Frax on ${chainLabel} for sfrxETH`,
         riskNote: `Moves real ETH on ${chainLabel} through Frax's minter — mints frxETH and auto-deposits into sfrxETH for yield. sfrxETH accrues staking yield via its exchange rate.`,
       };
     }
@@ -992,7 +1009,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           abi: ERC20_APPROVE_ABI,
           functionName: "approve",
           args: [spender, amount.value],
-          description: `Approve ${providerLabel} to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`,
+          description: `Approve ${providerLabel} to spend up to ${shown} ${assetLabel} on ${chainLabel}`,
           riskNote: `Approval lets this verified ${providerLabel} router transfer up to this amount of ${assetLabel}. Confirm before signing.`,
         };
       }
@@ -1012,7 +1029,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         address: routerTx.to,
         data: routerTx.data,
         value: routerTx.value,
-        description: `Swap/bridge ${order.amount} ${assetLabel} via ${providerLabel} on ${chainLabel}`,
+        description: `Swap/bridge ${shown} ${assetLabel} via ${providerLabel} on ${chainLabel}`,
         riskNote: `Moves real funds on ${chainLabel} through a verified third-party router (${providerLabel}) — the destination contract was checked against Meridian's own allowlist before this plan was built.`,
       };
     }
@@ -1039,12 +1056,13 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         return fail("Extended's bridge takes native USDC on Arbitrum only — any other token is not recoverable.");
       }
       const amount = normalizeAmount(order.amount, 6);
+      const shownUsdc = displayAmount(order.amount, 6);
       if ("error" in amount) return amount;
       if (order.type === "approve") {
         return {
           chainId, address: order.token, abi: ERC20_APPROVE_ABI, functionName: "approve",
           args: [RHINO_ARBITRUM_BRIDGE, amount.value],
-          description: `Approve Extended's bridge (Rhino.fi) to take up to ${order.amount} USDC on Arbitrum`,
+          description: `Approve Extended's bridge (Rhino.fi) to take up to ${shownUsdc} USDC on Arbitrum`,
           riskNote: "Approval lets the Rhino.fi bridge contract Extended uses take up to this amount of USDC, nothing more.",
         };
       }
@@ -1054,7 +1072,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
       return {
         chainId, address: RHINO_ARBITRUM_BRIDGE, abi: RHINO_DEPOSIT_ABI, functionName: "depositWithId",
         args: [order.token, amount.value, commitmentId],
-        description: `Deposit ${order.amount} USDC into your Extended account (Rhino.fi bridge, Arbitrum → Starknet)`,
+        description: `Deposit ${shownUsdc} USDC into your Extended account (Rhino.fi bridge, Arbitrum → Starknet)`,
         riskNote: "Extended credits the USDC (minus the bridge fee shown) to your Extended account in a few minutes. The deposit uses the quote committed just before signing.",
       };
     }
@@ -1081,7 +1099,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           abi: ERC20_APPROVE_ABI,
           functionName: "approve",
           args: [spender, amount.value],
-          description: `Approve Pendle's router to spend up to ${order.amount} ${assetLabel} on ${chainLabel}`,
+          description: `Approve Pendle's router to spend up to ${shown} ${assetLabel} on ${chainLabel}`,
           riskNote: "Approval lets Pendle's verified router transfer up to this amount. Confirm before signing.",
         };
       }
@@ -1096,7 +1114,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         address: routerTx.to,
         data: routerTx.data,
         value: routerTx.value,
-        description: `Buy Pendle PT with ${order.amount} ${assetLabel} on ${chainLabel} (fixed yield to maturity)`,
+        description: `Buy Pendle PT with ${shown} ${assetLabel} on ${chainLabel} (fixed yield to maturity)`,
         riskNote: `Locks the market's implied APY until expiry: the PT redeems 1:1 for the underlying then. Selling before expiry happens at the market price, which can be lower. The underlying's own risk stays with you.`,
       };
     }
@@ -1112,7 +1130,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
           abi: ERC20_APPROVE_ABI,
           functionName: "approve",
           args: [EIGENLAYER_STRATEGY_MANAGER, amount.value],
-          description: `Approve EigenLayer's StrategyManager to spend up to ${order.amount} stETH`,
+          description: `Approve EigenLayer's StrategyManager to spend up to ${shown} stETH`,
           riskNote: "Approval lets EigenLayer's StrategyManager transfer up to this amount of stETH. Confirm before signing.",
         };
       }
@@ -1123,7 +1141,7 @@ export function buildExecution(order: Order): ExecutionPlan | { error: string } 
         abi: EIGENLAYER_DEPOSIT_ABI,
         functionName: "depositIntoStrategy",
         args: [EIGENLAYER_STETH_STRATEGY, STETH_ADDRESS, amount.value],
-        description: `Restake ${order.amount} stETH into EigenLayer's stETH strategy`,
+        description: `Restake ${shown} stETH into EigenLayer's stETH strategy`,
         riskNote: EIGENLAYER_RISK_NOTE,
       };
     }

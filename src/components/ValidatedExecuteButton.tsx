@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAccount, useSwitchChain } from "wagmi";
-import type { Order } from "@/lib/execution";
+import { displayAmount, type Order } from "@/lib/execution";
 import { CHAIN_LABEL } from "@/lib/onchain";
 import { formatBaseUnits } from "@/lib/quote";
 import { explorerUrlFor } from "@/lib/explorer";
@@ -100,8 +100,7 @@ export function ValidatedExecuteButton({
     [order.type, simulatesHf, preview],
   );
 
-  const amountLabel =
-    typeof order.amount === "bigint" ? formatBaseUnits(order.amount, order.decimals ?? 18) : String(order.amount);
+  const amountLabel = displayAmount(order.amount, order.decimals ?? 18);
   const chainLabel = CHAIN_LABEL[order.chainId] ?? `chain ${order.chainId}`;
 
   if (state === "CONFIRMED" && mainHash) {
