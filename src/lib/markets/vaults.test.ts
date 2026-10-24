@@ -20,7 +20,7 @@ describe("perp vault parsers", () => {
   it("HLP: APR from vaultDetails, TVL and 30-day return from the month's histories", () => {
     const v = parseHlp({
       apr: 0.039,
-      followers: [{}, {}],
+      followers: Array.from({ length: 100 }, () => ({})),
       portfolio: [
         ["day", { accountValueHistory: [[1, "1"]], pnlHistory: [[1, "0"]] }],
         ["month", { accountValueHistory: [[1, "176000000"], [2, "177100000"]], pnlHistory: [[1, "1000000"], [2, "1563200"]] }],
@@ -29,6 +29,7 @@ describe("perp vault parsers", () => {
     expect(v.aprPct).toBeCloseTo(3.9, 6);
     expect(v.tvlUsd).toBe(177_100_000);
     expect(v.return30dPct).toBeCloseTo((563_200 / 176_000_000) * 100, 6);
+    expect(v.depositors).toBeNull(); // the API caps its follower list at 100
     expect(v.meridianPrompt).toMatch(/HLP/);
   });
 

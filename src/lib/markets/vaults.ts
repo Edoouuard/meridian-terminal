@@ -88,7 +88,7 @@ type PortfolioWindow = { accountValueHistory?: HistoryPoint[]; pnlHistory?: Hist
 
 /** HLP from vaultDetails: APR, TVL (latest account value), 30-day PnL over the account value 30 days ago. */
 export function parseHlp(json: unknown): PerpVault {
-  const d = (json ?? {}) as { apr?: unknown; portfolio?: unknown; followers?: unknown };
+  const d = (json ?? {}) as { apr?: unknown; portfolio?: unknown };
   const apr = num(d.apr);
   const month = Array.isArray(d.portfolio) ? ((d.portfolio as [string, PortfolioWindow][]).find((w) => Array.isArray(w) && w[0] === "month")?.[1] ?? null) : null;
   const values = (month?.accountValueHistory ?? []).map((p) => num(p?.[1])).filter((v): v is number => v !== null);
@@ -101,7 +101,8 @@ export function parseHlp(json: unknown): PerpVault {
     tvlUsd: tvl,
     aprPct: apr !== null ? apr * 100 : null,
     return30dPct: pnl !== null && start ? (pnl / start) * 100 : null,
-    depositors: Array.isArray(d.followers) ? d.followers.length : null,
+    // vaultDetails lists at most 100 followers: their count is not the number of depositors.
+    depositors: null,
   };
 }
 
