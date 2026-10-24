@@ -1956,31 +1956,6 @@ body {
 .drop-row__meta { font-size: 11px; }
 .drop-row__note { font-size: 10px; margin: 0; line-height: 1.4; }
 
-/* ---------- Tools tab: one line per tool, opened on demand ---------- */
-.tools-hint { font-size: 12px; margin: 0 2px; line-height: 1.5; }
-.tool-group { display: flex; flex-direction: column; gap: 6px; }
-.tool-group__label { margin: 4px 2px 0; color: var(--color-neutral-500); }
-.tool-group__items { display: flex; flex-direction: column; gap: 6px; }
-.tool-item { border: 1px solid var(--glass-border); border-radius: var(--radius-lg); background: var(--glass-bg); box-shadow: var(--glass-highlight); transition: border-color 0.15s; }
-.tool-item:hover { border-color: rgb(255 255 255 / 0.2); }
-.tool-item[open] { border-color: rgb(255 255 255 / 0.18); }
-/* A tool whose panel has nothing to show yet (no wallet) disappears. */
-.tool-item:has(> .tool-item__body:empty), .tool-wrap:has(> .tool-item > .tool-item__body:empty) { display: none; }
-.tool-group:not(:has(.tool-item__body:not(:empty))) { display: none; }
-.tool-item__summary { list-style: none; cursor: pointer; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; column-gap: 8px; padding: 10px 14px; }
-.tool-item__summary::-webkit-details-marker { display: none; }
-.tool-item__summary::after { content: ""; grid-column: 2; grid-row: 1 / span 2; align-self: center; width: 7px; height: 7px; border-right: 1.5px solid var(--color-neutral-500); border-bottom: 1.5px solid var(--color-neutral-500); transform: rotate(-45deg); transition: transform 0.15s; }
-.tool-item[open] > .tool-item__summary::after { transform: rotate(45deg); }
-.tool-item__title { font-family: var(--font-heading); font-size: 18px; line-height: 1.15; color: var(--color-text); }
-.tool-item__hint { grid-column: 1; font-size: 11.5px; color: var(--color-neutral-500); line-height: 1.35; }
-.tool-item__body { padding: 0 14px 12px; display: flex; flex-direction: column; gap: 10px; }
-/* The panel inside a tool row is flat: the row is the card, its name is the title. */
-.tool-item__body .panel-card { border: 0; background: none; box-shadow: none; padding: 0; animation: none; }
-.tool-item__body .panel-card:hover { border: 0; }
-.tool-item__body > .panel-card > .panel-card__head > .panel-card__title,
-.tool-item__body > section > .panel-card__head > .panel-card__title { display: none; }
-.tool-item__body > .panel-card > .panel-card__head:has(> :only-child.panel-card__title) { display: none; }
-
 /* ---------- Risk: what-ifs folded ---------- */
 .risk-whatifs > summary { cursor: pointer; font-size: 12px; color: var(--color-neutral-600); list-style: none; display: flex; justify-content: space-between; align-items: center; padding: 6px 0 0; }
 .risk-whatifs > summary::-webkit-details-marker { display: none; }
@@ -2004,3 +1979,55 @@ select {
 input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not(.input):focus-visible,
 select:focus-visible { border-color: rgb(255 255 255 / 0.4); outline: none; }
 input[type="checkbox"], input[type="radio"] { accent-color: #fff; }
+.alpha-row { padding: var(--space-2) 0; border-bottom: 1px solid var(--color-divider); }
+
+/* ---------- App structure: nav rail + one page per job ---------- */
+.topbar { background: rgb(5 32 47 / 0.6); backdrop-filter: blur(8px); }
+.topbar__value { background: none; border: 0; color: inherit; cursor: pointer; padding: 0; }
+.app-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 88px minmax(0, 1fr); }
+.app-nav { display: flex; flex-direction: column; gap: 4px; padding: var(--space-3) 8px; border-right: 1px solid var(--color-divider); }
+.app-nav__item { position: relative; appearance: none; border: 0; background: none; color: var(--color-neutral-500); font: inherit; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px 4px; border-radius: 14px; transition: background 0.15s, color 0.15s; }
+.app-nav__item:hover { color: var(--color-text); background: rgb(255 255 255 / 0.05); }
+.app-nav__item.is-on { color: #0a0a0a; background: #fff; }
+.app-nav__icon { font-size: 17px; line-height: 1; }
+.app-nav__label { font-size: 11px; font-weight: 500; letter-spacing: 0.02em; }
+.app-nav__count { position: absolute; top: 4px; right: 10px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 999px; background: var(--risk-good); color: #06281a; font-size: 10px; font-weight: 600; display: grid; place-items: center; }
+.app-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.app-main > :first-child { flex: 1; min-height: 0; }
+
+/* Terminal: the conversation, with the portfolio and its risk beside it. */
+.page-terminal { display: grid; grid-template-columns: minmax(0, 1fr) 320px; min-height: 0; }
+.page-terminal__thread { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.page-terminal__context { border-left: 1px solid var(--color-divider); min-height: 0; }
+
+/* Full-width pages */
+.page { padding: var(--space-6) var(--space-6) var(--space-8); display: flex; flex-direction: column; gap: var(--space-4); min-height: 0; }
+.page__head { display: flex; flex-direction: column; gap: 6px; max-width: 760px; }
+.page__head--row { max-width: none; flex-direction: row; align-items: flex-end; justify-content: space-between; gap: var(--space-4); flex-wrap: wrap; }
+.page__title { font-size: 44px; margin: 0; letter-spacing: -0.02em; }
+.page__sub { margin: 0; font-size: 14px; color: var(--color-neutral-500); max-width: 640px; line-height: 1.55; }
+.page__grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); align-items: start; }
+.page__grid--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.page__col { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
+.page__narrow { max-width: 860px; width: 100%; display: flex; flex-direction: column; gap: var(--space-3); }
+.page .seg-opt span { font-size: 12.5px; padding: 6px 14px; }
+
+@media (max-width: 1180px) {
+  .page__grid--3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .page-terminal { grid-template-columns: minmax(0, 1fr) 280px; }
+}
+
+/* Phones: the nav becomes a bottom bar, every page a single column. */
+@media (max-width: 860px) {
+  .app-shell { height: 100dvh !important; min-height: 0; }
+  .app-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .app-nav { order: 2; flex-direction: row; justify-content: space-around; border-right: 0; border-top: 1px solid var(--color-divider); padding: 6px 6px calc(6px + env(safe-area-inset-bottom)); background: rgb(5 32 47 / 0.92); }
+  .app-nav__item { flex: 1; padding: 6px 2px; }
+  .page-terminal { grid-template-columns: minmax(0, 1fr); }
+  .page-terminal__context { display: none; }
+  .page { padding: var(--space-4) var(--space-3) var(--space-6); }
+  .page__title { font-size: 34px; }
+  .page__grid, .page__grid--3 { grid-template-columns: minmax(0, 1fr); }
+  .page__head--row { align-items: flex-start; }
+  .page__head--row .seg { width: 100%; overflow-x: auto; }
+}

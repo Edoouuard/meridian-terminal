@@ -25,8 +25,8 @@ interface TourStep {
   target?: string;
   title: string;
   body: string;
-  /** Side tab to open before highlighting the target. */
-  tab?: "risk" | "strategies" | "venues" | "activity";
+  /** Page to open before highlighting the target. */
+  tab?: "terminal" | "perps-accounts";
   /** Prompts the user can send straight from the card. */
   prompts?: TourPrompt[];
   /** Only shown when perps are enabled. */
@@ -51,6 +51,7 @@ const ALL_STEPS: TourStep[] = [
   },
   {
     target: "portfolio",
+    tab: "terminal",
     title: "Your portfolio, live",
     body: "Balances across 8 chains, your lending, staking, Hyperliquid and Extended accounts, valued at live prices. It refreshes on its own after each transaction.",
   },
@@ -62,19 +63,19 @@ const ALL_STEPS: TourStep[] = [
   {
     target: "markets",
     title: "Live rates and markets",
-    body: "Yields by asset, crypto news, chain overview and alpha. Every row has an “Ask Meridian” button that turns it into a strategy.",
+    body: "Earn lists live yields by asset and the perp DEX vaults; Discover has crypto news, alpha, points programs and the chain overview. Every row has an “Ask Meridian” button that turns it into a strategy.",
   },
   {
     target: "extended",
-    tab: "venues",
+    tab: "perps-accounts",
     perps: true,
     title: "Trade on Extended",
-    body: "Stocks, indices and crypto perps on Extended. Before connecting: open your account on extended.exchange with this same wallet and fund it with USDC (or deposit from Arbitrum in Tools → Extended). Then click “Connect Extended with my wallet” here: three signatures, no keys to paste. Meridian finds your account, compares funding with Hyperliquid and builds pairs across both venues.",
+    body: "Stocks, indices and crypto perps on Extended. Before connecting: open your account on extended.exchange with this same wallet and fund it with USDC (or deposit from Arbitrum in Perps → Accounts → Extended). Then click “Connect Extended with my wallet” here: three signatures, no keys to paste. Meridian finds your account, compares funding with Hyperliquid and builds pairs across both venues.",
   },
   {
-    target: "tabs",
-    title: "Risk, strategies, tools, history",
-    body: "Perp positions on Hyperliquid and Extended with PnL, funding and liquidation distance; every strategy you put to work (a pair with one leg filled is flagged); bridges and venue connections in Tools; every transaction in History.",
+    target: "nav",
+    title: "Everything one click away",
+    body: "Terminal is where you ask. Portfolio has your holdings, risk, the strategies you put to work, bridges and history. Earn ranks yields and vaults; Perps holds the neutral bot, funding and price arbitrage and your venue accounts; Discover has news, alpha and points. The ask bar stays at the bottom of every page.",
   },
   {
     title: "Try a strategy now",
